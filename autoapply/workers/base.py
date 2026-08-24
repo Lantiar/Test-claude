@@ -82,6 +82,12 @@ class Worker:
         html = self.page.content().lower()
         return any(m in html for m in CAPTCHA_MARKERS)
 
+    # Selectors that mean "you must sign in or create an account to continue".
+    auth_selectors: tuple[str, ...] = ()
+
+    def needs_auth(self) -> bool:
+        return query_first(self.page, self.auth_selectors) is not None
+
     def discover(self) -> list[Field]:
         fields: list[Field] = []
         root = self.page.query_selector(self.form_selector) or self.page
@@ -130,6 +136,22 @@ class Worker:
                                 kind=kind, required=required, options=options))
         return fields
 
+    # ---- lifecycle -------------------------------------------------------
+    # Single-page workers let the pipeline verify afterwards. Wizard workers
+    # verify each step before advancing, because earlier steps' DOM is gone by
+    # the time the pipeline looks.
+    verifies_internally = False
+
+    def run(self, job: Job, profile: dict, store, provider,
+            screenshot_dir: str) -> FillOutcome:
+        from .. import mapper
+
+        self.open(job)
+        fields = self.discover()
+        mappings = mapper.map_fields(fields, profile, job.ats,
+                                     store=store, provider=provider)
+        return self.fill(job, fields, mappings, screenshot_dir)
+
     # ---- filling ---------------------------------------------------------
     def fill(self, job: Job, fields: list[Field], mappings: list[Mapping],
              screenshot_dir: str) -> FillOutcome:
@@ -143,40 +165,49 @@ class Worker:
             if f is None:
                 continue
             try:
-                if self._write(f, m.value):
+                written = self._write(f, m.value)
+                if written is not None:
+                    # A custom dropdown may render the option differently to how
+                    # the profile spells it; record what is actually on the form.
+                    m.value = written
                     outcome.filled_ids.append(f.id)
             except Exception as exc:                       # one field never kills the run
                 outcome.errors.append(f"{f.label or f.id}: {exc}")
 
         outcome.saw_captcha = self.saw_captcha()
+        outcome.needs_auth = self.needs_auth()
         outcome.filled_ok = not outcome.missing_required
         outcome.screenshot_path = self.screenshot(job, screenshot_dir)
         return outcome
 
-    def _write(self, f: Field, value: str) -> bool:
+    def _write(self, f: Field, value: str) -> Optional[str]:
+        """Write one field. Returns the value actually written, or None."""
         el = self.page.query_selector(f.selector)
         if el is None:
-            return False
+            return None
         if f.kind == "file":
             path = os.path.expanduser(value)
             if not os.path.exists(path):
                 raise FileNotFoundError(path)
             el.set_input_files(path)
-            return True
+            return value
         if f.kind == "select":
             try:
                 el.select_option(label=value)
             except Exception:
                 el.select_option(value=value)
-            return True
+            return value
         if f.kind in ("checkbox", "radio"):
             if str(value).strip().lower() in ("yes", "true", "1", "on"):
                 el.check()
-            return True
+            return value
         self.page.evaluate(SET_VALUE_JS, [el, value])
-        return True
+        return value
 
     def screenshot(self, job: Job, directory: str) -> str:
+        # Wizard steps fill with no directory; only the final page is captured.
+        if not directory:
+            return ""
         os.makedirs(directory, exist_ok=True)
         safe = re.sub(r"[^a-z0-9]+", "-", job.key.lower())[-80:]
         path = os.path.join(directory, f"{int(time.time())}{safe}.png")
@@ -189,9 +220,9 @@ class Worker:
     # ---- submission ------------------------------------------------------
     def submit(self) -> tuple[bool, str]:
         """Click submit and confirm the application actually landed."""
-        btn = self.page.query_selector(self.submit_selector)
+        btn = query_first(self.page, (self.submit_selector,))
         if btn is None:
-            return False, "submit button not found"
+            return False, "submit button not visible"
         before = self.page.url
         btn.click()
         try:
@@ -220,7 +251,105 @@ def css_escape(value: str) -> str:
 
 
 def get_worker(ats: str, page) -> Optional[Worker]:
+    """DOM workers only. iCIMS, Ashby, Oracle/Taleo and unknown hosts are driven
+    by the browser-use agent instead — see workers/agent.py and the playbooks."""
     from .greenhouse import GreenhouseWorker
     from .lever import LeverWorker
+    from .workday import WorkdayWorker
 
-    return {"greenhouse": GreenhouseWorker, "lever": LeverWorker}.get(ats, lambda p: None)(page)
+    registry = {
+        "greenhouse": GreenhouseWorker,
+        "lever": LeverWorker,
+        "workday": WorkdayWorker,
+    }
+    cls = registry.get(ats)
+    return cls(page) if cls else None
+
+
+def query_first(scope, selectors: tuple[str, ...] | list[str]):
+    """First selector in the list matching a *visible* element.
+
+    Visibility is the point, not a nicety: a Workday wizard keeps the Submit
+    button in the DOM and hidden until the review step, so a presence-only check
+    would report "we're at review" on page one.
+    """
+    for sel in selectors:
+        try:
+            el = scope.query_selector(sel)
+            if el is not None and el.is_visible():
+                return el
+        except Exception:
+            continue
+    return None
+
+
+class WizardWorker(Worker):
+    """Multi-page application flows (Workday, iCIMS, Oracle).
+
+    Each step is discovered, mapped and filled on its own, then verified before
+    we advance — once the next step renders, the previous step's DOM is gone.
+    """
+
+    verifies_internally = True
+    max_steps = 15
+    next_selectors: tuple[str, ...] = ()
+    review_selectors: tuple[str, ...] = ()
+
+    def at_review(self) -> bool:
+        return query_first(self.page, self.review_selectors) is not None
+
+    def advance(self) -> bool:
+        btn = query_first(self.page, self.next_selectors)
+        if btn is None:
+            return False
+        try:
+            btn.click()
+        except Exception:
+            return False
+        try:
+            self.page.wait_for_load_state("networkidle", timeout=20000)
+        except Exception:
+            pass
+        self.page.wait_for_timeout(1200)
+        return True
+
+    def run(self, job: Job, profile: dict, store, provider,
+            screenshot_dir: str) -> FillOutcome:
+        from .. import mapper
+        from ..verify import verify_fields
+
+        self.open(job)
+        outcome = FillOutcome(job=job)
+        all_ok = True
+
+        for _ in range(self.max_steps):
+            if self.saw_captcha():
+                outcome.saw_captcha = True
+                break
+            if self.needs_auth():
+                outcome.needs_auth = True
+                break
+
+            fields = self.discover()
+            mappings = mapper.map_fields(fields, profile, job.ats,
+                                         store=store, provider=provider)
+            step = self.fill(job, fields, mappings, screenshot_dir="")
+            outcome.fields.extend(fields)
+            outcome.mappings.extend(mappings)
+            outcome.filled_ids.extend(step.filled_ids)
+            outcome.errors.extend(step.errors)
+
+            ok, detail = verify_fields(self.page, fields, mappings,
+                                       outcome.filled_ids)
+            outcome.verify_detail.update(detail)
+            all_ok = all_ok and ok
+
+            if self.at_review() or not self.advance():
+                break
+
+        outcome.saw_captcha = outcome.saw_captcha or self.saw_captcha()
+        outcome.needs_auth = outcome.needs_auth or self.needs_auth()
+        outcome.verified = all_ok and not outcome.missing_required
+        outcome.filled_ok = not outcome.missing_required
+        outcome.screenshot_path = self.screenshot(job, screenshot_dir)
+        return outcome

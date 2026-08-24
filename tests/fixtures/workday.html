@@ -1,0 +1,98 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Workday — Apply</title>
+<body>
+<div data-automation-id="applyFlowPage">
+
+  <section class="step" data-step="0">
+    <h4>My Information</h4>
+    <div data-automation-id="formField-legalNameSection_firstName">
+      <label for="wd-fn">First Name *</label><input id="wd-fn" aria-required="true"></div>
+    <div data-automation-id="formField-legalNameSection_lastName">
+      <label for="wd-ln">Last Name *</label><input id="wd-ln" aria-required="true"></div>
+    <div data-automation-id="formField-email">
+      <label for="wd-em">Email Address *</label><input id="wd-em" aria-required="true"></div>
+    <div data-automation-id="formField-phone-number">
+      <label for="wd-ph">Phone Number</label><input id="wd-ph"></div>
+  </section>
+
+  <section class="step" data-step="1" hidden>
+    <h4>My Experience</h4>
+    <div data-automation-id="formField-resume">
+      <label for="wd-rs">Resume/CV *</label>
+      <div data-automation-id="file-upload-drop-zone">Drop files here</div>
+      <input id="wd-rs" type="file" aria-required="true">
+    </div>
+    <div data-automation-id="formField-schoolItem">
+      <label for="wd-sc">School or University</label><input id="wd-sc"></div>
+  </section>
+
+  <section class="step" data-step="2" hidden>
+    <h4>Application Questions</h4>
+    <div data-automation-id="formField-workAuth">
+      <label id="wd-auth-label">Are you legally authorized to work in the United States? *</label>
+      <button aria-haspopup="listbox" aria-required="true" data-target="wd-auth">Select One</button>
+      <ul role="listbox" hidden data-for="wd-auth">
+        <li role="option">Yes</li><li role="option">No</li></ul>
+    </div>
+    <div data-automation-id="formField-gender">
+      <label id="wd-gender-label">Gender</label>
+      <button aria-haspopup="listbox" data-target="wd-gender">Select One</button>
+      <ul role="listbox" hidden data-for="wd-gender">
+        <li role="option">Male</li><li role="option">Female</li>
+        <li role="option">Decline To Self Identify</li></ul>
+    </div>
+  </section>
+
+  <section class="step" data-step="3" hidden>
+    <h4>Review</h4><p>Please review your application.</p>
+  </section>
+
+  <footer>
+    <button data-automation-id="bottom-navigation-next-button">Save and Continue</button>
+    <button data-automation-id="bottom-navigation-submit-button" hidden>Submit</button>
+  </footer>
+</div>
+<script>
+// Minimal Workday-shaped SPA: steps swap in place, dropdowns are button+listbox.
+let step = 0;
+const steps = [...document.querySelectorAll('.step')];
+const next = document.querySelector('[data-automation-id="bottom-navigation-next-button"]');
+const submit = document.querySelector('[data-automation-id="bottom-navigation-submit-button"]');
+const state = {};
+
+document.querySelectorAll('button[aria-haspopup="listbox"]').forEach(btn => {
+  const list = document.querySelector(`ul[data-for="${btn.dataset.target}"]`);
+  btn.addEventListener('click', () => { list.hidden = !list.hidden; });
+  list.querySelectorAll('[role=option]').forEach(opt => {
+    opt.addEventListener('click', () => {
+      btn.textContent = opt.textContent;      // Workday shows the choice on the button
+      state[btn.dataset.target] = opt.textContent;
+      list.hidden = true;
+    });
+  });
+});
+
+function show(i) {
+  steps.forEach((s, n) => s.hidden = n !== i);
+  const last = i === steps.length - 1;
+  next.hidden = last; submit.hidden = !last;
+}
+next.addEventListener('click', () => {
+  // Gate each step the way Workday does: required fields must be answered.
+  const required = steps[step].querySelectorAll('[aria-required="true"]');
+  for (const el of required) {
+    const empty = el.tagName === 'BUTTON'
+      ? !state[el.dataset.target]
+      : (el.type === 'file' ? !el.files.length : !el.value);
+    if (empty) { alert('required'); return; }
+  }
+  step = Math.min(step + 1, steps.length - 1); show(step);
+});
+submit.addEventListener('click', () => {
+  document.body.innerHTML =
+    '<h1>Thank you for applying</h1><p>Your application was submitted.</p>';
+});
+show(0);
+</script>
+</body>

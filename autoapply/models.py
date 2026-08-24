@@ -14,7 +14,7 @@ from typing import Any, Literal, Optional
 #   unknown  -> nothing could answer it; blocks auto-submit if the field is required
 Action = Literal["fill", "generate", "skip", "unknown"]
 
-ATS = Literal["greenhouse", "lever", "workday", "ashby", "icims", "unknown"]
+ATS = Literal["greenhouse", "lever", "workday", "ashby", "icims", "oracle", "unknown"]
 
 
 @dataclass

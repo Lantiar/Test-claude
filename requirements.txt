@@ -4,5 +4,9 @@ uvicorn[standard]>=0.30
 jinja2>=3.1
 python-multipart>=0.0.9
 pytest>=8.0
-# Optional: only needed when LLM_PROVIDER=anthropic
-anthropic>=1.0
+# Agent lane (iCIMS, Ashby, Oracle/Taleo, unknown hosts) and the LLM judge.
+# Needs a model configured via LLM_PROVIDER; the DOM lane works without it.
+browser-use>=0.13
+
+# Only needed when LLM_PROVIDER=anthropic
+anthropic>=0.70

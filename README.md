@@ -12,10 +12,23 @@ python -m autoapply apply https://jobs.lever.co/acme/1234
 
 ## Status
 
-Working prototype. Greenhouse and Lever are supported end to end (discover →
-fill → verify → gate → submit → confirm → log). Workday, Ashby, iCIMS and
-unknown ATSs are detected and skipped rather than guessed at — the agent path
-that would handle them isn't built yet.
+Working prototype with two lanes.
+
+| ATS | Lane | Needs a model? |
+|---|---|---|
+| Greenhouse, Lever | DOM worker, single page | no |
+| Workday | DOM worker, multi-step wizard | no |
+| iCIMS, Ashby, Oracle Cloud HCM / Taleo, unknown | browser-use agent + playbook | yes |
+
+The DOM lane is deterministic and free. The agent lane drives
+[browser-use](https://github.com/browser-use/browser-use) with a per-ATS
+playbook from `autoapply/playbooks/`, and its work is checked by an independent
+judge pass (`judge.py`) rather than the agent's own say-so. Without a model
+configured, the agent lane queues with a clear reason instead of guessing at
+selectors.
+
+Oracle Cloud HCM is what JPMorgan and most large banks use; `*.taleo.net`
+routes to the same lane.
 
 ## Setup
 
@@ -100,10 +113,14 @@ url → router → worker.discover → mapper → worker.fill → verify → gat
 
 | Module | Job |
 |---|---|
-| `router.py` | URL → ATS. A data table; adding an ATS is one line. |
+| `router.py` | URL → ATS, and which lane handles it. A data table; adding an ATS is one line. |
 | `mapper.py` | Field → value: rules, then cache, then learned answers, then LLM. |
-| `workers/` | DOM work. `base.py` holds discovery/fill/submit; per-ATS files hold selectors. |
+| `workers/base.py` | Discovery, fill, submit. `WizardWorker` adds multi-step flows. |
+| `workers/workday.py` | The wizard: `data-automation-id` containers, button+listbox dropdowns. |
+| `workers/agent.py` | browser-use driver for everything without a DOM worker. |
+| `playbooks/` | Per-ATS notes handed to the agent as guidance. |
 | `verify.py` | Deterministic readback of every field we set. No LLM. |
+| `judge.py` | Independent LLM check of an agent fill. The agent never grades itself. |
 | `gate.py` | The only place that decides submit vs queue. |
 | `store.py` | sqlite: applied log, mapping cache, queue, corrections. |
 
@@ -125,8 +142,29 @@ docker compose run --rm worker apply <url>
 docker compose up dashboard
 ```
 
+## Verification status
+
+Greenhouse, Lever and Workday are tested end to end against local fixtures that
+replicate their real markup — including a React controlled input and Workday's
+button+listbox dropdowns, neither of which a naive filler can drive. **None of
+the workers has been run against a live ATS tenant yet**, so treat the selectors
+as needing one validation pass. Use `--dry-run` for that: it fills and verifies
+but never submits.
+
 ## Not built yet
 
-Scraping and job matching (this takes a link you supply), the browser-use agent
-path for unknown ATSs, the Workday wizard worker, Gmail-based verification codes
-and account creation, and the live CAPTCHA handoff.
+Scraping and job matching (this takes a link you supply), Gmail-based
+verification codes, automatic account creation, and the live CAPTCHA handoff.
+Applications that hit a sign-in wall queue with `sign-in or account creation
+required`.
+
+## Credits
+
+- [browser-use](https://github.com/browser-use/browser-use) (MIT) — the agent lane.
+- [berellevy/job_app_filler](https://github.com/berellevy/job_app_filler) — its
+  Workday field definitions confirmed the `data-automation-id` conventions this
+  project's Workday worker relies on.
+- [ShipItAndPray/job-apply-ai](https://github.com/ShipItAndPray/job-apply-ai) (MIT)
+  and [liruihan000/claude-job-auto-apply](https://github.com/liruihan000/claude-job-auto-apply)
+  were read for ATS behaviour notes. The latter carries no licence, so nothing
+  was copied from it — the playbooks here are written from scratch.

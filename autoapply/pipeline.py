@@ -1,26 +1,38 @@
-"""link -> apply. Orchestrates route, fill, verify, gate, submit|queue."""
+"""link -> apply.
+
+Two lanes:
+  * DOM lane (Greenhouse, Lever, Workday) — Playwright, deterministic, no model.
+  * Agent lane (iCIMS, Ashby, Oracle/Taleo, unknown) — browser-use with a
+    per-ATS playbook, verified by an independent judge pass.
+
+A DOM fill that fails verification falls back to the agent lane once. The gate
+is the only thing that decides whether anything is submitted, in either lane.
+"""
 from __future__ import annotations
 
 import json
 import os
 import traceback
+from typing import Callable
 
 from . import mapper, router
 from .browser import browser_page
 from .gate import safety_gate
+from .judge import judge
 from .llm import get_provider
-from .models import ApplyResult, FillOutcome, GateResult
+from .models import ApplyResult, FillOutcome, GateResult, Job
 from .store import Store
 from .verify import verify
 from .workers import get_worker
+from .workers.agent import AgentUnavailable, AgentWorker
 
 
 def load_profile(path: str | None = None) -> dict:
     path = path or os.getenv("PROFILE_PATH", "config/profile.json")
     if not os.path.exists(path):
-        example = "config/profile.example.json"
         raise SystemExit(
-            f"No profile at {path}. Copy {example} to {path} and fill it in."
+            f"No profile at {path}. Copy config/profile.example.json to {path} "
+            "and fill it in."
         )
     with open(path) as fh:
         return json.load(fh)
@@ -38,58 +50,97 @@ def apply_to(url: str, mode: str | None = None, store: Store | None = None,
 
     job = router.parse_job(url)
     if ats_override:
-        # For a company hosting a Greenhouse/Lever-shaped form on its own domain,
-        # and for driving the local fixtures in tests.
         job.ats = ats_override
 
     if store.already_applied(job.key):
         return ApplyResult(job, None, GateResult("skip", ["already applied"]),
                            "skipped", "already applied")
 
-    if job.ats not in router.SUPPORTED:
-        # Workday/Ashby/iCIMS/unknown need the agent path, which isn't built yet.
-        store.record_applied(job, "skipped")
-        return ApplyResult(job, None, GateResult("skip", [f"{job.ats} has no worker yet"]),
-                           "skipped", f"{job.ats} not supported yet")
-
     try:
-        with browser_page() as page:
-            worker = get_worker(job.ats, page)
-            worker.open(job)
+        if job.ats in router.DOM_WORKERS:
+            result = _run_dom(job, profile, store, provider, shots, mode,
+                              dry_run, overrides)
+            # One fallback, never a loop: an unverified DOM fill gets one agent
+            # attempt, which is the whole point of having the agent lane.
+            if result.status == "queued" and result.outcome \
+                    and not result.outcome.verified and not result.outcome.saw_captcha:
+                fallback = _run_agent(job, profile, store, mode, dry_run,
+                                      shots, note="agent fallback after failed verify")
+                if fallback.status == "applied" or (
+                        fallback.outcome and fallback.outcome.verified):
+                    return fallback
+            return result
 
-            fields = worker.discover()
-            mappings = mapper.map_fields(fields, profile, job.ats,
-                                         store=store, provider=provider)
-            if overrides:
-                # Values a human corrected in the dashboard win over everything.
-                _apply_overrides(mappings, overrides, job.ats, store)
-            outcome = worker.fill(job, fields, mappings, shots)
-            outcome = verify(page, outcome)
-
-            gate = safety_gate(job, outcome, mode, store=store)
-
-            if dry_run:
-                return ApplyResult(job, outcome, GateResult("queue", ["dry run"]),
-                                   "queued", "dry run: nothing submitted")
-
-            if gate.decision == "submit":
-                ok, detail = worker.submit()
-                if ok:
-                    store.record_applied(job, "applied", outcome.screenshot_path,
-                                         _submitted_values(outcome))
-                    return ApplyResult(job, outcome, gate, "applied", detail)
-                # Clicked but never confirmed: do not claim an application.
-                gate.reasons.append(f"submit unconfirmed ({detail})")
-                store.enqueue(job, outcome, gate.reasons)
-                return ApplyResult(job, outcome, gate, "queued", detail)
-
-            store.enqueue(job, outcome, gate.reasons)
-            return ApplyResult(job, outcome, gate, "queued", "; ".join(gate.reasons))
+        return _run_agent(job, profile, store, mode, dry_run, shots)
 
     except Exception as exc:
         store.record_applied(job, "errored")
         return ApplyResult(job, None, GateResult("queue", ["error"]), "errored",
                            f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}")
+
+
+def _run_dom(job: Job, profile: dict, store, provider, shots: str, mode: str,
+             dry_run: bool, overrides: dict[str, str] | None) -> ApplyResult:
+    with browser_page() as page:
+        worker = get_worker(job.ats, page)
+        if worker is None:
+            return ApplyResult(job, None, GateResult("skip", ["no worker"]),
+                               "skipped", f"no worker for {job.ats}")
+
+        # Overrides are applied inside the mapper call the worker makes, so they
+        # are threaded through the profile-independent path here.
+        if overrides:
+            worker.overrides = overrides
+        outcome = worker.run(job, profile, store, provider, shots)
+        if overrides:
+            _apply_overrides(outcome.mappings, overrides, job.ats, store)
+
+        if not worker.verifies_internally:
+            outcome = verify(page, outcome)
+
+        return _decide(job, outcome, mode, store, dry_run, worker.submit)
+
+
+def _run_agent(job: Job, profile: dict, store, mode: str, dry_run: bool,
+               shots: str, note: str = "") -> ApplyResult:
+    worker = AgentWorker()
+    try:
+        outcome = worker.run(job, profile, store, None, shots)
+    except AgentUnavailable as exc:
+        outcome = FillOutcome(job=job)
+        outcome.errors.append(str(exc))
+        store.enqueue(job, outcome, [f"agent unavailable: {exc}"])
+        return ApplyResult(job, outcome, GateResult("queue", ["agent unavailable"]),
+                           "queued", str(exc))
+
+    # The agent does not get to grade itself; the judge reads the page fresh.
+    outcome = judge(outcome)
+    result = _decide(job, outcome, mode, store, dry_run, worker.submit)
+    if note:
+        result.detail = f"{note}; {result.detail}"
+    return result
+
+
+def _decide(job: Job, outcome: FillOutcome, mode: str, store, dry_run: bool,
+            submitter: Callable[[], tuple[bool, str]]) -> ApplyResult:
+    gate = safety_gate(job, outcome, mode, store=store)
+
+    if dry_run:
+        return ApplyResult(job, outcome, GateResult("queue", ["dry run"]),
+                           "queued", "dry run: nothing submitted")
+
+    if gate.decision == "submit":
+        ok, detail = submitter()
+        if ok:
+            store.record_applied(job, "applied", outcome.screenshot_path,
+                                 _submitted_values(outcome))
+            return ApplyResult(job, outcome, gate, "applied", detail)
+        gate.reasons.append(f"submit unconfirmed ({detail})")
+        store.enqueue(job, outcome, gate.reasons)
+        return ApplyResult(job, outcome, gate, "queued", detail)
+
+    store.enqueue(job, outcome, gate.reasons)
+    return ApplyResult(job, outcome, gate, "queued", "; ".join(gate.reasons))
 
 
 def _submitted_values(outcome: FillOutcome) -> dict:
@@ -106,5 +157,4 @@ def _apply_overrides(mappings, overrides: dict[str, str], ats: str, store) -> No
             m.action = "fill" if overrides[key] else "skip"
             m.confidence, m.source = 1.0, "human"
             if store is not None and m.label:
-                store.record_correction(mapper.signature(ats, m.label),
-                                        m.label, m.value)
+                store.record_correction(mapper.signature(ats, m.label), m.label, m.value)

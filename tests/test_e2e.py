@@ -79,8 +79,33 @@ def test_dedupe_skips_second_application(tmp_path):
     assert second.status == "skipped"
 
 
-def test_unsupported_ats_never_guesses(tmp_path):
-    r = apply_to("https://amat.wd1.myworkdayjobs.com/External/job/X/SWE_R1",
+def test_unknown_ats_queues_rather_than_guessing(tmp_path):
+    """No dedicated worker and no LLM configured: queue with a clear reason.
+
+    The agent lane handles unknown hosts, but it needs a model. Without one it
+    must not fall back to guessing at selectors.
+    """
+    os.environ["LLM_PROVIDER"] = "rules"
+    r = apply_to("https://acme.example.com/careers/apply/123",
                  mode="auto", store=_store(tmp_path), profile=PROFILE)
-    assert r.status == "skipped"
-    assert r.job.ats == "workday"
+    assert r.job.ats == "unknown"
+    assert r.status == "queued"
+    assert any("agent unavailable" in x for x in r.gate.reasons)
+
+
+def test_oracle_routes_to_agent_lane(tmp_path):
+    """JPMorgan-style Oracle Cloud HCM links reach the agent lane, not a skip."""
+    from autoapply import router
+
+    job = router.parse_job(
+        "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/210123")
+    assert job.ats == "oracle"
+    assert job.ats in router.AGENT_ATS
+
+
+def test_icims_and_ashby_route_to_agent_lane():
+    from autoapply import router
+
+    assert router.parse_job("https://careers-gdms.icims.com/jobs/74471/job").ats == "icims"
+    assert router.parse_job("https://jobs.ashbyhq.com/Crusoe/abc/application").ats == "ashby"
+    assert {"icims", "ashby"} <= router.AGENT_ATS

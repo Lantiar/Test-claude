@@ -29,5 +29,5 @@ def pytest_collection_modifyitems(config, items):
         return
     skip = pytest.mark.skip(reason=why)
     for item in items:
-        if "test_e2e" in item.nodeid:
+        if "test_e2e" in item.nodeid or "test_workday" in item.nodeid:
             item.add_marker(skip)

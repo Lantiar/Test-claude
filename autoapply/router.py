@@ -14,11 +14,21 @@ REGISTRY: list[tuple[str, ATS]] = [
     (r"(^|\.)ashbyhq\.com$",                        "ashby"),
     (r"\.myworkdayjobs\.com$",                      "workday"),
     (r"(^|\.)icims\.com$",                          "icims"),
+    # JPMorgan and most large banks run Oracle Cloud HCM; Taleo is its older sibling.
+    (r"\.fa\.oraclecloud\.com$|\.ocs\.oraclecloud\.com$", "oracle"),
+    (r"(^|\.)oraclecloud\.com$",                    "oracle"),
+    (r"(^|\.)taleo\.net$",                          "oracle"),
 ]
 
-# Only these have a dedicated single-page worker today. Everything else needs
-# the agent path (not built yet), so it queues rather than guessing.
-SUPPORTED: set[ATS] = {"greenhouse", "lever"}
+# ATSs with a dedicated DOM worker: cheap, deterministic, no model needed.
+DOM_WORKERS: set[ATS] = {"greenhouse", "lever", "workday"}
+
+# Everything else is driven by the browser-use agent with a per-ATS playbook.
+# That path needs an LLM; without one configured it queues with a clear reason
+# rather than guessing at selectors.
+AGENT_ATS: set[ATS] = {"icims", "ashby", "oracle", "unknown"}
+
+SUPPORTED: set[ATS] = DOM_WORKERS | AGENT_ATS
 
 
 def detect(url: str) -> ATS:

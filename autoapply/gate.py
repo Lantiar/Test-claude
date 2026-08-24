@@ -38,6 +38,10 @@ def safety_gate(job: Job, outcome: FillOutcome, mode: str, store=None) -> GateRe
 
     if outcome.saw_captcha:
         reasons.append("CAPTCHA present")
+    if outcome.needs_auth:
+        # Capability limit, not a permission gate: the login / account-creation
+        # and mail-code services aren't built, so the run cannot get past this.
+        reasons.append("sign-in or account creation required")
     if missing := outcome.missing_required:
         reasons.append(f"no answer for required: {', '.join(missing[:5])}")
     if not outcome.verified:
