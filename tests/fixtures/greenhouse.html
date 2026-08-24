@@ -1,0 +1,77 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Software Engineer — Application</title>
+<body>
+<div id="application-form">
+  <h1>Apply for Software Engineer</h1>
+  <form id="application_form">
+    <div><label for="first_name">First Name *</label>
+         <input id="first_name" name="job_application[first_name]" required></div>
+    <div><label for="last_name">Last Name *</label>
+         <input id="last_name" name="job_application[last_name]" required></div>
+    <div><label for="email">Email *</label>
+         <input id="email" name="job_application[email]" type="email" required></div>
+    <div><label for="phone">Phone</label>
+         <input id="phone" name="job_application[phone]" type="tel"></div>
+    <div><label for="resume">Resume/CV *</label>
+         <input id="resume" name="job_application[resume]" type="file" required></div>
+    <div><label for="urls_linkedin">LinkedIn Profile</label>
+         <input id="urls_linkedin" name="job_application[urls][LinkedIn]"></div>
+    <div><label for="urls_github">GitHub URL</label>
+         <input id="urls_github" name="job_application[urls][GitHub]"></div>
+
+    <div><label for="q_auth">Are you legally authorized to work in the United States? *</label>
+      <select id="q_auth" required><option value=""></option>
+        <option>Yes</option><option>No</option></select></div>
+    <div><label for="q_spon">Will you now or in the future require sponsorship for employment visa status? *</label>
+      <select id="q_spon" required><option value=""></option>
+        <option>Yes</option><option>No</option></select></div>
+    <div><label for="q_salary">Desired Salary *</label>
+         <input id="q_salary" required></div>
+
+    <fieldset>
+      <legend>Voluntary Self-Identification</legend>
+      <div><label for="gender">Gender</label>
+        <select id="gender"><option value=""></option><option>Male</option>
+          <option>Female</option><option>Decline To Self Identify</option></select></div>
+      <div><label for="race">Race / Ethnicity</label>
+        <select id="race"><option value=""></option><option>Asian</option>
+          <option>White</option><option>Two or More Races</option>
+          <option>Decline To Self Identify</option></select></div>
+      <div><label for="veteran">Veteran Status</label>
+        <select id="veteran"><option value=""></option>
+          <option>I identify as one or more of the classifications of a protected veteran</option>
+          <option>I am not a protected veteran</option>
+          <option>I don't wish to answer</option></select></div>
+      <div><label for="disability">Disability Status</label>
+        <select id="disability"><option value=""></option>
+          <option>Yes, I have a disability</option><option>No, I don't have a disability</option>
+          <option>I don't wish to answer</option></select></div>
+    </fieldset>
+
+    <div><label for="cover_letter_text">Cover Letter</label>
+         <textarea id="cover_letter_text"></textarea></div>
+    <button id="submit_app" type="button">Submit Application</button>
+  </form>
+</div>
+<script>
+// Simulates a React controlled input: the value that gets *submitted* comes from
+// this state object, which only updates on a real input event. Assigning
+// el.value directly leaves state empty, so a naive filler silently submits blanks.
+const state = {};
+for (const el of document.querySelectorAll('#application_form input, #application_form textarea')) {
+  if (el.type === 'file') continue;
+  el.addEventListener('input', e => { state[e.target.id] = e.target.value; });
+}
+document.getElementById('submit_app').addEventListener('click', () => {
+  const required = ['first_name','last_name','email','q_salary'];
+  const blanks = required.filter(id => !state[id]);
+  const resume = document.getElementById('resume');
+  if (!resume.files.length) blanks.push('resume');
+  for (const id of ['q_auth','q_spon']) if (!document.getElementById(id).value) blanks.push(id);
+  document.body.innerHTML = blanks.length
+    ? '<h1>Error</h1><p>Missing required fields: ' + blanks.join(', ') + '</p>'
+    : '<h1>Thank you for applying</h1><p>Your application has been submitted.</p>';
+});
+</script>
+</body>

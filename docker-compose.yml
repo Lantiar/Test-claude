@@ -1,0 +1,30 @@
+services:
+  worker:
+    build: .
+    env_file: [.env]
+    volumes:
+      - ./config:/config:ro      # profile + resume, never baked into the image
+      - ./data:/data             # sqlite + screenshots
+    # One-shot: docker compose run --rm worker python -m autoapply apply <url>
+    entrypoint: ["python", "-m", "autoapply"]
+    command: ["stats"]
+
+  dashboard:
+    build: .
+    env_file: [.env]
+    volumes:
+      - ./config:/config:ro
+      - ./data:/data
+    # Loopback-only on the host: the queue holds your PII.
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      DASHBOARD_HOST: "0.0.0.0"  # inside the container only; the port bind above scopes it
+    command: ["python", "dashboard/app.py"]
+
+  # Optional local model so nothing leaves the box. Enable with:
+  #   docker compose --profile local up ollama
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local"]
+    volumes: ["./data/ollama:/root/.ollama"]
+    ports: ["127.0.0.1:11434:11434"]

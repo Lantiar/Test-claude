@@ -1,0 +1,69 @@
+{
+  "identity": {
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "preferred_name": "Jane",
+    "pronouns": "they/them",
+    "email": "jane.doe@example.com",
+    "phone": "+1 415 555 0142"
+  },
+  "location": {
+    "city": "San Francisco",
+    "state": "CA",
+    "country": "United States",
+    "address_line1": "123 Example St",
+    "postal_code": "94110",
+    "willing_to_relocate": "Yes"
+  },
+  "links": {
+    "linkedin": "https://linkedin.com/in/janedoe",
+    "github": "https://github.com/janedoe",
+    "portfolio": "https://janedoe.dev",
+    "other_website": ""
+  },
+  "education": {
+    "school": "University of Example",
+    "degree": "Bachelor's Degree",
+    "discipline": "Computer Science",
+    "gpa": "3.8",
+    "start_date": "2021-09",
+    "end_date": "2025-05",
+    "graduation_year": "2025"
+  },
+  "experience": {
+    "years_of_experience": "2",
+    "current_company": "Example Corp",
+    "current_title": "Software Engineer",
+    "earliest_start_date": "Immediately",
+    "notice_period": "2 weeks"
+  },
+  "files": {
+    "resume": "config/files/resume.pdf",
+    "cover_letter": "",
+    "transcript": ""
+  },
+  "work_authorization": {
+    "authorized_to_work": "Yes",
+    "requires_sponsorship": "No",
+    "visa_status": "US permanent resident; no sponsorship required",
+    "security_clearance": "None"
+  },
+  "compensation": {
+    "expected_salary": "150000",
+    "salary_currency": "USD"
+  },
+  "demographics": {
+    "gender": "Decline to self-identify",
+    "race_ethnicity": "Decline to self-identify",
+    "hispanic_latino": "Decline to self-identify",
+    "veteran_status": "I don't wish to answer",
+    "disability_status": "I don't wish to answer"
+  },
+  "misc": {
+    "how_did_you_hear": "Company website",
+    "referral_name": "",
+    "previously_employed_here": "No",
+    "over_18": "Yes",
+    "cover_letter_text": ""
+  }
+}

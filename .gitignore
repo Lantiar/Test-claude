@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+config/profile.json
+config/accounts.json
+data/
+screenshots/
+*.sqlite
+*.db
+.pytest_cache/
+config/files/

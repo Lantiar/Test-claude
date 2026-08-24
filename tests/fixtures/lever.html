@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Lever — Apply</title>
+<body>
+<form class="application-form" action="/apply">
+  <div class="application-field">
+    <label class="application-label">Full name<span>*</span>
+      <input name="name" required placeholder="Full name"></label></div>
+  <div class="application-field">
+    <label class="application-label">Email<span>*</span>
+      <input name="email" type="email" required></label></div>
+  <div class="application-field">
+    <label class="application-label">Phone
+      <input name="phone" type="tel"></label></div>
+  <div class="application-field">
+    <label class="application-label">Resume/CV<span>*</span>
+      <input name="resume" type="file" required></label></div>
+  <div class="application-field">
+    <label class="application-label">Current company
+      <input name="org"></label></div>
+  <div class="application-field">
+    <label class="application-label">LinkedIn URL
+      <input name="urls[LinkedIn]"></label></div>
+  <div class="application-field">
+    <label class="application-label">Are you willing to relocate?
+      <select name="cards[reloc]"><option value=""></option>
+        <option>Yes</option><option>No</option></select></label></div>
+  <div class="application-field">
+    <label class="application-label">Additional information
+      <textarea name="comments"></textarea></label></div>
+  <button class="postings-btn" type="button" id="lever-submit">Submit application</button>
+</form>
+<script>
+document.getElementById('lever-submit').addEventListener('click', () => {
+  const need = ['name','email'];
+  const blanks = need.filter(n => !document.querySelector(`[name="${n}"]`).value);
+  if (!document.querySelector('[name="resume"]').files.length) blanks.push('resume');
+  document.body.innerHTML = blanks.length
+    ? '<h1>Error</h1><p>Missing: ' + blanks.join(', ') + '</p>'
+    : '<h1>Thank you</h1><p>Your application was received.</p>';
+});
+</script>
+</body>
