@@ -97,6 +97,10 @@ CREATE_SUBMIT_SELECTORS = (
     "button:has-text('Create Account')",
     "div[role=button][aria-label='Create Account']",
 )
+SIGNIN_SUBMIT_SELECTORS = (
+    "button[data-automation-id='signInSubmitButton']",
+    "button:has-text('Sign In')", "button:has-text('Sign in')",
+)
 CREATE_SWITCH_SELECTORS = (
     "[data-automation-id='createAccountLink']",
     "a:has-text('Create Account')", "button:has-text('Create Account')",
@@ -211,9 +215,18 @@ def _on_registration_form(frames) -> bool:
     have one, and the create form has two.
     """
     for fr in frames:
+        # The confirm-password field is the one control only registration has.
         if _first(fr, VERIFY_PASSWORD_SELECTORS) is not None:
             return True
-        if _first(fr, CREATE_SUBMIT_SELECTORS, allow_account_creation=True) is not None:
+    for fr in frames:
+        # A create-account button counts only when nothing offers to sign you
+        # in beside it. The sign-in form keeps a Create Account link for people
+        # without an account, and matching that read every sign-in page as a
+        # registration page -- which left the run insisting it was still on the
+        # create form after it had successfully switched away from it.
+        if _first(fr, CREATE_SUBMIT_SELECTORS, allow_account_creation=True) is None:
+            continue
+        if _first(fr, SIGNIN_SUBMIT_SELECTORS) is None:
             return True
     return False
 
