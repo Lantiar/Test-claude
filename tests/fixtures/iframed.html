@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Careers — Apply</title>
+<body>
+<!-- The real failure mode this guards against: the application form lives in an
+     iframe (iCIMS does this), so top-level discovery finds nothing fillable,
+     while a submit button is still sitting right there on the outer page. -->
+<h1>Apply for Software Engineer</h1>
+<iframe src="greenhouse.html" width="900" height="600" title="application"></iframe>
+<button type="submit" id="outer-submit">Submit Application</button>
+<script>
+document.getElementById('outer-submit').addEventListener('click', () => {
+  document.body.innerHTML =
+    '<h1>Thank you for applying</h1><p>Your application was submitted.</p>';
+});
+</script>
+</body>

@@ -60,15 +60,22 @@ def apply_to(url: str, mode: str | None = None, store: Store | None = None,
         if job.ats in router.DOM_WORKERS:
             result = _run_dom(job, profile, store, provider, shots, mode,
                               dry_run, overrides)
-            # One fallback, never a loop: an unverified DOM fill gets one agent
-            # attempt, which is the whole point of having the agent lane.
-            if result.status == "queued" and result.outcome \
-                    and not result.outcome.verified and not result.outcome.saw_captcha:
-                fallback = _run_agent(job, profile, store, mode, dry_run,
-                                      shots, note="agent fallback after failed verify")
+            # One fallback, never a loop.
+            if result.status == "queued" and _needs_agent_fallback(result.outcome):
+                fallback = _run_agent(job, profile, store, mode, dry_run, shots,
+                                      note=_fallback_note(result.outcome))
                 if fallback.status == "applied" or (
                         fallback.outcome and fallback.outcome.verified):
                     return fallback
+                # Fallback didn't rescue it. Both lanes wrote a queue row for the
+                # same job, so the later write would otherwise be all you see;
+                # merge the reasons and record them once so the queue entry says
+                # what the DOM worker hit *and* why the agent couldn't help.
+                for reason in fallback.gate.reasons:
+                    if reason not in result.gate.reasons:
+                        result.gate.reasons.append(reason)
+                store.enqueue(job, result.outcome, result.gate.reasons)
+                result.detail = "; ".join(result.gate.reasons)
             return result
 
         return _run_agent(job, profile, store, mode, dry_run, shots)
@@ -77,6 +84,29 @@ def apply_to(url: str, mode: str | None = None, store: Store | None = None,
         store.record_applied(job, "errored")
         return ApplyResult(job, None, GateResult("queue", ["error"]), "errored",
                            f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}")
+
+
+def _needs_agent_fallback(outcome: FillOutcome | None) -> bool:
+    """Is this a failure the agent could plausibly do better on?
+
+    Empty discovery counts: markup the DOM worker cannot read — an iframe, a
+    shadow root, a tenant that renders differently — is exactly what the agent
+    lane exists for. A CAPTCHA or a login wall is not: the agent is blocked by
+    those too, so retrying just costs a run.
+    """
+    if outcome is None:
+        return True
+    if outcome.saw_captcha or outcome.needs_auth:
+        return False
+    return (not outcome.fields) or (not outcome.filled_ids) or (not outcome.verified)
+
+
+def _fallback_note(outcome: FillOutcome | None) -> str:
+    if outcome is None or not outcome.fields:
+        return "agent fallback after empty discovery"
+    if not outcome.filled_ids:
+        return "agent fallback after nothing was filled"
+    return "agent fallback after failed verify"
 
 
 def _run_dom(job: Job, profile: dict, store, provider, shots: str, mode: str,

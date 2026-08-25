@@ -104,3 +104,29 @@ def test_human_correction_is_reused_next_time(tmp_path):
     assert second.action == "fill"
     assert second.value == "Excited about this role."
     assert second.source == "learned"
+
+
+def test_gate_blocks_when_nothing_was_discovered():
+    from autoapply.gate import safety_gate
+    from autoapply.models import FillOutcome, Job
+
+    job = Job(url="https://jobs.lever.co/acme/1", ats="lever")
+    outcome = FillOutcome(job=job, verified=True)          # vacuously verified
+    result = safety_gate(job, outcome, "auto")
+    assert result.decision == "queue"
+    assert "no form fields discovered" in result.reasons
+
+
+def test_gate_blocks_when_fields_found_but_none_filled():
+    from autoapply.gate import safety_gate
+    from autoapply.models import FillOutcome, Job
+
+    job = Job(url="https://jobs.lever.co/acme/1", ats="lever")
+    outcome = FillOutcome(
+        job=job,
+        fields=[Field(id="a", selector="#a", label="Full name", required=False)],
+        filled_ids=[], verified=True,
+    )
+    result = safety_gate(job, outcome, "auto")
+    assert result.decision == "queue"
+    assert "nothing was filled" in result.reasons

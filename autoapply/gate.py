@@ -3,6 +3,8 @@
 approve mode queues everything. auto mode submits unless something makes the
 submission wrong rather than merely unreviewed:
 
+  * nothing discovered, or nothing filled -> the page defeated us; submitting
+                                             would send an empty application
   * a required field nothing could answer -> we'd send blanks or invented data
   * verification failed                   -> we don't know what's on the form
   * a CAPTCHA is present                  -> the run cannot proceed unattended
@@ -35,6 +37,15 @@ def safety_gate(job: Job, outcome: FillOutcome, mode: str, store=None) -> GateRe
         cap = int(os.getenv("DAILY_SUBMIT_CAP", "25"))
         if store.submits_since(time.time() - 86400) >= cap:
             reasons.append(f"daily submit cap reached ({cap})")
+
+    # A page whose markup defeats discovery yields no fields, an empty
+    # missing_required, and a verification pass that succeeds vacuously. Without
+    # these two checks that reads as success and authorizes a submit on a form
+    # where nothing was filled.
+    if not outcome.fields:
+        reasons.append("no form fields discovered")
+    elif not outcome.filled_ids:
+        reasons.append("nothing was filled")
 
     if outcome.saw_captcha:
         reasons.append("CAPTCHA present")

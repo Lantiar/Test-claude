@@ -109,3 +109,34 @@ def test_icims_and_ashby_route_to_agent_lane():
     assert router.parse_job("https://careers-gdms.icims.com/jobs/74471/job").ats == "icims"
     assert router.parse_job("https://jobs.ashbyhq.com/Crusoe/abc/application").ats == "ashby"
     assert {"icims", "ashby"} <= router.AGENT_ATS
+
+
+def test_empty_discovery_never_submits(tmp_path):
+    """A page whose fields we cannot see must not be submitted.
+
+    The outer page here has a working submit button but every field is inside an
+    iframe, so discovery comes back empty. Nothing was filled, so nothing may be
+    sent — even though verification passes vacuously and there is a live submit
+    button one click away.
+    """
+    os.environ["SCREENSHOT_DIR"] = str(tmp_path / "shots")
+    os.environ["LLM_PROVIDER"] = "rules"          # no agent available to fall back to
+    store = _store(tmp_path)
+    r = apply_to(_url("iframed.html"), mode="auto", store=store,
+                 profile=PROFILE, ats_override="greenhouse")
+
+    assert r.status != "applied", "submitted a form where nothing was filled"
+    assert store.stats()["applied"] == 0
+    reasons = " ".join(r.gate.reasons)
+    assert "no form fields discovered" in reasons or "agent unavailable" in reasons
+
+
+def test_empty_discovery_reaches_for_the_agent(tmp_path):
+    """Empty discovery is exactly what the agent lane is for, so it must try."""
+    os.environ["SCREENSHOT_DIR"] = str(tmp_path / "shots")
+    os.environ["LLM_PROVIDER"] = "rules"
+    r = apply_to(_url("iframed.html"), mode="auto", store=_store(tmp_path),
+                 profile=PROFILE, ats_override="greenhouse")
+    # With no model configured the fallback can't run, but it must have been
+    # attempted — that is what surfaces as "agent unavailable".
+    assert "agent unavailable" in " ".join(r.gate.reasons)
