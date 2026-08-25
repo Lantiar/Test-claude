@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import pathlib
+import tempfile
 from typing import Optional
 
 from ..models import Field, FillOutcome, Job, Mapping
@@ -75,8 +76,15 @@ def build_browser():
     # startup rather than on the page.
     if proxy := os.getenv("HTTPS_PROXY") or os.getenv("https_proxy"):
         kwargs["proxy"] = {"server": proxy}
+    # A dedicated profile directory per run. Sharing the default one makes the
+    # launch hang until CDP times out in a container -- browser-use issues #2941,
+    # #3613 -- and the failure looks like "BrowserStartEvent timed out after
+    # 30.0s" with no mention of the profile.
+    kwargs["user_data_dir"] = tempfile.mkdtemp(prefix="autoapply-bu-")
+    args = ["--no-sandbox", "--disable-dev-shm-usage"]
     if tls_max := os.getenv("AUTOAPPLY_TLS_MAX"):
-        kwargs["args"] = [f"--ssl-version-max={tls_max}"]
+        args.append(f"--ssl-version-max={tls_max}")
+    kwargs["args"] = args
     return Browser(**kwargs)
 
 
