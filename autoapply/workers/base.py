@@ -162,6 +162,18 @@ class Worker:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
 
+    def settle_after_sign_in(self, timeout_ms: int = 30000) -> bool:
+        """Wait for the form to render once a sign-in wall is behind us."""
+        deadline = time.time() + timeout_ms / 1000
+        while time.time() < deadline:
+            try:
+                if self.discover():
+                    return True
+            except Exception:
+                pass
+            self.page.wait_for_timeout(500)
+        return False
+
     def frames(self) -> list:
         """Main frame first, then any child frame with real content.
 
@@ -860,8 +872,12 @@ class WizardWorker(Worker):
                     outcome.needs_auth = True
                     outcome.reached_end = False
                     break
-                # Signed in: the wizard is on the other side of that wall, so
-                # re-read the page rather than counting the step as done.
+                # Signed in, but the wizard behind the wall has not rendered
+                # yet. sign_in returns as soon as the sign-in page is gone, and
+                # discovery ran 28ms later against an empty document -- the run
+                # then found nothing to advance with and stopped, having lost
+                # the whole application to a race. Wait for the form.
+                self.settle_after_sign_in()
                 continue
 
             fields = self.discover()
