@@ -252,11 +252,31 @@ class Worker:
             waiter = None
 
         try:
-            return sign_in(self, creds, wait_for_code=waiter)
+            ok, detail = sign_in(self, creds, wait_for_code=waiter)
+            if ok:
+                return True, detail
         except LoginUnavailable as exc:
             return False, str(exc)
         except Exception as exc:                    # never kill the run over it
-            return False, f"{type(exc).__name__}: {exc}"
+            detail = f"{type(exc).__name__}: {exc}"
+
+        # Sign-in did not get through, so there may be no account yet.
+        # Registering is per-host opt-in because it is the one step here that
+        # cannot be undone: it puts a new account on an employer's system under
+        # the candidate's name. Same address and password, so the next run
+        # signs in to what this created instead of registering again.
+        if not creds.get("allow_account_creation"):
+            return False, f"{detail}; account creation not enabled for this host"
+
+        from ..login import create_account
+
+        try:
+            self.page.reload(wait_until="domcontentloaded")
+            self.page.wait_for_timeout(2500)
+            made, made_detail = create_account(self, creds, wait_for_code=waiter)
+        except Exception as exc:
+            return False, f"{detail}; create failed: {type(exc).__name__}: {exc}"
+        return made, f"sign-in: {detail}; create: {made_detail}"
 
     def discover(self) -> list[Field]:
         """Every frame, not just the top one -- embedded forms are the norm."""

@@ -24,14 +24,16 @@ from .models import FillOutcome, GateResult, Job
 KILL_SWITCH = "data/STOP"
 
 
-def safety_gate(job: Job, outcome: FillOutcome, mode: str, store=None) -> GateResult:
+def safety_gate(job: Job, outcome: FillOutcome, mode: str, store=None,
+                profile: dict | None = None, provider=None) -> GateResult:
     if mode != "auto":
         return GateResult("queue", ["approve mode"])
-    reasons = blockers(outcome, store)
+    reasons = blockers(outcome, store, profile=profile, provider=provider)
     return GateResult("submit" if not reasons else "queue", reasons)
 
 
-def blockers(outcome: FillOutcome, store=None) -> list[str]:
+def blockers(outcome: FillOutcome, store=None, profile: dict | None = None,
+             provider=None) -> list[str]:
     """Everything that would make this submission wrong, independent of mode.
 
     Split out from safety_gate so a dry run can report what *would* stop a real
@@ -67,5 +69,19 @@ def blockers(outcome: FillOutcome, store=None) -> list[str]:
         reasons.append(f"no answer for required: {', '.join(missing[:5])}")
     if not outcome.verified:
         reasons.append("verification failed")
+
+    # The model's read of the answers themselves. Runs in both submit modes:
+    # verification passing only means the form holds what we meant to type, not
+    # that we meant the right thing, and in approve mode a human sees a list of
+    # values rather than the reasoning behind them. Only ever adds reasons --
+    # it cannot clear a block the deterministic rules already raised.
+    if profile is not None and not reasons:
+        from .presubmit import presubmit_review
+
+        safe, blocking, note = presubmit_review(outcome, profile, provider)
+        if not safe:
+            reasons.extend(blocking or ["presubmit review declined"])
+        outcome.verify_detail["_presubmit"] = {
+            "safe": safe, "blocking": blocking, "note": note}
 
     return reasons

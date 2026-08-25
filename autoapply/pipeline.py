@@ -132,7 +132,8 @@ def _run_dom(job: Job, profile: dict, store, provider, shots: str, mode: str,
             # _needs_agent_fallback decide, rather than erroring the whole job.
             outcome = FillOutcome(job=job)
             outcome.errors.append(f"{type(exc).__name__}: {exc}")
-            return _decide(job, outcome, mode, store, dry_run, worker.submit)
+            return _decide(job, outcome, mode, store, dry_run, worker.submit,
+                       profile=profile, provider=provider)
         if overrides:
             _apply_overrides(outcome.mappings, overrides, job.ats, store)
 
@@ -156,21 +157,25 @@ def _run_agent(job: Job, profile: dict, store, mode: str, dry_run: bool,
 
     # The agent does not get to grade itself; the judge reads the page fresh.
     outcome = judge(outcome)
-    result = _decide(job, outcome, mode, store, dry_run, worker.submit)
+    result = _decide(job, outcome, mode, store, dry_run, worker.submit,
+                     profile=profile)
     if note:
         result.detail = f"{note}; {result.detail}"
     return result
 
 
 def _decide(job: Job, outcome: FillOutcome, mode: str, store, dry_run: bool,
-            submitter: Callable[[], tuple[bool, str]]) -> ApplyResult:
-    gate = safety_gate(job, outcome, mode, store=store)
+            submitter: Callable[[], tuple[bool, str]],
+            profile: dict | None = None, provider=None) -> ApplyResult:
+    gate = safety_gate(job, outcome, mode, store=store, profile=profile,
+                       provider=provider)
 
     if dry_run:
         # Report the verdict rather than discarding it: the point of a dry run
         # is to see what a real submit would hit, and "dry run" alone says only
         # what the operator already typed.
-        would_block = blockers(outcome, store)
+        would_block = blockers(outcome, store, profile=profile,
+                               provider=provider)
         detail = ("dry run: nothing submitted; would block on "
                   + "; ".join(would_block)) if would_block else (
                   "dry run: nothing submitted; auto mode would have submitted")
