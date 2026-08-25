@@ -141,6 +141,13 @@ class WorkdayWorker(WizardWorker):
             required = "*" in label or bool(box.query_selector("[aria-required='true']"))
 
             listbox = box.query_selector("button[aria-haspopup='listbox']")
+            # Workday's other picklist: a search box that commits a choice as a
+            # removable chip. Typing into it only sets the search text, so the
+            # value shows on screen, reads back fine, and the form still says
+            # the field is required -- which is exactly what "How Did You Hear
+            # About Us?" did on every run. It needs click, type, pick.
+            multiselect = box.query_selector(
+                "[data-automation-id='multiSelectContainer']")
             file_zone = box.query_selector("div[data-automation-id='file-upload-drop-zone']")
             textarea = box.query_selector("textarea")
             radios = box.query_selector_all("input[type=radio]")
@@ -152,6 +159,10 @@ class WorkdayWorker(WizardWorker):
                 kind = "select"
                 selector = (f"{FORM_FIELD}[data-automation-id='{automation_id}'] "
                             "button[aria-haspopup='listbox']")
+            elif multiselect is not None:
+                kind = "combobox"
+                selector = (f"{FORM_FIELD}[data-automation-id='{automation_id}'] "
+                            "input")
             elif textarea is not None:
                 kind, selector = "textarea", f"{FORM_FIELD}[data-automation-id='{automation_id}'] textarea"
             elif len(radios) >= 2:

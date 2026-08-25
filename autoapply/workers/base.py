@@ -599,7 +599,8 @@ class Worker:
     (el) => {
       let n = el, hops = 0;
       while (n && hops++ < 8) {
-        if (n.querySelector && n.querySelector('[role=option]')) return n;
+        if (n.querySelector && n.querySelector(
+              '[role=option], [data-automation-id="promptOption"]')) return n;
         n = n.parentElement;
       }
       return null;
@@ -619,7 +620,8 @@ class Worker:
 
         candidates = []
         if scope is not None:
-            candidates.append(scope.query_selector_all("[role=option]"))
+            candidates.append(scope.query_selector_all(
+                "[role=option], [data-automation-id='promptOption']"))
         # A menu rendered into a portal is not an ancestor of the input, so fall
         # back to the listbox this input names, then to any open one.
         owns = None
@@ -629,7 +631,8 @@ class Worker:
             pass
         if owns:
             candidates.append(ctx.query_selector_all(f'[id="{owns}"] [role=option]'))
-        candidates.append(ctx.query_selector_all("[role=listbox] [role=option]"))
+        candidates.append(ctx.query_selector_all(
+            "[role=listbox] [role=option], [data-automation-id='promptOption']"))
 
         for group in candidates:
             for opt in group:
