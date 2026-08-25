@@ -406,9 +406,30 @@ class WorkdayWorker(WizardWorker):
                 text = (el.inner_text() or "").strip()
                 if text:
                     return re.sub(r"\s+", " ", text)
-        # Fall back to the automation id itself: "formField-legalNameSection_firstName"
-        # still carries the field's meaning for the mapper to match on.
-        return re.sub(r"[-_]+", " ", automation_id.replace("formField-", "")).strip()
+        # The automation id usually carries the meaning --
+        # "formField-legalNameSection_firstName" is perfectly readable. But a
+        # tenant's own questions are keyed by uuid, and "802e7dac252910014cf42"
+        # tells the mapper nothing: the audit's verdict on one was "field label
+        # is not meaningful", which was exactly right. Read the question off the
+        # page instead.
+        derived = re.sub(r"[-_]+", " ", automation_id.replace("formField-", "")).strip()
+        if not re.fullmatch(r"[0-9a-f]{16,}", derived.replace(" ", "")):
+            return derived
+        try:
+            nearby = box.evaluate(
+                r"""b => {
+                     const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+                     let n = b, hops = 0;
+                     while (n && hops++ < 4) {
+                       const t = clean(n.innerText);
+                       if (t && t.length > 3) return t.split('\n')[0].slice(0, 160);
+                       n = n.parentElement;
+                     }
+                     return '';
+                   }""") or ""
+        except Exception:
+            nearby = ""
+        return nearby.strip() or derived
 
     def _write(self, f: Field, value: str) -> Optional[str]:
         """Workday's dropdowns and radios are not native controls."""

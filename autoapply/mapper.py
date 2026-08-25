@@ -31,6 +31,12 @@ RULES: list[tuple[str, str]] = [
     (r"portfolio|personal\s*(web)?site|website|\burl\b", "links.portfolio"),
 
     (r"school|university|college|institution",           "education.school"),
+    # Before the degree rule on purpose. "Please select date that you will
+    # complete your current degree" is a date question, and matching "degree"
+    # inside it filled a graduation-date picker with "Bachelor's Degree".
+    (r"date .*(complete|completion|graduat|finish)"
+     r"|(complete|completion|graduat|finish).*date"
+     r"|expected graduation|anticipated graduation",  "education.end_date"),
     (r"degree",                                          "education.degree"),
     (r"discipline|\bmajor\b|field of study",                 "education.discipline"),
     (r"\bgpa\b",                                         "education.gpa"),
