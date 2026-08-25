@@ -93,8 +93,25 @@ def test_phone_shaped_questions_are_not_all_the_phone_number():
     assert match_rule("Phone Number*") == "identity.phone"
     assert match_rule("Mobile Phone") == "identity.phone"
 
-    for label in ("Phone Device Type*", "Phone Extension", "Country Phone Code*"):
+    # Nothing in the profile answers these, so they go to the model.
+    for label in ("Phone Device Type*", "Phone Extension"):
         assert match_rule(label) is None, f"{label} should not resolve to a rule"
+
+    # This one the profile does answer. Sending it to the model instead got "1"
+    # back, which resolved to American Samoa -- a real +1 country, so the form
+    # accepted it and the wrong answer was learned.
+    assert match_rule("Country Phone Code*") == "location.country"
+
+
+def test_a_country_name_beats_a_bare_dialling_code():
+    from autoapply.mapper import resolve_option
+
+    options = ["American Samoa (+1)", "Anguilla (+1)", "United States of America (+1)"]
+    assert resolve_option("United States", options) == "United States of America (+1)"
+    # A bare number is a whole word inside half these options and must not
+    # select one by being the first that contains it.
+    assert resolve_option("1", options) is None
+    assert resolve_option("+1", options) is None
 
 
 def test_a_state_abbreviation_finds_the_full_name_in_a_dropdown():
