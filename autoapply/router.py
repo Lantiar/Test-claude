@@ -39,11 +39,18 @@ def detect(url: str) -> ATS:
     return "unknown"
 
 
+# Workday puts the UI locale in the path. A non-English locale renders every
+# field label in that language, which defeats label matching outright.
+WORKDAY_LOCALE = re.compile(r"/([a-z]{2}-[A-Z]{2})/")
+
+
 def normalize(url: str, ats: ATS) -> str:
     """Point at the application form rather than the job description."""
     base = url.split("?")[0].rstrip("/")
     if ats == "lever" and not base.endswith("/apply"):
         return base + "/apply"
+    if ats == "workday":
+        base = WORKDAY_LOCALE.sub("/en-US/", base, count=1)
     return base
 
 

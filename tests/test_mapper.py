@@ -130,3 +130,26 @@ def test_gate_blocks_when_fields_found_but_none_filled():
     result = safety_gate(job, outcome, "auto")
     assert result.decision == "queue"
     assert "nothing was filled" in result.reasons
+
+
+def test_workday_locale_is_normalized_to_english():
+    """A non-English Workday locale renders every label in that language, which
+    defeats label matching outright. Simplify links often carry one."""
+    from autoapply.router import parse_job
+
+    job = parse_job(
+        "https://blackstone.wd1.myworkdayjobs.com/zh-CN/Blackstone_Campus_Careers"
+        "/job/Miami/XMLNAME-2027-Blackstone-Software-Engineer-Summer-Analyst_45021"
+        "?utm_source=Simplify&ref=Simplify")
+    assert job.ats == "workday"
+    assert job.company == "blackstone"
+    assert "/en-US/" in job.url
+    assert "zh-CN" not in job.url
+    assert "utm_source" not in job.url          # tracking params stripped for dedupe
+
+
+def test_non_workday_urls_keep_their_path():
+    from autoapply.router import parse_job
+
+    job = parse_job("https://job-boards.greenhouse.io/acme/jobs/123")
+    assert job.url == "https://job-boards.greenhouse.io/acme/jobs/123"
