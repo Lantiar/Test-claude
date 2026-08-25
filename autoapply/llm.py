@@ -159,6 +159,7 @@ class OpenAICompatProvider:
         self.api_key = api_key
 
     def _chat(self, system: str, user: str) -> str:
+        import urllib.error
         import urllib.request
 
         body = json.dumps({
@@ -172,8 +173,21 @@ class OpenAICompatProvider:
             headers={"Content-Type": "application/json",
                      "Authorization": f"Bearer {self.api_key}"},
         )
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.loads(r.read())["choices"][0]["message"]["content"]
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.loads(r.read())["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as exc:
+            # "HTTPError" alone says nothing: a 429 means slow down, a 400 means
+            # the request is malformed or too long, and they need opposite
+            # responses. Carry the code and the body's message.
+            detail = ""
+            try:
+                body = json.loads(exc.read().decode("utf-8", "replace"))
+                detail = (body.get("error") or {}).get("message", "")
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"{exc.code} {exc.reason}: {detail[:200]}") from exc
 
     def map_fields(self, fields, profile):
         raw = self._chat(

@@ -600,7 +600,13 @@ class Worker:
 
         if not f.options:
             if str(value).strip().lower() in ("yes", "true", "1", "on"):
-                el.check()
+                if not _click(el):
+                    return None
+                try:
+                    if not el.is_checked():
+                        el.check(timeout=4000)
+                except Exception:
+                    pass
                 return value
             return None
 
@@ -619,7 +625,16 @@ class Worker:
             return None
         for m, text in labelled:
             if text == chosen:
-                m.check()
+                # check() runs its own actionability wait and never reaches the
+                # overlay-aware click, so a radio painted over by a custom
+                # control times out after 30s exactly like the buttons did.
+                if not _click(m):
+                    return None
+                try:
+                    if not m.is_checked():
+                        m.check(timeout=4000)
+                except Exception:
+                    pass
                 return text
         return None
 
