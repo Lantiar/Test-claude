@@ -63,8 +63,20 @@ def build_browser():
     kwargs: dict = {"headless": os.getenv("HEADLESS", "1") != "0"}
     if exe := os.getenv("AUTOAPPLY_CHROMIUM"):
         kwargs["executable_path"] = exe
+        # An explicit binary and a browser channel are mutually exclusive;
+        # leaving a channel set makes the launch look for a browser that is
+        # not installed and time out.
+        kwargs["channel"] = None
     if state := os.getenv("STORAGE_STATE"):
         kwargs["storage_state"] = state
+    # The agent drives its own browser, so the egress settings the DOM lane
+    # gets from browser.py have to be handed to it explicitly -- without them
+    # it launches a browser that cannot reach anything and the run dies at
+    # startup rather than on the page.
+    if proxy := os.getenv("HTTPS_PROXY") or os.getenv("https_proxy"):
+        kwargs["proxy"] = {"server": proxy}
+    if tls_max := os.getenv("AUTOAPPLY_TLS_MAX"):
+        kwargs["args"] = [f"--ssl-version-max={tls_max}"]
     return Browser(**kwargs)
 
 

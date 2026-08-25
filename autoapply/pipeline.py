@@ -57,7 +57,9 @@ def apply_to(url: str, mode: str | None = None, store: Store | None = None,
                            "skipped", "already applied")
 
     try:
-        if job.ats in router.DOM_WORKERS:
+        # Every ATS gets the deterministic pass first; _needs_agent_fallback
+        # still routes empty or unverified discovery to the agent.
+        if True:
             result = _run_dom(job, profile, store, provider, shots, mode,
                               dry_run, overrides)
             # One fallback, never a loop.
@@ -121,7 +123,16 @@ def _run_dom(job: Job, profile: dict, store, provider, shots: str, mode: str,
         # are threaded through the profile-independent path here.
         if overrides:
             worker.overrides = overrides
-        outcome = worker.run(job, profile, store, provider, shots)
+        try:
+            outcome = worker.run(job, profile, store, provider, shots)
+        except Exception as exc:
+            # The deterministic pass failing is not the end of the run: an
+            # unreachable page or markup that breaks discovery is exactly what
+            # the agent lane is the fallback for. Record it and let
+            # _needs_agent_fallback decide, rather than erroring the whole job.
+            outcome = FillOutcome(job=job)
+            outcome.errors.append(f"{type(exc).__name__}: {exc}")
+            return _decide(job, outcome, mode, store, dry_run, worker.submit)
         if overrides:
             _apply_overrides(outcome.mappings, overrides, job.ats, store)
 

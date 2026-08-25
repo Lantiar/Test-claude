@@ -67,8 +67,38 @@ READ_COMBO_JS = r"""
 """
 
 
+# A radio/checkbox group is many elements; reading the first one answers
+# "is the first option checked", which is not the question. Read the labels of
+# whichever members are actually checked.
+READ_CHOICE_JS = r"""
+(els) => {
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  const labelOf = (n) => {
+    const id = n.getAttribute('id');
+    if (id) {
+      const l = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+      if (l && clean(l.innerText)) return clean(l.innerText);
+    }
+    const anc = n.closest('label');
+    return anc ? clean(anc.innerText) : '';
+  };
+  return els.filter(e => e.checked).map(labelOf).filter(Boolean).join(', ');
+}
+"""
+
+
 def _read(page, el, kind: str) -> str:
     return page.evaluate(READ_COMBO_JS if kind == "combobox" else READ_JS, el)
+
+
+def _read_field(page, f, el) -> tuple[str, str]:
+    """(value read back, kind to compare it as)."""
+    if f.kind in ("radio", "checkbox") and f.options:
+        try:
+            return page.eval_on_selector_all(f.selector, READ_CHOICE_JS), "text"
+        except Exception:
+            return "", "text"
+    return _read(page, el, f.kind), f.kind
 
 
 def _squash(s: str) -> str:
@@ -111,12 +141,12 @@ def verify_fields(page, fields, mappings, filled_ids: list[str]) -> tuple[bool, 
             continue
         try:
             el = page.query_selector(f.selector)
-            actual = _read(page, el, f.kind) if el else ""
+            actual, cmp_kind = _read_field(page, f, el) if el else ("", f.kind)
         except Exception as exc:
             detail[m.field_id] = {"label": f.label, "error": str(exc)}
             ok = False
             continue
-        good = _matches(m.value, actual, f.kind)
+        good = _matches(m.value, actual, cmp_kind)
         detail[m.field_id] = {"label": f.label, "expected": m.value,
                               "actual": actual, "ok": good}
         if not good:
@@ -139,13 +169,12 @@ def verify(page, outcome: FillOutcome) -> FillOutcome:
             continue
         try:
             el = page.query_selector(f.selector)
-            actual = _read(page, el, f.kind) if el else ""
+            actual, cmp_kind = _read_field(page, f, el) if el else ("", f.kind)
         except Exception as exc:
-            actual, exc_note = "", str(exc)
-            detail[m.field_id] = {"label": f.label, "error": exc_note}
+            detail[m.field_id] = {"label": f.label, "error": str(exc)}
             ok = False
             continue
-        good = _matches(m.value, actual, f.kind)
+        good = _matches(m.value, actual, cmp_kind)
         detail[m.field_id] = {"label": f.label, "expected": m.value,
                               "actual": actual, "ok": good}
         if not good:

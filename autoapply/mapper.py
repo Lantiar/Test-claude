@@ -262,7 +262,7 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
             if not value:
                 still.append(f)
                 continue
-            if f.kind in ("select", "radio", "combobox") and f.options:
+            if f.kind in ("select", "radio", "checkbox", "combobox") and f.options:
                 # The model must land on a real option, not paraphrase one.
                 value = resolve_option(value, f.options) or ""
                 if not value:

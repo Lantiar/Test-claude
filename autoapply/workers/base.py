@@ -22,7 +22,7 @@ NON_CAPTCHA_MARKERS = ("nocaptchawrapper", "nocaptcha", "no-captcha")
 
 # Reads the label for a control the way a person would: explicit <label for>,
 # ARIA, an ancestor label, the nearest preceding text, then placeholder/name.
-LABEL_JS = """
+LABEL_JS = r"""
 (el) => {
   const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
   if (el.id) {
@@ -50,9 +50,80 @@ LABEL_JS = """
 }
 """
 
+# The question a radio/checkbox group is asking, as opposed to the label on any
+# one of its options. Without this a "Pronouns" group discovers as five separate
+# fields called He/Him, She/Her, They/Them ... and nothing can answer any of them.
+# A stable key for the group a choice input belongs to. Radios share a name, but
+# checkbox sets often do not -- each option gets its own name -- so fall back to
+# the identity of the fieldset/group that contains them.
+GROUP_KEY_JS = r"""
+(el) => {
+  // Only an explicit fieldset / group role is trusted to delimit a choice set.
+  // Walking up to "the nearest ancestor holding more than one checkbox" looks
+  // reasonable and is not: on a real form that ancestor is the whole section,
+  // and a dozen unrelated standalone checkboxes collapse into one bogus group.
+  const g = el.closest('fieldset, [role="group"], [role="radiogroup"]');
+  if (!g) return '';
+  if (!g.getAttribute('data-aa-group')) {
+    window.__aaGroupN = (window.__aaGroupN || 0) + 1;
+    g.setAttribute('data-aa-group', 'grp' + window.__aaGroupN);
+  }
+  return g.getAttribute('data-aa-group');
+}
+"""
+
+GROUP_LABEL_JS = r"""
+(el) => {
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  const labelOf = (n) => {
+    const id = n.getAttribute('id');
+    if (id) {
+      const l = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+      if (l && clean(l.innerText)) return clean(l.innerText);
+    }
+    const anc = n.closest('label');
+    return anc ? clean(anc.innerText) : '';
+  };
+
+  const group = el.closest('fieldset, [role="group"], [role="radiogroup"]');
+  if (group) {
+    const lg = group.querySelector('legend');
+    if (lg && clean(lg.innerText)) return clean(lg.innerText);
+    const by = group.getAttribute('aria-labelledby');
+    if (by) {
+      const t = by.split(/\s+/).map(id => {
+        const n = document.getElementById(id); return n ? n.innerText : '';
+      }).join(' ');
+      if (clean(t)) return clean(t);
+    }
+    const lab = group.getAttribute('aria-label');
+    if (clean(lab)) return clean(lab);
+  }
+
+  // No legend: the question sits outside the group. Walk outwards and subtract
+  // the options' own labels from the container's text -- whatever is left is
+  // the question. Without this a group is named after its first option, and
+  // "Which offices are you interested in?" discovers as "New York, NY".
+  const scope = group || el.parentElement;
+  const opts = Array.from(
+    scope.querySelectorAll('input[type="radio"], input[type="checkbox"]')
+  ).map(labelOf).filter(Boolean);
+
+  let n = scope, hops = 0;
+  while (n && hops++ < 4) {
+    let text = clean(n.innerText);
+    opts.forEach(o => { text = text.split(o).join(' '); });
+    text = clean(text);
+    if (text.length > 2) return text;
+    n = n.parentElement;
+  }
+  return '';
+}
+"""
+
 # React and similar frameworks track value on the DOM node; assigning .value
 # directly is invisible to them, so go through the native setter and fire events.
-SET_VALUE_JS = """
+SET_VALUE_JS = r"""
 ([el, value]) => {
   const proto = el.tagName === 'TEXTAREA'
     ? window.HTMLTextAreaElement.prototype
@@ -97,6 +168,7 @@ class Worker:
 
     def discover(self) -> list[Field]:
         fields: list[Field] = []
+        groups: dict[str, Field] = {}
         root = self.page.query_selector(self.form_selector) or self.page
         for idx, el in enumerate(root.query_selector_all("input, textarea, select")):
             try:
@@ -130,6 +202,39 @@ class Worker:
                 or (el.get_attribute("aria-required") == "true") \
                 or "*" in label
 
+            # One logical field per radio/checkbox group, carrying the group's
+            # question as its label and the members' labels as its options.
+            if itype in ("radio", "checkbox"):
+                gname = el.get_attribute("name") or ""
+                gkey = (self.page.evaluate(GROUP_KEY_JS, el) or "").strip()
+                # A fieldset outranks the name attribute: Ashby names each
+                # checkbox after its own label, so name-keying splits a real
+                # group into one field per option. Radios without a fieldset
+                # still group by name, which is what name is for.
+                if gkey:
+                    key = f"{itype}:{gkey}"
+                elif itype == "radio" and gname:
+                    key = f"radio:{gname}"
+                else:
+                    key = f"{itype}:{fid}"          # standalone consent box
+                if key in groups:
+                    if label and label not in groups[key].options:
+                        groups[key].options.append(label)
+                    groups[key].required = groups[key].required or required
+                    continue
+                gl = (self.page.evaluate(GROUP_LABEL_JS, el) or "").strip()
+                field = Field(
+                    id=gkey or gname or fid,
+                    selector=(f'[data-aa-group="{gkey}"] input[type={itype}]' if gkey
+                              else f'{tag}[name="{gname}"]' if (itype == "radio" and gname)
+                              else f'[id="{el.get_attribute("id") or fid}"]'),
+                    label=gl or label, kind=itype, required=required,
+                    options=[label] if label else [],
+                )
+                groups[key] = field
+                fields.append(field)
+                continue
+
             options: list[str] = []
             if kind == "combobox":
                 # The choices only exist while the menu is open, so read them
@@ -147,7 +252,11 @@ class Worker:
 
             # A unique selector we can find again during verification.
             if el.get_attribute("id"):
-                selector = f'#{css_escape(el.get_attribute("id"))}'
+                # [id="..."] rather than #id: a CSS id selector may not begin
+                # with a digit, and UUID ids that start with one are everywhere
+                # (Ashby names every custom field that way). #0d09... raises a
+                # SyntaxError and the field silently never gets written.
+                selector = f'[id="{el.get_attribute("id")}"]'
             elif name:
                 selector = f'{tag}[name="{name}"]'
             else:
@@ -155,6 +264,12 @@ class Worker:
 
             fields.append(Field(id=fid, selector=selector, label=label or name,
                                 kind=kind, required=required, options=options))
+
+        # A lone checkbox is a consent box, not a choice between options: keep
+        # its own label so "I agree to the terms" is still answerable.
+        for field in fields:
+            if field.kind == "checkbox" and len(field.options) <= 1:
+                field.options = []
         return fields
 
     # ---- lifecycle -------------------------------------------------------
@@ -209,7 +324,10 @@ class Worker:
         if f.kind == "file":
             path = os.path.expanduser(value)
             if not os.path.exists(path):
-                raise FileNotFoundError(path)
+                # A mislabelled upload zone can be mapped to a name or an email
+                # by a rule matching its label. Uploading is not possible and
+                # the run should not die over it -- leave it for the gate.
+                return None
             el.set_input_files(path)
             return value
         if f.kind == "select":
@@ -219,9 +337,7 @@ class Worker:
                 el.select_option(value=value)
             return value
         if f.kind in ("checkbox", "radio"):
-            if str(value).strip().lower() in ("yes", "true", "1", "on"):
-                el.check()
-            return value
+            return self._write_choice(f, el, value)
         if f.kind == "combobox":
             return self._write_combobox(el, value)
         self.page.evaluate(SET_VALUE_JS, [el, value])
@@ -264,6 +380,40 @@ class Worker:
         self.page.keyboard.press("Escape")
         return None
 
+    def _write_choice(self, f: Field, el, value: str) -> Optional[str]:
+        """Tick the member of a radio/checkbox group whose label is the answer.
+
+        A lone checkbox has no options and is a plain yes/no consent tick; a
+        group has to match the answer against the members' own labels, because
+        checking whichever one happens to be first answers a different question
+        than the one that was asked.
+        """
+        from ..mapper import resolve_option
+
+        if not f.options:
+            if str(value).strip().lower() in ("yes", "true", "1", "on"):
+                el.check()
+                return value
+            return None
+
+        members = self.page.query_selector_all(f.selector)
+        labelled = []
+        for m in members:
+            text = (self.page.evaluate(LABEL_JS, m) or "").strip()
+            if text:
+                labelled.append((m, text))
+        if not labelled:
+            return None
+
+        chosen = resolve_option(value, [text for _, text in labelled])
+        if chosen is None:
+            return None
+        for m, text in labelled:
+            if text == chosen:
+                m.check()
+                return text
+        return None
+
     def _probe_options(self, el) -> list[str]:
         """Open a combobox just long enough to read its choices, then close it."""
         try:
@@ -281,7 +431,7 @@ class Worker:
     # is what keeps one widget from reading another's menu -- an international
     # phone input keeps a 200-entry country listbox mounted at all times, and an
     # unscoped query hands you Afghanistan for every question on the page.
-    OPTION_SCOPE_JS = """
+    OPTION_SCOPE_JS = r"""
     (el) => {
       let n = el, hops = 0;
       while (n && hops++ < 8) {
@@ -314,7 +464,7 @@ class Worker:
             pass
         if owns:
             candidates.append(self.page.query_selector_all(
-                f"#{css_escape(owns)} [role=option]"))
+                f'[id="{owns}"] [role=option]'))
         candidates.append(self.page.query_selector_all("[role=listbox] [role=option]"))
 
         for group in candidates:
@@ -378,8 +528,8 @@ def css_escape(value: str) -> str:
 
 
 def get_worker(ats: str, page) -> Optional[Worker]:
-    """DOM workers only. iCIMS, Ashby, Oracle/Taleo and unknown hosts are driven
-    by the browser-use agent instead — see workers/agent.py and the playbooks."""
+    """The DOM worker for an ATS, or the generic one when none is dedicated."""
+    from .generic import GenericWorker
     from .greenhouse import GreenhouseWorker
     from .lever import LeverWorker
     from .workday import WorkdayWorker
@@ -389,8 +539,10 @@ def get_worker(ats: str, page) -> Optional[Worker]:
         "lever": LeverWorker,
         "workday": WorkdayWorker,
     }
-    cls = registry.get(ats)
-    return cls(page) if cls else None
+    # Anything without a dedicated worker still gets a deterministic first pass
+    # rather than going straight to the agent; empty discovery falls through to
+    # the agent lane exactly as before.
+    return registry.get(ats, GenericWorker)(page)
 
 
 def query_first(scope, selectors: tuple[str, ...] | list[str]):
