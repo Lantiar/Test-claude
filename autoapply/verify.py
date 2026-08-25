@@ -189,6 +189,14 @@ def verify(page, outcome: FillOutcome) -> FillOutcome:
         ok = False
         detail["_missing_required"] = {"fields": missing}
 
+    # Nothing discovered means nothing was checked, and a pass over an empty
+    # list succeeds vacuously. The wizard path already refuses to call that
+    # verified; the single-page path has to agree, or a page whose markup
+    # defeated discovery reports verified=True having read no form at all.
+    if not outcome.fields:
+        ok = False
+        detail["_no_fields"] = {"note": "discovery found no fields to verify"}
+
     outcome.verified = ok
     outcome.verify_detail = detail
     return outcome
