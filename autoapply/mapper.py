@@ -120,8 +120,14 @@ def get_value(profile: dict, path: str) -> str:
 RULE_EXEMPT = (
     r"phone\s*(device\s*)?type|device\s*type",
     r"phone\s*ext(ension)?\b|\bext(ension)?\s*(number)?$",
-    r"country\s*(phone\s*)?code|phone\s*country",
 )
+
+# Country Phone Code is answered from the profile's country, not held out. It
+# was exempt, which sent it to the model, which answered "1" -- and a bare "1"
+# resolved to American Samoa, a real +1 country the form was happy to accept.
+# "United States" matches "United States of America (+1)" outright.
+COUNTRY_CODE_RULE = (r"country\s*(phone\s*)?code|phone\s*country",
+                     "location.country")
 
 
 def match_rule(label: str) -> Optional[str]:
@@ -130,6 +136,8 @@ def match_rule(label: str) -> Optional[str]:
         return None
     if any(re.search(p, norm) for p in RULE_EXEMPT):
         return None
+    if re.search(COUNTRY_CODE_RULE[0], norm):
+        return COUNTRY_CODE_RULE[1]
     for pattern, path in RULES:
         if re.search(pattern, norm):
             return path
