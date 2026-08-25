@@ -476,8 +476,17 @@ class Worker:
         outcome.screenshot_path = self.screenshot(job, screenshot_dir)
         return outcome
 
+    # A learned recipe for a control that needed clicking through. Kept in the
+    # same store as any other taught answer; the separator is what tells them
+    # apart, so nothing else needed a new concept.
+    PATH_SEP = " > "
+
     def _write(self, f: Field, value: str) -> Optional[str]:
         """Write one field. Returns the value actually written, or None."""
+        if self.PATH_SEP in (value or "") and f.kind in (
+                "combobox", "select", "radio", "checkbox", "text"):
+            if written := self._replay_path(f, value):
+                return written
         ctx = self.frame_for(f)
         el = ctx.query_selector(f.selector)
         if el is None:
@@ -541,6 +550,43 @@ class Worker:
                     return text
         self.page.keyboard.press("Escape")
         return None
+
+    def _replay_path(self, f: Field, value: str) -> Optional[str]:
+        """Re-walk a click path that was worked out once and remembered.
+
+        This is what stops an awkward control costing a model call on every
+        future application: the first run figures out that Job Board has to be
+        opened before Handshake exists, and every run after it just clicks.
+        """
+        ctx = self.frame_for(f)
+        el = ctx.query_selector(f.selector)
+        if el is None or not _click(el):
+            return None
+        self.page.wait_for_timeout(600)
+
+        steps = [s.strip() for s in value.split(self.PATH_SEP) if s.strip()]
+        for step in steps:
+            found = None
+            for node in ctx.query_selector_all(
+                    "[role=option], [data-automation-id='promptOption'], "
+                    "li, button, [role=button]"):
+                try:
+                    if not node.is_visible():
+                        continue
+                except Exception:
+                    continue
+                if (node.inner_text() or "").strip() == step:
+                    found = node
+                    break
+            if found is None or not _click(found):
+                return None
+            self.page.wait_for_timeout(700)
+
+        try:
+            self.page.keyboard.press("Escape")
+        except Exception:
+            pass
+        return value
 
     def _write_choice(self, f: Field, el, value: str) -> Optional[str]:
         """Tick the member of a radio/checkbox group whose label is the answer.

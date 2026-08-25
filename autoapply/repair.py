@@ -224,6 +224,38 @@ def usable(value) -> str:
     return text
 
 
+def _explore(worker, field, profile, provider, store, ats, notes):
+    """Last resort for a control nothing knows how to drive."""
+    from .explore import solve_field
+    from .verify import _read_field
+
+    def read_value() -> str:
+        el = worker.frame_for(field).query_selector(field.selector)
+        if el is None:
+            return ""
+        try:
+            return (_read_field(worker.page, field, el)[0] or "").strip()
+        except Exception:
+            return ""
+
+    try:
+        value, path = solve_field(worker, field, profile, provider, read_value)
+    except Exception as exc:
+        notes.append(f"{field.label or field.id}: exploring failed ({exc})")
+        return None
+    if not value or not path:
+        return None
+
+    # The route, not the destination: a nested menu's answer is not reachable
+    # from the top level by name, so replaying the leaf alone would find
+    # nothing. Stored the same way a human correction is, so the deterministic
+    # pass produces it next run with no model involved.
+    recipe = " > ".join(path)
+    notes.append(f"{field.label or field.id}: worked out by exploring -> {recipe}")
+    _teach(store, ats, field.label, recipe)
+    return recipe
+
+
 def _teach(store, ats: str, label: str, value: str) -> None:
     """Record an answer so the deterministic pass produces it next time."""
     if store is None or not label or not usable(value):
@@ -340,8 +372,13 @@ def repair_step(worker, fields: list[Field], mappings: list[Mapping],
             notes.append(f"{field.label or field.id}: rewrite failed ({exc})")
             continue
         if written is None:
-            # The answer may be right and the widget simply not driveable by
-            # the current filler. Say so rather than counting it as fixed.
+            # The answer may be fine and the control simply not driveable by
+            # any code written so far. Rather than adding another hand-written
+            # routine for another widget, look at the page and work it out --
+            # and keep the click path, so the next run replays it without a
+            # model. A widget defeats this project once.
+            written = _explore(worker, field, profile, provider, store, ats, notes)
+        if written is None:
             notes.append(f"{field.label or field.id}: '{value}' would not stick")
             continue
 
