@@ -217,6 +217,47 @@ class Worker:
             return False
         return any(marker in path for marker in self.AUTH_URL_MARKERS)
 
+    # Signing in is attempted at most once per run. A second try after a
+    # refusal is how an account gets locked, and the credentials would be the
+    # same ones that just failed.
+    _tried_sign_in = False
+
+    def try_sign_in(self, job) -> tuple[bool, str]:
+        """Attempt the sign-in wall this run is stuck behind.
+
+        Returns (signed_in, detail). A failure is not an error: the caller
+        queues with the reason, which is what it did before this existed.
+        """
+        if self._tried_sign_in:
+            return False, "already attempted"
+        self._tried_sign_in = True
+
+        from ..login import LoginUnavailable, credentials_for, sign_in
+
+        creds = credentials_for(self.page.url) or credentials_for(job.url)
+        if not creds:
+            return False, "no credentials configured for this host"
+
+        waiter = None
+        try:
+            from ..mailcode import MailUnavailable, wait_for_code
+
+            def waiter(needles, _w=wait_for_code):           # noqa: E731
+                try:
+                    return _w(needles, timeout=int(
+                        os.getenv("MAIL_CODE_TIMEOUT", "180")))
+                except MailUnavailable:
+                    return None
+        except Exception:
+            waiter = None
+
+        try:
+            return sign_in(self, creds, wait_for_code=waiter)
+        except LoginUnavailable as exc:
+            return False, str(exc)
+        except Exception as exc:                    # never kill the run over it
+            return False, f"{type(exc).__name__}: {exc}"
+
     def discover(self) -> list[Field]:
         """Every frame, not just the top one -- embedded forms are the norm."""
         fields: list[Field] = []
@@ -355,10 +396,19 @@ class Worker:
         from .. import mapper
 
         self.open(job)
+        if self.needs_auth():
+            ok, detail = self.try_sign_in(job)
+            if ok:
+                # The form only exists past the wall; re-open so discovery sees
+                # the application rather than the sign-in page it replaced.
+                self.open(job)
         fields = self.discover()
         mappings = mapper.map_fields(fields, profile, job.ats,
                                      store=store, provider=provider)
-        return self.fill(job, fields, mappings, screenshot_dir)
+        outcome = self.fill(job, fields, mappings, screenshot_dir)
+        if not fields and self.needs_auth():
+            outcome.needs_auth = True
+        return outcome
 
     # ---- filling ---------------------------------------------------------
     def fill(self, job: Job, fields: list[Field], mappings: list[Mapping],
@@ -698,8 +748,14 @@ class WizardWorker(Worker):
                 outcome.saw_captcha = True
                 break
             if self.needs_auth():
-                outcome.needs_auth = True
-                break
+                ok, detail = self.try_sign_in(job)
+                outcome.errors.append(f"sign-in: {detail}")
+                if not ok:
+                    outcome.needs_auth = True
+                    break
+                # Signed in: the wizard is on the other side of that wall, so
+                # re-read the page rather than counting the step as done.
+                continue
 
             fields = self.discover()
             mappings = mapper.map_fields(fields, profile, job.ats,
