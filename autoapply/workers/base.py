@@ -757,6 +757,7 @@ class WizardWorker(Worker):
     def run(self, job: Job, profile: dict, store, provider,
             screenshot_dir: str) -> FillOutcome:
         from .. import mapper
+        from ..repair import repair_step
         from ..verify import verify_fields
 
         self.open(job)
@@ -790,6 +791,26 @@ class WizardWorker(Worker):
                                        outcome.filled_ids)
             outcome.verify_detail.update(detail)
             all_ok = all_ok and ok
+
+            # A wizard validates on Save and Continue: if it rejects the step it
+            # re-renders it with the offending fields marked, and we are still
+            # standing on the same step. That rejection names exactly what is
+            # wrong, which is a better critic than anything we could ask, so
+            # repair from it and try to move on again. Whatever works is written
+            # to the corrections store, so the next application answers it right
+            # the first time instead of relearning it here.
+            if not self.at_review() and self.advance():
+                repaired, notes = repair_step(
+                    self, fields, mappings, profile, provider=provider,
+                    store=store, ats=job.ats)
+                outcome.errors.extend(notes)
+                if repaired:
+                    ok2, detail2 = verify_fields(self.page, fields, mappings,
+                                                 outcome.filled_ids)
+                    outcome.verify_detail.update(detail2)
+                    all_ok = all_ok and ok2
+                    self.advance()
+                continue
 
             if self.at_review() or not self.advance():
                 break
