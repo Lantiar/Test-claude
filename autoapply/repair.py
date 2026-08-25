@@ -275,6 +275,23 @@ def _teach(store, ats: str, label: str, value: str) -> None:
     _PENDING.setdefault(id(store), {})[label] = (ats, value)
 
 
+def teach_paths(store, worker, fields, ats: str) -> None:
+    """Stage the click routes that filled fields this step.
+
+    A route is what makes the answer reproducible; the value alone is not.
+    Staged like any other lesson, so it is only written if the form accepts
+    the step.
+    """
+    paths = getattr(worker, "pending_paths", None)
+    if not paths:
+        return
+    for field in fields:
+        route = paths.get(field.id)
+        if route and field.label:
+            _teach(store, ats, field.label, route)
+    paths.clear()
+
+
 # label -> (ats, value), per store, awaiting the form's verdict on the step.
 _PENDING: dict[int, dict[str, tuple[str, str]]] = {}
 

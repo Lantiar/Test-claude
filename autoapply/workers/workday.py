@@ -351,15 +351,24 @@ class WorkdayWorker(WizardWorker):
             if not _click(match[0]):
                 break
             self.page.wait_for_timeout(900)
-            if chip():
+            if committed := chip():
                 self.page.keyboard.press("Escape")
                 self.page.wait_for_timeout(200)
-                # The route, not just the destination. This value is what gets
-                # taught, and "Handshake" alone is not on the top-level menu --
-                # replaying it next run would find nothing and fail. The chip
-                # text still matches this for verification, since one contains
-                # the other.
-                return self.PATH_SEP.join(walked)
+                # Two different answers are wanted here, and returning one for
+                # both marked a correctly filled field as missing:
+                #
+                #   verify FAIL How Did You Hear About Us?*
+                #               want=Job Board got=1 item selected, Handshake
+                #
+                # Clicking the category Job Board leaves a chip reading
+                # Handshake, so verification has to compare against the chip.
+                # Teaching needs the opposite -- the route, since Handshake is
+                # not on the top-level menu and replaying it would find
+                # nothing. So the route is stashed and the chip is returned.
+                if self.pending_paths is None:
+                    self.pending_paths = {}
+                self.pending_paths[f.id] = self.PATH_SEP.join(walked)
+                return committed
 
         self.page.keyboard.press("Escape")
         self.page.wait_for_timeout(200)

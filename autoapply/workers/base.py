@@ -147,6 +147,11 @@ class Worker:
     # produces a convincing "Thank you for applying" while the real form in the
     # frame was never sent.
     form_frame_url: str = ""
+    # field id -> the click path that filled it. Kept apart from the value
+    # because they answer different questions: verification needs what the form
+    # now shows ("Handshake"), and teaching needs the route that got there
+    # ("Job Board > Handshake"), since the leaf is not on the top-level menu.
+    pending_paths: dict[str, str] | None = None
     form_selector = "form"
     submit_selector = "button[type=submit]"
     # Text that means the application landed. Checked after submit; without a
@@ -892,7 +897,7 @@ class WizardWorker(Worker):
             screenshot_dir: str) -> FillOutcome:
         from .. import mapper
         from ..repair import (audit_step, commit_lessons, drop_lessons,
-                              repair_step)
+                              repair_step, teach_paths)
         from ..verify import verify_fields
 
         log = _log.get(f"wizard.{self.ats}")
@@ -980,6 +985,10 @@ class WizardWorker(Worker):
                 for note in audit_notes:
                     log.debug("  audit: %s", _log.brief(note, 120))
                 outcome.errors.extend(audit_notes)
+
+            # Routes worked out while filling are staged with everything else,
+            # so they are learned only if this step is accepted.
+            teach_paths(store, self, fields, job.ats)
 
             ok, detail = verify_fields(self.page, fields, mappings,
                                        outcome.filled_ids)
