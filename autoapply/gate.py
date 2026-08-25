@@ -59,6 +59,14 @@ def blockers(outcome: FillOutcome, store=None, profile: dict | None = None,
     elif not outcome.filled_ids:
         reasons.append("nothing was filled")
 
+    # A wizard that stalls on step one still fills and verifies everything on
+    # that step, so verified reads True and nothing else here objects -- while
+    # the five steps behind it were never opened. Submitting on that basis
+    # would send a part-filled application, and the run reported "auto mode
+    # would have submitted" while it was in fact stuck.
+    if not outcome.reached_end:
+        reasons.append("the application flow did not reach its review step")
+
     if outcome.saw_captcha:
         reasons.append("CAPTCHA present")
     if outcome.needs_auth:

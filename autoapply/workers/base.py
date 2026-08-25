@@ -784,6 +784,7 @@ class WizardWorker(Worker):
             if self.saw_captcha():
                 log.info("step %d: captcha present, stopping", step_no)
                 outcome.saw_captcha = True
+                outcome.reached_end = False
                 break
             if self.needs_auth():
                 log.info("step %d: sign-in wall at %s", step_no, self.page.url)
@@ -792,6 +793,7 @@ class WizardWorker(Worker):
                 outcome.errors.append(f"sign-in: {detail}")
                 if not ok:
                     outcome.needs_auth = True
+                    outcome.reached_end = False
                     break
                 # Signed in: the wizard is on the other side of that wall, so
                 # re-read the page rather than counting the step as done.
@@ -812,6 +814,7 @@ class WizardWorker(Worker):
                             "looping", step_no, repeats + 1)
                 outcome.errors.append(
                     f"stuck on the same step after {repeats + 1} attempts")
+                outcome.reached_end = False
                 break
 
             mappings = mapper.map_fields(fields, profile, job.ats,
@@ -883,8 +886,17 @@ class WizardWorker(Worker):
                     self.advance()
                 continue
 
-            if self.at_review() or not self.advance():
+            if self.at_review():
+                log.info("step %d: reached the review step", step_no)
                 break
+            if not self.advance():
+                log.info("step %d: nothing to advance with, stopping", step_no)
+                outcome.reached_end = False
+                break
+        else:
+            log.warning("ran out of steps (max %d) before reaching review",
+                        self.max_steps)
+            outcome.reached_end = False
 
         outcome.saw_captcha = outcome.saw_captcha or self.saw_captcha()
         outcome.needs_auth = outcome.needs_auth or self.needs_auth()

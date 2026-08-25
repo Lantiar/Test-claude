@@ -143,3 +143,26 @@ def test_registration_is_off_unless_the_host_opts_in():
     accounts = {"example.com": {"email": "a@b.c", "password": "x"}}
     creds = credentials_for("https://example.com/apply", accounts)
     assert not creds.get("allow_account_creation")
+
+
+def test_a_wizard_that_never_reached_review_cannot_submit():
+    """A stalled wizard looks perfect from the gate's side.
+
+    It fills and verifies everything on the step it is stuck on, so verified is
+    True, nothing is missing, and the run reported "auto mode would have
+    submitted" while it had in fact never left step one of eight. Submitting
+    there sends a part-filled application under the candidate's name.
+    """
+    job = Job(url="https://x.wd1.myworkdayjobs.com/j", ats="workday")
+    outcome = FillOutcome(
+        job=job,
+        fields=[Field(id="a", selector="#a", label="First name", required=True)],
+        mappings=[Mapping(field_id="a", action="fill", value="Nideesh",
+                          label="First name")],
+        filled_ids=["a"], verified=True, reached_end=False,
+    )
+    reasons = blockers(outcome, None)
+    assert any("review step" in r for r in reasons), reasons
+
+    outcome.reached_end = True
+    assert not any("review step" in r for r in blockers(outcome, None))

@@ -66,6 +66,12 @@ class FillOutcome:
     needs_auth: bool = False
     filled_ok: bool = False
     verified: bool = False
+    # Did a multi-step flow actually get to the end? A wizard that stalls on
+    # step one still fills and verifies everything on that step, so verified
+    # says True and the gate sees nothing wrong -- while five later steps were
+    # never even opened. Single-page workers leave this True; only the wizard
+    # clears it, and only when it stopped somewhere other than the review page.
+    reached_end: bool = True
     verify_detail: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
