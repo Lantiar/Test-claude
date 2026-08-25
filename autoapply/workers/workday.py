@@ -13,6 +13,7 @@ import re
 
 from typing import Optional
 
+from ..mapper import match_rule
 from ..models import Field
 from .base import WizardWorker, query_first
 
@@ -150,15 +151,82 @@ class WorkdayWorker(WizardWorker):
             elif textarea is not None:
                 kind, selector = "textarea", f"{FORM_FIELD}[data-automation-id='{automation_id}'] textarea"
             elif len(radios) >= 2:
-                kind, selector = "radio", f"{FORM_FIELD}[data-automation-id='{automation_id}']"
+                # The inputs, not the container: the group readback checks each
+                # member's .checked, and handed a div it finds none and falls
+                # back to the container's text -- which is the question. That is
+                # why a correctly selected "No" verified as the question itself.
+                kind = "radio"
+                selector = (f"{FORM_FIELD}[data-automation-id='{automation_id}'] "
+                            "input[type=radio]")
             elif len(checkboxes) == 1:
                 kind, selector = "checkbox", f"{FORM_FIELD}[data-automation-id='{automation_id}'] input[type=checkbox]"
             else:
                 kind, selector = "text", f"{FORM_FIELD}[data-automation-id='{automation_id}'] input"
 
+            # Without the real choices the model cannot answer a question the
+            # profile does not cover -- "Phone Device Type" stayed unknown every
+            # run because nothing ever told anyone that Mobile was on offer.
+            options: list[str] = []
+            if kind == "radio":
+                # Read from the labels already in the DOM: no interaction, so
+                # no risk of disturbing the control.
+                options = self._radio_labels(box)
+            elif kind == "select" and match_rule(label) is None:
+                # Opening a dropdown is the only way to see its choices, and
+                # doing it to every dropdown on the page disturbs them -- the
+                # ones a rule can already answer came back unfillable. So pay
+                # that cost only where the answer is otherwise unknown, which
+                # is exactly the case the options are needed for.
+                options = self._listbox_options(box)
+
             fields.append(Field(id=fid, selector=selector, label=label,
-                                kind=kind, required=required))
+                                kind=kind, required=required, options=options))
         return fields
+
+    def _radio_labels(self, box) -> list[str]:
+        """The choices in a radio group, read without touching the page."""
+        labels: list[str] = []
+        for radio in box.query_selector_all("input[type=radio]"):
+            text = ""
+            rid = radio.get_attribute("id") or ""
+            if rid:
+                lab = box.query_selector(f"label[for='{rid}']")
+                if lab is not None:
+                    text = (lab.inner_text() or "").strip()
+            if not text:
+                text = (radio.get_attribute("value") or "").strip()
+            if text and text not in labels:
+                labels.append(text)
+        return labels
+
+    def _listbox_options(self, box) -> list[str]:
+        """Open a Workday dropdown far enough to read it, then close it.
+
+        The options are rendered only while it is open, so there is no way to
+        know them at discovery time without opening it.
+        """
+        button = box.query_selector("button[aria-haspopup='listbox']")
+        if button is None:
+            return []
+        try:
+            button.click()
+            self.page.wait_for_timeout(450)
+            texts = []
+            for el in self.page.query_selector_all(
+                    "li[role=option], div[data-automation-id='promptOption'], [role=option]"):
+                try:
+                    if not el.is_visible():
+                        continue
+                except Exception:
+                    continue
+                text = (el.inner_text() or "").strip()
+                if text and text not in texts:
+                    texts.append(text)
+            self.page.keyboard.press("Escape")
+            self.page.wait_for_timeout(150)
+            return texts
+        except Exception:
+            return []
 
     def _label_for(self, box, automation_id: str) -> str:
         for sel in ("label", "legend", "[id$='-label']"):
@@ -209,17 +277,9 @@ class WorkdayWorker(WizardWorker):
             button.click()          # close the listbox we opened
             return None
 
-        if f.kind == "radio":
-            box = self.page.query_selector(f.selector)
-            if box is None:
-                return None
-            for radio in box.query_selector_all("input[type=radio]"):
-                rid = radio.get_attribute("id") or ""
-                label = box.query_selector(f"label[for='{rid}']") if rid else None
-                text = (label.inner_text() if label else "") or radio.get_attribute("value") or ""
-                if text.strip().lower() == value.strip().lower():
-                    radio.check()
-                    return text.strip()
-            return None
-
+        # Radio groups fall through to the base worker. It matches the answer
+        # against the members' labels with the same resolver the options were
+        # read with, so "No" still finds "No" and a long-form option still
+        # matches a short profile answer -- this override only did exact
+        # case-insensitive equality and returned None for everything else.
         return super()._write(f, value)
