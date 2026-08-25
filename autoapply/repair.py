@@ -105,6 +105,7 @@ REPAIR_SYSTEM = (
     "profile plus ordinary common sense about what the question is asking.\n"
     "Rules:\n"
     "- If the field lists options, return exactly one of them, verbatim.\n"
+    "- If the field lists options and the profile's answer is not among them, pick the offered option closest to the truth of it. Return null only when every option would be false -- a field can only be answered with what it offers, and leaving a required one empty stops the application.\\n"
     "- Never invent a fact about the candidate. If the profile does not support "
     "an answer and no option is obviously right, return null.\n"
     "- Read the question carefully: a field asking for a phone EXTENSION is not "
@@ -171,7 +172,7 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
         if mapping is None:
             continue
         field = by_id.get(mapping.field_id)
-        value = item.get("value")
+        value = usable(item.get("value"))
         why = item.get("why") or "audited as wrong"
         if not value:
             notes.append(f"{mapping.label}: flagged ({why}), no replacement offered")
@@ -206,12 +207,26 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
 # learning at all -- a wrong taught answer outranks the rules that follow it.
 _NOT_AN_ANSWER = re.compile(r"^(select|choose)\b|^-{2,}|^please\s+select$", re.I)
 
+# A model asked for JSON null sometimes replies with the *word*. "null" is a
+# perfectly truthy Python string, so it was accepted as an answer and typed
+# into the form -- the run reported: How Did You Hear About Us?: 'null' would
+# not stick. Declining has to survive the round trip through JSON.
+_NULL_WORDS = {"null", "none", "nil", "n/a", "na", "undefined", "unknown", "-"}
+
+
+def usable(value) -> str:
+    """The answer a model gave, or "" when it actually declined."""
+    text = ("" if value is None else str(value)).strip()
+    if not text or text.lower() in _NULL_WORDS:
+        return ""
+    if _NOT_AN_ANSWER.match(text):
+        return ""
+    return text
+
 
 def _teach(store, ats: str, label: str, value: str) -> None:
     """Record an answer so the deterministic pass produces it next time."""
-    if store is None or not label or not value:
-        return
-    if _NOT_AN_ANSWER.match(value.strip()):
+    if store is None or not label or not usable(value):
         return
     from .mapper import signature
     try:
@@ -315,7 +330,7 @@ def repair_step(worker, fields: list[Field], mappings: list[Mapping],
 
     for entry, field, mapping in targets:
         fix = suggested.get(_norm(field.label or field.id))
-        value = (fix or {}).get("value")
+        value = usable((fix or {}).get("value"))
         if not value:
             notes.append(f"{field.label or field.id}: no better answer available")
             continue
