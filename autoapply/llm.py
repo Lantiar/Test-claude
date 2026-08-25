@@ -18,11 +18,40 @@ SYSTEM = (
 )
 
 
+ANSWER_SYSTEM = (
+    "You answer job-application questions on a candidate's behalf, using ONLY "
+    "the facts in the profile you are given.\n"
+    "Rules:\n"
+    "- Never invent facts. No employer, date, credential, degree, salary or "
+    "authorization that is not in the profile.\n"
+    "- If the profile does not support an answer, return null for that field. "
+    "A null is always better than a guess.\n"
+    "- Reason from the profile where the answer follows from it. If the profile "
+    "says the candidate is authorized to work in the United States and needs no "
+    "sponsorship, then a question about work authorization in a DIFFERENT "
+    "country is answered from that fact, not assumed to be the same.\n"
+    "- If the field lists options, return exactly one of them, verbatim.\n"
+    "- For yes/no questions return exactly \"Yes\" or \"No\".\n"
+    "- For free-text questions write 1-3 truthful sentences grounded in the "
+    "profile. No placeholders, no invented enthusiasm about specifics you were "
+    "not told.\n"
+    "- confidence is 0.0-1.0: how well the profile supports the answer."
+)
+
+
 class LLMProvider(Protocol):
     name: str
 
     def map_fields(self, fields: list[dict], profile: dict) -> dict[str, dict]:
         """{field_id: {"profile_path": str|None, "confidence": float}}"""
+
+    def answer_fields(self, fields: list[dict], profile: dict) -> dict[str, dict]:
+        """Answer questions no profile path covers.
+
+        {field_id: {"value": str|None, "confidence": float}}. Returning None is
+        the correct result whenever the profile does not support an answer --
+        an unanswered required field blocks auto-submit, an invented one does not.
+        """
 
     def generate(self, prompt: str, profile: dict) -> str:
         """Free text for an open question (cover letter, 'why this company')."""
@@ -43,6 +72,9 @@ class RulesProvider:
     name = "rules"
 
     def map_fields(self, fields, profile):
+        return {}
+
+    def answer_fields(self, fields, profile):
         return {}
 
     def generate(self, prompt, profile):
@@ -80,6 +112,28 @@ class AnthropicProvider:
             m.field_id: {"profile_path": m.profile_path, "confidence": m.confidence}
             for m in resp.parsed_output.mappings
         }
+
+    def answer_fields(self, fields, profile):
+        from pydantic import BaseModel
+
+        class Answer(BaseModel):
+            field_id: str
+            value: str | None
+            confidence: float
+
+        class Answers(BaseModel):
+            answers: list[Answer]
+
+        resp = self.client.messages.parse(
+            model=self.model,
+            max_tokens=4096,
+            system=ANSWER_SYSTEM,
+            thinking={"type": "adaptive"},
+            messages=[{"role": "user", "content": _prompt(fields, profile)}],
+            output_format=Answers,
+        )
+        return {a.field_id: {"value": a.value, "confidence": a.confidence}
+                for a in resp.parsed_output.answers}
 
     def generate(self, prompt, profile):
         resp = self.client.messages.create(
@@ -136,11 +190,38 @@ class OpenAICompatProvider:
             for m in data.get("mappings", []) if m.get("field_id")
         }
 
+    def answer_fields(self, fields, profile):
+        raw = self._chat(
+            ANSWER_SYSTEM + ' Reply with JSON only: {"answers":[{"field_id":..,'
+                            '"value":..,"confidence":0.0-1.0}]}',
+            _prompt(fields, profile),
+        )
+        return _parse_answers(raw)
+
     def generate(self, prompt, profile):
         return self._chat(
             "Write a concise, truthful answer using only the profile facts given.",
             prompt + "\n\n" + json.dumps(profile),
         ).strip()
+
+
+def _parse_answers(raw: str) -> dict[str, dict]:
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end < 0:
+        return {}
+    try:
+        data = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError:
+        return {}
+    out: dict[str, dict] = {}
+    for a in data.get("answers", []):
+        fid = a.get("field_id")
+        if not fid:
+            continue
+        value = a.get("value")
+        out[fid] = {"value": None if value in (None, "", "null") else str(value),
+                    "confidence": float(a.get("confidence", 0) or 0)}
+    return out
 
 
 def get_provider(name: str | None = None) -> LLMProvider:

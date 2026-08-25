@@ -144,6 +144,30 @@ def resolve_option(value: str, options: list[str]) -> Optional[str]:
     return None
 
 
+# Below this the model is telling us the profile does not back the answer.
+MIN_ANSWER_CONFIDENCE = 0.25
+
+_FREE_TEXT_PROMPT = (
+    "Answer this job-application question in 2-4 sentences, in the first "
+    "person, using only facts from the profile.\n\n"
+    "Question: {question}\n\n"
+    "Do not invent employers, projects, dates or credentials. Do not claim "
+    "specific knowledge of the company's products that the profile does not "
+    "support -- write about what the candidate has actually done and what they "
+    "want to work on. No salutation, no sign-off, no placeholders."
+)
+
+
+def _is_free_text(f: Field) -> bool:
+    """A prompt wanting prose, not a value to look up."""
+    if f.kind == "textarea":
+        return True
+    label = (f.label or "").lower()
+    return (len(label) > 60 and label.rstrip("* ").endswith("?")) or any(
+        p in label for p in ("why are you", "why do you", "tell us", "describe",
+                             "cover letter", "in your own words"))
+
+
 def map_fields(fields: list[Field], profile: dict, ats: str,
                store=None, provider=None) -> list[Mapping]:
     """Rules -> cache -> LLM. Anything still unanswered is `unknown`."""
@@ -170,7 +194,16 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
             unresolved.append(f)
             continue
 
-        mappings.append(_build(f, path, profile, source, RULE_CONFIDENCE))
+        built = _build(f, path, profile, source, RULE_CONFIDENCE)
+        if built.action == "unknown" and f.options:
+            # A rule matched the label but its value is not one of the choices
+            # actually on the form: "are you currently enrolled?" pattern-matches
+            # the education rules, but the form wants Yes/No, not a school name.
+            # The model can pick from the real list, so let it try before this
+            # gives up.
+            unresolved.append(f)
+            continue
+        mappings.append(built)
 
     # Only genuinely novel fields reach the model.
     if unresolved and provider is not None and provider.name != "rules":
@@ -188,6 +221,12 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
                 still.append(f)
                 continue
             m = _build(f, path, profile, "llm", float(hint.get("confidence", 0.5)))
+            if m.action == "unknown" and f.options:
+                # Same trap as the rules branch: a plausible profile path whose
+                # value is not one of the form's choices. Hand it to the
+                # answering pass, which sees the options themselves.
+                still.append(f)
+                continue
             mappings.append(m)
             if store is not None and m.action == "fill":
                 # Unconfirmed until a human sees it once — same bar as any other
@@ -195,6 +234,66 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
                 store.cache_put(signature(ats, f.label), ats, f.label, "fill",
                                 path, m.confidence, unconfirmed=True)
         unresolved = still
+
+    # Second model pass: questions no profile *path* answers, but the profile's
+    # facts still do -- "do you have permission to work in the UK?" follows from
+    # a US-only authorization, and "why this role?" from the education and
+    # experience already on file. Path-mapping structurally cannot express
+    # either, so without this every such field stays unknown and every
+    # application with one is blocked.
+    if unresolved and provider is not None and provider.name != "rules":
+        payload = [{"field_id": f.id, "label": f.label, "kind": f.kind,
+                    "options": f.options, "required": f.required}
+                   for f in unresolved]
+        try:
+            answers = provider.answer_fields(payload, profile)
+        except Exception:
+            answers = {}
+        still = []
+        for f in unresolved:
+            hint = answers.get(f.id) or {}
+            value, confidence = hint.get("value"), float(hint.get("confidence", 0.5))
+            # The model reports how well the profile backs each answer. Filling
+            # one it scored at ~zero is exactly the invented answer the whole
+            # design is trying to avoid, so treat it as unanswered and let the
+            # gate block instead.
+            if value and confidence < MIN_ANSWER_CONFIDENCE:
+                value = None
+            if not value:
+                still.append(f)
+                continue
+            if f.kind in ("select", "radio", "combobox") and f.options:
+                # The model must land on a real option, not paraphrase one.
+                value = resolve_option(value, f.options) or ""
+                if not value:
+                    still.append(f)
+                    continue
+            mappings.append(Mapping(field_id=f.id, action="fill", value=value,
+                                    confidence=confidence,
+                                    source="llm-answer", label=f.label))
+        unresolved = still
+
+        # Free-text prompts ("why this company?", "describe a project") get
+        # their own call each. Asked as one of eight in a batch the model
+        # answers the easy ones and returns null for these; asked on its own it
+        # writes the answer. This is what provider.generate() is for.
+        rest = []
+        for f in unresolved:
+            if not _is_free_text(f):
+                rest.append(f)
+                continue
+            try:
+                text = (provider.generate(_FREE_TEXT_PROMPT.format(question=f.label),
+                                          profile) or "").strip()
+            except Exception:
+                text = ""
+            if not text:
+                rest.append(f)
+                continue
+            mappings.append(Mapping(field_id=f.id, action="generate", value=text,
+                                    confidence=0.5, source="llm-generate",
+                                    label=f.label))
+        unresolved = rest
 
     for f in unresolved:
         mappings.append(Mapping(field_id=f.id, action="unknown", label=f.label))
@@ -208,7 +307,7 @@ def _build(f: Field, path: str, profile: dict, source: str, confidence: float) -
         # Optional and unanswerable is fine; required and unanswerable blocks auto.
         return Mapping(field_id=f.id, action="unknown" if f.required else "skip",
                        source=source, label=f.label)
-    if f.kind in ("select", "radio"):
+    if f.kind in ("select", "radio", "combobox") and f.options:
         chosen = resolve_option(value, f.options)
         if chosen is None:
             return Mapping(field_id=f.id, action="unknown", source=source, label=f.label)

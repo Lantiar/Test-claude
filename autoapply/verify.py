@@ -7,9 +7,12 @@ as an escalation for unknown ATSs, not as the first tier.
 """
 from __future__ import annotations
 
+import os
+import re
+
 from .models import FillOutcome
 
-READ_JS = """
+READ_JS = r"""
 (el) => {
   if (!el) return '';
   if (el.tagName === 'SELECT') {
@@ -20,11 +23,57 @@ READ_JS = """
   // they have no .value to read.
   if (el.tagName === 'BUTTON') return (el.innerText || '').trim();
   if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? 'on' : '';
-  if (el.type === 'file') return (el.files && el.files.length) ? el.files[0].name : '';
+  if (el.type === 'file') {
+    if (el.files && el.files.length) return el.files[0].name;
+    // Most ATSs swap the input for a "resume.pdf  Remove" chip once the upload
+    // lands, so the input itself reads back empty even though the file is
+    // attached. Look for a filename in the surrounding container before
+    // concluding nothing was uploaded.
+    let n = el.parentElement, hops = 0;
+    while (n && hops++ < 4) {
+      const m = (n.innerText || '').match(/[^\s\/\\]+\.(pdf|docx?|txt|rtf)\b/i);
+      if (m) return m[0];
+      n = n.parentElement;
+    }
+    return '';
+  }
   if ('value' in el) return el.value || '';
   return (el.innerText || '').trim();
 }
 """
+
+
+# A combobox commits its choice to the widget's display, clearing the input it
+# was typed into, so el.value reads empty on a field that is correctly set.
+READ_COMBO_JS = r"""
+(el) => {
+  // react-select and friends show the committed choice in a *sibling* of the
+  // input (single-value / multi-value), while the input's own container holds
+  // only the input and therefore reads empty.
+  let n = el, hops = 0;
+  while (n && hops++ < 6) {
+    if (n.querySelector) {
+      const sv = n.querySelector('[class*="single-value"], [class*="singleValue"],'
+                               + ' [class*="multi-value"], [class*="multiValue"]');
+      if (sv && sv.innerText && sv.innerText.trim()) return sv.innerText.trim();
+    }
+    n = n.parentElement;
+  }
+  const box = el.closest('[class*="control"], [class*="select"]') || el.parentElement;
+  const text = box ? (box.innerText || '') : '';
+  const first = text.split('\n').map(s => s.trim()).filter(Boolean)[0];
+  return first || el.value || '';
+}
+"""
+
+
+def _read(page, el, kind: str) -> str:
+    return page.evaluate(READ_COMBO_JS if kind == "combobox" else READ_JS, el)
+
+
+def _squash(s: str) -> str:
+    """Strip everything a form widget is free to reformat."""
+    return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
 def _matches(expected: str, actual: str, kind: str) -> bool:
@@ -32,10 +81,20 @@ def _matches(expected: str, actual: str, kind: str) -> bool:
     if not a:
         return False
     if kind == "file":
-        return a in e or e.endswith(a)          # browsers report basename only
+        # Compare basenames: we hold a path, the DOM reports a filename.
+        e = os.path.basename(e)
+        return a in e or e.endswith(a) or e in a
     if kind in ("checkbox", "radio"):
         return a == "on"
-    return e == a or e in a or a in e           # selects normalize whitespace/case
+    if e == a or e in a or a in e:              # selects normalize whitespace/case
+        return True
+    # Widgets rewrite what they are given -- an intl phone input turns
+    # "224-333-1045" into "2243331045", a date picker re-punctuates, a currency
+    # field adds separators. Byte-equality would call every one of those a
+    # verification failure, so fall back to comparing the characters that carry
+    # the meaning.
+    se, sa = _squash(e), _squash(a)
+    return bool(se) and bool(sa) and (se == sa or se in sa or sa in se)
 
 
 def verify_fields(page, fields, mappings, filled_ids: list[str]) -> tuple[bool, dict]:
@@ -52,7 +111,7 @@ def verify_fields(page, fields, mappings, filled_ids: list[str]) -> tuple[bool, 
             continue
         try:
             el = page.query_selector(f.selector)
-            actual = page.evaluate(READ_JS, el) if el else ""
+            actual = _read(page, el, f.kind) if el else ""
         except Exception as exc:
             detail[m.field_id] = {"label": f.label, "error": str(exc)}
             ok = False
@@ -80,7 +139,7 @@ def verify(page, outcome: FillOutcome) -> FillOutcome:
             continue
         try:
             el = page.query_selector(f.selector)
-            actual = page.evaluate(READ_JS, el) if el else ""
+            actual = _read(page, el, f.kind) if el else ""
         except Exception as exc:
             actual, exc_note = "", str(exc)
             detail[m.field_id] = {"label": f.label, "error": exc_note}

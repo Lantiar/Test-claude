@@ -114,6 +114,14 @@ class Worker:
             kind = ("textarea" if tag == "textarea"
                     else "select" if tag == "select"
                     else itype)
+            # react-select and friends render a listbox behind a plain text
+            # input. Typing into it sets no value -- the widget only commits
+            # when an option is chosen -- so it needs the click/type/pick path,
+            # not the native setter.
+            if kind not in ("select", "textarea") and (
+                    (el.get_attribute("role") or "") == "combobox"
+                    or (el.get_attribute("aria-autocomplete") or "") == "list"):
+                kind = "combobox"
             label = (self.page.evaluate(LABEL_JS, el) or "").strip()
             name = el.get_attribute("name") or ""
             fid = el.get_attribute("id") or name or f"field-{idx}"
@@ -123,6 +131,12 @@ class Worker:
                 or "*" in label
 
             options: list[str] = []
+            if kind == "combobox":
+                # The choices only exist while the menu is open, so read them
+                # now: the mapper can only pick a real option if it can see the
+                # real list, and "How did you hear about us?" never contains the
+                # profile's wording verbatim.
+                options = self._probe_options(el)
             if kind == "select":
                 options = [
                     (o.inner_text() or o.get_attribute("value") or "").strip()
@@ -208,8 +222,114 @@ class Worker:
             if str(value).strip().lower() in ("yes", "true", "1", "on"):
                 el.check()
             return value
+        if f.kind == "combobox":
+            return self._write_combobox(el, value)
         self.page.evaluate(SET_VALUE_JS, [el, value])
         return value
+
+    def _write_combobox(self, el, value: str) -> Optional[str]:
+        """Open the listbox, filter to the value, take the best real option.
+
+        The options only exist once it is open, so they cannot be read at
+        discovery time; and the listbox has to be scoped to this widget --
+        several are usually mounted at once (an international phone input keeps
+        a 200-entry country list in the DOM permanently), so an unscoped
+        [role=option] sweep picks up somebody else's menu.
+        """
+        from ..mapper import resolve_option
+
+        el.click()
+        self.page.wait_for_timeout(250)
+        try:
+            el.type(value, delay=20)
+        except Exception:
+            self.page.keyboard.type(value, delay=20)
+        self.page.wait_for_timeout(600)
+
+        options = self._combobox_options(el)
+
+        if options:
+            chosen = resolve_option(value, [text for _, text in options])
+            if chosen is None:
+                # No real option means this answer. Taking the first one would
+                # put a fabricated answer on the form under the candidate's
+                # name, so leave it unset and let the gate block on it.
+                self.page.keyboard.press("Escape")
+                return None
+            for opt, text in options:
+                if text == chosen:
+                    opt.click()
+                    self.page.wait_for_timeout(250)
+                    return text
+        self.page.keyboard.press("Escape")
+        return None
+
+    def _probe_options(self, el) -> list[str]:
+        """Open a combobox just long enough to read its choices, then close it."""
+        try:
+            el.click()
+            self.page.wait_for_timeout(350)
+            texts = [text for _, text in self._combobox_options(el)]
+            self.page.keyboard.press("Escape")
+            self.page.wait_for_timeout(120)
+            return texts
+        except Exception:
+            return []
+
+    # Walk up from the input to the nearest ancestor that actually contains
+    # options. Scoping by ancestry rather than a page-wide [role=option] sweep
+    # is what keeps one widget from reading another's menu -- an international
+    # phone input keeps a 200-entry country listbox mounted at all times, and an
+    # unscoped query hands you Afghanistan for every question on the page.
+    OPTION_SCOPE_JS = """
+    (el) => {
+      let n = el, hops = 0;
+      while (n && hops++ < 8) {
+        if (n.querySelector && n.querySelector('[role=option]')) return n;
+        n = n.parentElement;
+      }
+      return null;
+    }
+    """
+
+    def _combobox_options(self, el) -> list:
+        """Visible [role=option] belonging to this combobox, nearest scope first."""
+        options: list = []
+        scope = None
+        try:
+            handle = self.page.evaluate_handle(self.OPTION_SCOPE_JS, el)
+            scope = handle.as_element()
+        except Exception:
+            scope = None
+
+        candidates = []
+        if scope is not None:
+            candidates.append(scope.query_selector_all("[role=option]"))
+        # A menu rendered into a portal is not an ancestor of the input, so fall
+        # back to the listbox this input names, then to any open one.
+        owns = None
+        try:
+            owns = el.get_attribute("aria-controls") or el.get_attribute("aria-owns")
+        except Exception:
+            pass
+        if owns:
+            candidates.append(self.page.query_selector_all(
+                f"#{css_escape(owns)} [role=option]"))
+        candidates.append(self.page.query_selector_all("[role=listbox] [role=option]"))
+
+        for group in candidates:
+            for opt in group:
+                try:
+                    if not opt.is_visible():
+                        continue
+                except Exception:
+                    continue
+                text = (opt.inner_text() or "").strip()
+                if text:
+                    options.append((opt, text))
+            if options:
+                break
+        return options
 
     def screenshot(self, job: Job, directory: str) -> str:
         # Wizard steps fill with no directory; only the final page is captured.
