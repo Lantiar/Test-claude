@@ -152,6 +152,57 @@ def _first(scope, selectors, allow_account_creation: bool = False):
     return None
 
 
+def _click(el) -> bool:
+    """Click a control that something else may be painted on top of.
+
+    Workday renders its real <button> and then covers it with
+    div[data-automation-id="click_filter"][role=button], which carries the same
+    aria-label and the actual handler. A plain click on the button underneath
+    never lands -- Playwright waits for it to stop being obscured and times out
+    after 30s, which is what both the sign-in and create-account clicks were
+    doing. So: scroll it into view, and if something stands on top of it that
+    represents the same control, click that instead.
+    """
+    try:
+        el.scroll_into_view_if_needed(timeout=5000)
+    except Exception:
+        pass
+
+    try:
+        handle = el.evaluate_handle(
+            """el => {
+                 const r = el.getBoundingClientRect();
+                 const top = document.elementFromPoint(r.left + r.width / 2,
+                                                       r.top + r.height / 2);
+                 if (!top || top === el || el.contains(top)) return null;
+                 const norm = n => ((n.getAttribute('aria-label') || n.innerText || '')
+                                    .trim().toLowerCase());
+                 const a = norm(top), b = norm(el);
+                 if (!a || !b) return null;
+                 return (a === b || a.includes(b) || b.includes(a)) ? top : null;
+               }""")
+        proxy = handle.as_element()
+        if proxy is not None:
+            proxy.click(timeout=8000)
+            return True
+    except Exception:
+        pass
+
+    try:
+        el.click(timeout=8000)
+        return True
+    except Exception:
+        pass
+
+    # Last resort: dispatch the click directly, which ignores pointer-event
+    # interception entirely.
+    try:
+        el.evaluate("e => e.click()")
+        return True
+    except Exception:
+        return False
+
+
 def _on_registration_form(frames) -> bool:
     """Is this the Create Account form rather than the sign-in one?
 
@@ -237,8 +288,8 @@ def _clear_code(worker, creds: dict, wait_for_code, say) -> tuple[bool, str]:
     say("filled the code")
     btn, _ = _find(worker.frames(), SUBMIT_SELECTORS)
     if btn is not None:
+        _click(btn)
         try:
-            btn.click()
             page.wait_for_load_state("networkidle", timeout=25000)
         except Exception:
             pass
@@ -278,12 +329,10 @@ def sign_in(worker, creds: dict, wait_for_code=None, log=None) -> tuple[bool, st
         switch, _ = _find_switch(worker.frames())
         if switch is None:
             return False, "on a create-account form with no sign-in link"
-        try:
-            switch.click()
-            page.wait_for_timeout(3000)
-            say("switched from create-account to the sign-in form")
-        except Exception as exc:
-            return False, f"could not reach the sign-in form: {exc}"
+        if not _click(switch):
+            return False, "could not click the sign-in link"
+        page.wait_for_timeout(3500)
+        say("switched from create-account to the sign-in form")
         if _on_registration_form(worker.frames()):
             return False, "still on the create-account form after clicking sign-in"
 
@@ -300,7 +349,7 @@ def sign_in(worker, creds: dict, wait_for_code=None, log=None) -> tuple[bool, st
         btn, _ = _find(worker.frames(), SUBMIT_SELECTORS)
         if btn is None:
             return False, "no password field and nothing to advance with"
-        btn.click()
+        _click(btn)
         page.wait_for_timeout(3500)
         pw, pw_frame = _find(worker.frames(), PASSWORD_SELECTORS)
         if pw is None:
@@ -311,7 +360,8 @@ def sign_in(worker, creds: dict, wait_for_code=None, log=None) -> tuple[bool, st
     btn, _ = _find(worker.frames(), SUBMIT_SELECTORS)
     if btn is None:
         return False, "no submit button on the sign-in page"
-    btn.click()
+    if not _click(btn):
+        return False, "could not click the sign-in button"
     try:
         page.wait_for_load_state("networkidle", timeout=25000)
     except Exception:
@@ -349,12 +399,9 @@ def create_account(worker, creds: dict, wait_for_code=None,
         switch, _ = _first_in(worker.frames(), CREATE_SWITCH_SELECTORS,
                               allow_account_creation=True)
         if switch is not None:
-            try:
-                switch.click()
-                page.wait_for_timeout(2500)
-                say("switched to the create-account form")
-            except Exception:
-                pass
+            _click(switch)
+            page.wait_for_timeout(2500)
+            say("switched to the create-account form")
 
     el, frame = _find(worker.frames(), EMAIL_SELECTORS)
     if el is None:
@@ -384,10 +431,8 @@ def create_account(worker, creds: dict, wait_for_code=None,
                        allow_account_creation=True)
     if btn is None:
         return False, "no create-account button"
-    try:
-        btn.click()
-    except Exception as exc:
-        return False, f"create-account click failed: {exc}"
+    if not _click(btn):
+        return False, "could not click the create-account button"
     try:
         page.wait_for_load_state("networkidle", timeout=25000)
     except Exception:
