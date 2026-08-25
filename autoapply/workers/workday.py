@@ -186,6 +186,14 @@ class WorkdayWorker(WizardWorker):
                 # Read from the labels already in the DOM: no interaction, so
                 # no risk of disturbing the control.
                 options = self._radio_labels(box)
+            elif kind == "combobox" and (required or match_rule(label) is None):
+                # Read these even when a rule answers them, because the rule's
+                # answer is often not on the menu: the profile says the source
+                # was a "Company website" and this tenant offers only Job Board,
+                # Talent Acquisition Team and University/College. Without the
+                # list nothing can tell that the answer is unusable, so the
+                # write silently fails and the step never validates.
+                options = self._multiselect_options(box)
             elif kind == "select" and match_rule(label) is None:
                 # Opening a dropdown is the only way to see its choices, and
                 # doing it to every dropdown on the page disturbs them -- the
@@ -213,6 +221,42 @@ class WorkdayWorker(WizardWorker):
             if text and text not in labels:
                 labels.append(text)
         return labels
+
+    def _multiselect_options(self, box) -> list[str]:
+        """The choices a multiselect offers, read by opening it briefly.
+
+        Scoped to the leaf nodes of the menu this widget opened: several
+        prompt menus can be mounted at once -- the Country Phone Code picker
+        sits right beside this one -- and an unscoped sweep mixes their
+        options together.
+        """
+        el = box.query_selector("input")
+        if el is None:
+            return []
+        try:
+            if not _click(el):
+                return []
+            self.page.wait_for_timeout(700)
+            texts: list[str] = []
+            for sel in ("[data-automation-id='promptLeafNode']",
+                        "[data-automation-id='promptOption']"):
+                for opt in self.page.query_selector_all(sel):
+                    try:
+                        if not opt.is_visible():
+                            continue
+                    except Exception:
+                        continue
+                    text = (opt.inner_text() or "").strip()
+                    if (text and not PLACEHOLDER_OPTION.match(text)
+                            and text not in texts):
+                        texts.append(text)
+                if texts:
+                    break
+            self.page.keyboard.press("Escape")
+            self.page.wait_for_timeout(200)
+            return texts
+        except Exception:
+            return []
 
     def _listbox_options(self, box) -> list[str]:
         """Open a Workday dropdown far enough to read it, then close it.
