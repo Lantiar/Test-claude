@@ -162,16 +162,49 @@ class Worker:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
 
-    def settle_after_sign_in(self, timeout_ms: int = 30000) -> bool:
-        """Wait for the form to render once a sign-in wall is behind us."""
-        deadline = time.time() + timeout_ms / 1000
-        while time.time() < deadline:
+    # Single-page apps fail to load a step and say so. Workday renders
+    # "Something went wrong -- Please refresh the page" while still showing the
+    # progress bar and the signed-in header, so the run reads it as a page with
+    # no fields and gives up on an application that only needed reloading.
+    TRANSIENT_ERROR_MARKERS = ("something went wrong", "please refresh",
+                               "try again later", "unexpected error")
+
+    def showing_transient_error(self) -> bool:
+        for frame in self.frames():
             try:
-                if self.discover():
-                    return True
+                text = (frame.inner_text("body") or "").lower()
             except Exception:
-                pass
-            self.page.wait_for_timeout(500)
+                continue
+            if any(m in text for m in self.TRANSIENT_ERROR_MARKERS):
+                return True
+        return False
+
+    def settle_after_sign_in(self, timeout_ms: int = 30000,
+                             reloads: int = 2) -> bool:
+        """Wait for the form to render once a sign-in wall is behind us."""
+        log = _log.get(f"worker.{self.ats}")
+        for attempt in range(reloads + 1):
+            deadline = time.time() + timeout_ms / 1000
+            while time.time() < deadline:
+                try:
+                    if self.discover():
+                        return True
+                except Exception:
+                    pass
+                if self.showing_transient_error():
+                    break
+                self.page.wait_for_timeout(500)
+
+            if attempt >= reloads:
+                break
+            log.info("page did not render (%s); reloading",
+                     "error shown" if self.showing_transient_error()
+                     else "timed out")
+            try:
+                self.page.reload(wait_until="domcontentloaded")
+                self.page.wait_for_timeout(3000)
+            except Exception:
+                break
         return False
 
     def frames(self) -> list:
