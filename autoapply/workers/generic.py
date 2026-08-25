@@ -12,7 +12,7 @@ fallback is for.
 """
 from __future__ import annotations
 
-from .base import Worker
+from .base import Worker, query_first
 
 
 class GenericWorker(Worker):
@@ -27,3 +27,44 @@ class GenericWorker(Worker):
         "a:has-text('Sign in')", "button:has-text('Sign in')",
         "a:has-text('Create account')", "button:has-text('Create account')",
     )
+
+    def open(self, job):
+        super().open(job)
+        # A company careers page is often a shell around a real ATS: AMD's
+        # careers.amd.com posting is an AMD-branded wrapper whose Apply button
+        # goes to campus-amd.icims.com. Discovery on the wrapper finds nothing
+        # useful, so follow the link through to the ATS that actually holds the
+        # form and let the normal machinery take it from there.
+        target = self._ats_apply_link()
+        if target:
+            try:
+                self.page.goto(target, wait_until="domcontentloaded")
+                self.page.wait_for_timeout(2500)
+            except Exception:
+                pass
+
+    def _ats_apply_link(self) -> str | None:
+        """An Apply link pointing at a different host we recognise as an ATS."""
+        from urllib.parse import urljoin, urlparse
+
+        from ..router import detect
+
+        here = urlparse(self.page.url).hostname or ""
+        best = None
+        for a in self.page.query_selector_all("a[href]"):
+            href = (a.get_attribute("href") or "").strip()
+            if not href or href.startswith(("#", "javascript:", "mailto:")):
+                continue
+            url = urljoin(self.page.url, href)
+            host = urlparse(url).hostname or ""
+            if not host or host == here:
+                continue
+            if detect(url) == "unknown":
+                continue
+            text = ((a.inner_text() or "") + " " + href).lower()
+            # Prefer an actual Apply control; a careers page also links to the
+            # ATS from "Returning User Login", which lands on a sign-in wall.
+            if "apply" in text:
+                return url
+            best = best or url
+        return best

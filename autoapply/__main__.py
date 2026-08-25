@@ -27,10 +27,18 @@ def main(argv: list[str] | None = None) -> int:
     a = sub.add_parser("apply", help="apply to one job link")
     a.add_argument("url")
     a.add_argument("--mode", choices=["approve", "auto"], default=None)
-    a.add_argument("--ats", choices=["greenhouse", "lever"], default=None,
+    a.add_argument("--ats", default=None,
                    help="force a worker when host detection can't identify the ATS")
     a.add_argument("--dry-run", action="store_true",
                    help="fill and verify but never submit, whatever the mode")
+
+    m = sub.add_parser("mailcode",
+                       help="wait for a verification code in a NEW email")
+    m.add_argument("--contains", required=True,
+                   help="comma-separated words that must appear in the sender "
+                        "or subject, e.g. workday,mastercard. Required: an "
+                        "unfiltered wait would read whatever arrives first.")
+    m.add_argument("--timeout", type=int, default=180)
 
     sub.add_parser("stats", help="show counts")
     q = sub.add_parser("queue", help="list the review queue")
@@ -38,6 +46,20 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     store = Store()
+
+    if args.cmd == "mailcode":
+        from .mailcode import MailUnavailable, wait_for_code
+        needles = [c.strip() for c in args.contains.split(",") if c.strip()]
+        try:
+            code = wait_for_code(needles, timeout=args.timeout)
+        except MailUnavailable as exc:
+            print(f"mail unavailable: {exc}")
+            return 2
+        if code:
+            print(code)
+            return 0
+        print(f"no matching message in {args.timeout}s")
+        return 1
 
     if args.cmd == "stats":
         for k, v in store.stats().items():

@@ -87,18 +87,30 @@ READ_CHOICE_JS = r"""
 """
 
 
+def _ctx(page, f):
+    """The frame a field lives in: a selector only resolves against its own."""
+    url = getattr(f, "frame_url", "")
+    if not url:
+        return page
+    for fr in page.frames:
+        if fr.url == url:
+            return fr
+    return page
+
+
 def _read(page, el, kind: str) -> str:
     return page.evaluate(READ_COMBO_JS if kind == "combobox" else READ_JS, el)
 
 
 def _read_field(page, f, el) -> tuple[str, str]:
     """(value read back, kind to compare it as)."""
+    ctx = _ctx(page, f)
     if f.kind in ("radio", "checkbox") and f.options:
         try:
-            return page.eval_on_selector_all(f.selector, READ_CHOICE_JS), "text"
+            return ctx.eval_on_selector_all(f.selector, READ_CHOICE_JS), "text"
         except Exception:
             return "", "text"
-    return _read(page, el, f.kind), f.kind
+    return _read(ctx, el, f.kind), f.kind
 
 
 def _squash(s: str) -> str:
@@ -140,7 +152,7 @@ def verify_fields(page, fields, mappings, filled_ids: list[str]) -> tuple[bool, 
         if f is None:
             continue
         try:
-            el = page.query_selector(f.selector)
+            el = _ctx(page, f).query_selector(f.selector)
             actual, cmp_kind = _read_field(page, f, el) if el else ("", f.kind)
         except Exception as exc:
             detail[m.field_id] = {"label": f.label, "error": str(exc)}
@@ -168,7 +180,7 @@ def verify(page, outcome: FillOutcome) -> FillOutcome:
         if f is None:
             continue
         try:
-            el = page.query_selector(f.selector)
+            el = _ctx(page, f).query_selector(f.selector)
             actual, cmp_kind = _read_field(page, f, el) if el else ("", f.kind)
         except Exception as exc:
             detail[m.field_id] = {"label": f.label, "error": str(exc)}

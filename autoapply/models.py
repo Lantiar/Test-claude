@@ -39,6 +39,10 @@ class Field:
     kind: str = "text"           # text|email|tel|textarea|select|file|checkbox|radio
     required: bool = False
     options: list[str] = field(default_factory=list)   # for select/radio
+    # Which frame the field lives in. Embedded boards (an iCIMS login, a
+    # Greenhouse form dropped into a company careers page) render inside an
+    # iframe, and a selector only resolves against the frame that holds it.
+    frame_url: str = ""
 
 
 @dataclass

@@ -139,6 +139,12 @@ SET_VALUE_JS = r"""
 
 class Worker:
     ats = "generic"
+    # Set during fill: the frame the filled fields live in. Submitting has to
+    # happen there. An outer page can carry a button that looks like the form's
+    # submit and is not -- the iframed fixture has exactly that, and clicking it
+    # produces a convincing "Thank you for applying" while the real form in the
+    # frame was never sent.
+    form_frame_url: str = ""
     form_selector = "form"
     submit_selector = "button[type=submit]"
     # Text that means the application landed. Checked after submit; without a
@@ -154,8 +160,39 @@ class Worker:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
 
+    def frames(self) -> list:
+        """Main frame first, then any child frame with real content.
+
+        Application forms are routinely embedded: an iCIMS login, a Greenhouse
+        board dropped into a company careers page. Searching only the main frame
+        finds nothing on those and reports the page as empty markup.
+        """
+        out = [self.page.main_frame]
+        for fr in self.page.frames:
+            if fr is self.page.main_frame:
+                continue
+            url = (fr.url or "")
+            if not url or url == "about:blank":
+                continue
+            out.append(fr)
+        return out
+
+    def frame_for(self, f: Field):
+        """The frame a discovered field belongs to, falling back to the page."""
+        if not f.frame_url:
+            return self.page
+        for fr in self.page.frames:
+            if fr.url == f.frame_url:
+                return fr
+        return self.page
+
     def saw_captcha(self) -> bool:
-        html = self.page.content().lower()
+        html = ""
+        for fr in self.frames():
+            try:
+                html += (fr.content() or "").lower()
+            except Exception:
+                continue
         for negative in NON_CAPTCHA_MARKERS:
             html = html.replace(negative, "")
         return any(m in html for m in CAPTCHA_MARKERS)
@@ -164,12 +201,33 @@ class Worker:
     auth_selectors: tuple[str, ...] = ()
 
     def needs_auth(self) -> bool:
-        return query_first(self.page, self.auth_selectors) is not None
+        return any(query_first(fr, self.auth_selectors) is not None
+                   for fr in self.frames())
 
     def discover(self) -> list[Field]:
+        """Every frame, not just the top one -- embedded forms are the norm."""
+        fields: list[Field] = []
+        seen_ids: set[str] = set()
+        for frame in self.frames():
+            try:
+                found = self._discover_in(frame)
+            except Exception:
+                continue
+            for f in found:
+                # The same form often appears both standalone and re-embedded
+                # in a child frame; keep the first sighting of each field.
+                key = f"{f.id}|{f.label}"
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                fields.append(f)
+        return fields
+
+    def _discover_in(self, frame) -> list[Field]:
         fields: list[Field] = []
         groups: dict[str, Field] = {}
-        root = self.page.query_selector(self.form_selector) or self.page
+        frame_url = "" if frame is self.page.main_frame else (frame.url or "")
+        root = frame.query_selector(self.form_selector) or frame
         for idx, el in enumerate(root.query_selector_all("input, textarea, select")):
             try:
                 if not el.is_visible():
@@ -194,7 +252,7 @@ class Worker:
                     (el.get_attribute("role") or "") == "combobox"
                     or (el.get_attribute("aria-autocomplete") or "") == "list"):
                 kind = "combobox"
-            label = (self.page.evaluate(LABEL_JS, el) or "").strip()
+            label = (frame.evaluate(LABEL_JS, el) or "").strip()
             name = el.get_attribute("name") or ""
             fid = el.get_attribute("id") or name or f"field-{idx}"
 
@@ -206,7 +264,7 @@ class Worker:
             # question as its label and the members' labels as its options.
             if itype in ("radio", "checkbox"):
                 gname = el.get_attribute("name") or ""
-                gkey = (self.page.evaluate(GROUP_KEY_JS, el) or "").strip()
+                gkey = (frame.evaluate(GROUP_KEY_JS, el) or "").strip()
                 # A fieldset outranks the name attribute: Ashby names each
                 # checkbox after its own label, so name-keying splits a real
                 # group into one field per option. Radios without a fieldset
@@ -222,14 +280,14 @@ class Worker:
                         groups[key].options.append(label)
                     groups[key].required = groups[key].required or required
                     continue
-                gl = (self.page.evaluate(GROUP_LABEL_JS, el) or "").strip()
+                gl = (frame.evaluate(GROUP_LABEL_JS, el) or "").strip()
                 field = Field(
                     id=gkey or gname or fid,
                     selector=(f'[data-aa-group="{gkey}"] input[type={itype}]' if gkey
                               else f'{tag}[name="{gname}"]' if (itype == "radio" and gname)
                               else f'[id="{el.get_attribute("id") or fid}"]'),
                     label=gl or label, kind=itype, required=required,
-                    options=[label] if label else [],
+                    options=[label] if label else [], frame_url=frame_url,
                 )
                 groups[key] = field
                 fields.append(field)
@@ -241,7 +299,7 @@ class Worker:
                 # now: the mapper can only pick a real option if it can see the
                 # real list, and "How did you hear about us?" never contains the
                 # profile's wording verbatim.
-                options = self._probe_options(el)
+                options = self._probe_options(el, frame)
             if kind == "select":
                 options = [
                     (o.inner_text() or o.get_attribute("value") or "").strip()
@@ -263,7 +321,8 @@ class Worker:
                 selector = f"{self.form_selector} {tag}:nth-of-type({idx + 1})"
 
             fields.append(Field(id=fid, selector=selector, label=label or name,
-                                kind=kind, required=required, options=options))
+                                kind=kind, required=required, options=options,
+                                frame_url=frame_url))
 
         # A lone checkbox is a consent box, not a choice between options: keep
         # its own label so "I agree to the terms" is still answerable.
@@ -310,6 +369,12 @@ class Worker:
             except Exception as exc:                       # one field never kills the run
                 outcome.errors.append(f"{f.label or f.id}: {exc}")
 
+        for m in mappings:
+            f = by_id.get(m.field_id)
+            if f is not None and f.id in outcome.filled_ids:
+                self.form_frame_url = f.frame_url
+                break
+
         outcome.saw_captcha = self.saw_captcha()
         outcome.needs_auth = self.needs_auth()
         outcome.filled_ok = not outcome.missing_required
@@ -318,7 +383,8 @@ class Worker:
 
     def _write(self, f: Field, value: str) -> Optional[str]:
         """Write one field. Returns the value actually written, or None."""
-        el = self.page.query_selector(f.selector)
+        ctx = self.frame_for(f)
+        el = ctx.query_selector(f.selector)
         if el is None:
             return None
         if f.kind == "file":
@@ -339,11 +405,11 @@ class Worker:
         if f.kind in ("checkbox", "radio"):
             return self._write_choice(f, el, value)
         if f.kind == "combobox":
-            return self._write_combobox(el, value)
-        self.page.evaluate(SET_VALUE_JS, [el, value])
+            return self._write_combobox(el, value, ctx)
+        ctx.evaluate(SET_VALUE_JS, [el, value])
         return value
 
-    def _write_combobox(self, el, value: str) -> Optional[str]:
+    def _write_combobox(self, el, value: str, ctx=None) -> Optional[str]:
         """Open the listbox, filter to the value, take the best real option.
 
         The options only exist once it is open, so they cannot be read at
@@ -362,7 +428,7 @@ class Worker:
             self.page.keyboard.type(value, delay=20)
         self.page.wait_for_timeout(600)
 
-        options = self._combobox_options(el)
+        options = self._combobox_options(el, ctx)
 
         if options:
             chosen = resolve_option(value, [text for _, text in options])
@@ -396,10 +462,11 @@ class Worker:
                 return value
             return None
 
-        members = self.page.query_selector_all(f.selector)
+        ctx = self.frame_for(f)
+        members = ctx.query_selector_all(f.selector)
         labelled = []
         for m in members:
-            text = (self.page.evaluate(LABEL_JS, m) or "").strip()
+            text = (ctx.evaluate(LABEL_JS, m) or "").strip()
             if text:
                 labelled.append((m, text))
         if not labelled:
@@ -414,12 +481,12 @@ class Worker:
                 return text
         return None
 
-    def _probe_options(self, el) -> list[str]:
+    def _probe_options(self, el, frame=None) -> list[str]:
         """Open a combobox just long enough to read its choices, then close it."""
         try:
             el.click()
             self.page.wait_for_timeout(350)
-            texts = [text for _, text in self._combobox_options(el)]
+            texts = [text for _, text in self._combobox_options(el, frame)]
             self.page.keyboard.press("Escape")
             self.page.wait_for_timeout(120)
             return texts
@@ -442,12 +509,13 @@ class Worker:
     }
     """
 
-    def _combobox_options(self, el) -> list:
+    def _combobox_options(self, el, frame=None) -> list:
         """Visible [role=option] belonging to this combobox, nearest scope first."""
+        ctx = frame if frame is not None else self.page
         options: list = []
         scope = None
         try:
-            handle = self.page.evaluate_handle(self.OPTION_SCOPE_JS, el)
+            handle = ctx.evaluate_handle(self.OPTION_SCOPE_JS, el)
             scope = handle.as_element()
         except Exception:
             scope = None
@@ -463,9 +531,8 @@ class Worker:
         except Exception:
             pass
         if owns:
-            candidates.append(self.page.query_selector_all(
-                f'[id="{owns}"] [role=option]'))
-        candidates.append(self.page.query_selector_all("[role=listbox] [role=option]"))
+            candidates.append(ctx.query_selector_all(f'[id="{owns}"] [role=option]'))
+        candidates.append(ctx.query_selector_all("[role=listbox] [role=option]"))
 
         for group in candidates:
             for opt in group:
@@ -496,8 +563,20 @@ class Worker:
 
     # ---- submission ------------------------------------------------------
     def submit(self) -> tuple[bool, str]:
-        """Click submit and confirm the application actually landed."""
-        btn = query_first(self.page, (self.submit_selector,))
+        """Click submit, in the frame the form is in, and confirm it landed."""
+        scopes = []
+        if self.form_frame_url:
+            for fr in self.page.frames:
+                if fr.url == self.form_frame_url:
+                    scopes.append(fr)
+                    break
+        scopes.append(self.page)
+
+        btn = None
+        for scope in scopes:
+            btn = query_first(scope, (self.submit_selector,))
+            if btn is not None:
+                break
         if btn is None:
             return False, "submit button not visible"
         before = self.page.url

@@ -114,15 +114,14 @@ def test_icims_and_ashby_route_to_agent_lane():
 def test_empty_discovery_never_submits(tmp_path):
     """A page whose fields we cannot see must not be submitted.
 
-    The outer page here has a working submit button but every field is inside an
-    iframe, so discovery comes back empty. Nothing was filled, so nothing may be
-    sent — even though verification passes vacuously and there is a live submit
-    button one click away.
+    This page has a working submit button and no fillable field anywhere.
+    Nothing was filled, so nothing may be sent — even though verification passes
+    vacuously and there is a live submit button one click away.
     """
     os.environ["SCREENSHOT_DIR"] = str(tmp_path / "shots")
     os.environ["LLM_PROVIDER"] = "rules"          # no agent available to fall back to
     store = _store(tmp_path)
-    r = apply_to(_url("iframed.html"), mode="auto", store=store,
+    r = apply_to(_url("nofields.html"), mode="auto", store=store,
                  profile=PROFILE, ats_override="greenhouse")
 
     assert r.status != "applied", "submitted a form where nothing was filled"
@@ -135,8 +134,53 @@ def test_empty_discovery_reaches_for_the_agent(tmp_path):
     """Empty discovery is exactly what the agent lane is for, so it must try."""
     os.environ["SCREENSHOT_DIR"] = str(tmp_path / "shots")
     os.environ["LLM_PROVIDER"] = "rules"
-    r = apply_to(_url("iframed.html"), mode="auto", store=_store(tmp_path),
+    r = apply_to(_url("nofields.html"), mode="auto", store=_store(tmp_path),
                  profile=PROFILE, ats_override="greenhouse")
     # With no model configured the fallback can't run, but it must have been
     # attempted — that is what surfaces as "agent unavailable".
     assert "agent unavailable" in " ".join(r.gate.reasons)
+
+
+def test_iframed_form_is_discovered_and_filled(tmp_path):
+    """A form inside an iframe is the normal case, not an unreadable one.
+
+    iCIMS serves its form in a frame, and a company careers page routinely
+    embeds someone else's board. Discovery that only reads the top document
+    reports these as empty markup and hands them to the agent lane, which is
+    slower, costs a model call, and is not needed.
+    """
+    os.environ["SCREENSHOT_DIR"] = str(tmp_path / "shots")
+    os.environ["LLM_PROVIDER"] = "rules"
+    r = apply_to(_url("iframed.html"), mode="auto", store=_store(tmp_path),
+                 profile=PROFILE, ats_override="greenhouse")
+
+    assert r.outcome is not None and r.outcome.fields, "did not look inside the frame"
+    assert r.outcome.filled_ids, "found the frame's fields but filled none"
+    labels = {(m.label or "").lower() for m in r.outcome.mappings if m.action == "fill"}
+    assert any("first name" in x for x in labels)
+
+
+def test_submit_prefers_the_forms_own_frame(tmp_path):
+    """The button on the outer page is not this form's submit button.
+
+    iframed.html carries a decoy: an outer submit that swaps in a convincing
+    "Thank you for applying" while the real form in the frame was never sent.
+    Recording that as applied is the worst outcome the gate has -- a job marked
+    done that was never actually submitted.
+    """
+    from autoapply.browser import browser_page
+    from autoapply.workers.greenhouse import GreenhouseWorker
+
+    with browser_page() as page:
+        page.goto(_url("iframed.html"))
+        page.wait_for_timeout(600)
+        worker = GreenhouseWorker(page)
+        inner = [f.url for f in page.frames if f.url.endswith("greenhouse.html")]
+        assert inner, "fixture no longer has the inner form frame"
+
+        worker.form_frame_url = inner[0]
+        worker.submit()
+        # The decoy rewrites the OUTER document; if it still has its heading the
+        # click went to the frame, which is where the form is.
+        outer = page.main_frame.inner_text("body").lower()
+        assert "apply for software engineer" in outer, "clicked the outer decoy"

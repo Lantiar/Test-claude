@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Careers — Apply</title>
+<body>
+<!-- Genuinely unreadable markup: a live submit button and no fillable field
+     anywhere, in this document or any frame. Nothing was filled, so nothing may
+     be sent, however inviting that button looks.
+     (iframed.html used to serve this purpose, back when discovery could not see
+     into a frame. It can now, so it tests the opposite property.) -->
+<h1>Apply for Software Engineer</h1>
+<p>Application form loading…</p>
+<button type="submit" id="outer-submit">Submit Application</button>
+<script>
+document.getElementById('outer-submit').addEventListener('click', () => {
+  document.body.innerHTML =
+    '<h1>Thank you for applying</h1><p>Your application was submitted.</p>';
+});
+</script>
+</body>
