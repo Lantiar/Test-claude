@@ -10,6 +10,7 @@ import re
 import time
 from typing import Optional
 
+from .. import log as _log
 from ..models import Field, FillOutcome, Job, Mapping
 
 SKIP_TYPES = {"submit", "button", "reset", "image"}
@@ -251,10 +252,16 @@ class Worker:
         except Exception:
             waiter = None
 
+        log = _log.get("login")
+        log.info("attempting sign-in as %s at %s",
+                 creds.get("email"), _log.brief(self.page.url, 70))
         try:
-            ok, detail = sign_in(self, creds, wait_for_code=waiter)
+            ok, detail = sign_in(self, creds, wait_for_code=waiter,
+                                 log=lambda m: log.debug("  %s", m))
             if ok:
+                log.info("signed in")
                 return True, detail
+            log.info("sign-in did not go through: %s", detail)
         except LoginUnavailable as exc:
             return False, str(exc)
         except Exception as exc:                    # never kill the run over it
@@ -270,11 +277,15 @@ class Worker:
 
         from ..login import create_account
 
+        log.info("no account reached; registering (allow_account_creation on)")
         try:
             self.page.reload(wait_until="domcontentloaded")
             self.page.wait_for_timeout(2500)
-            made, made_detail = create_account(self, creds, wait_for_code=waiter)
+            made, made_detail = create_account(self, creds, wait_for_code=waiter,
+                                               log=lambda m: log.debug("  %s", m))
+            log.info("registration -> %s (%s)", made, made_detail)
         except Exception as exc:
+            log.warning("registration raised: %s", exc)
             return False, f"{detail}; create failed: {type(exc).__name__}: {exc}"
         return made, f"sign-in: {detail}; create: {made_detail}"
 
@@ -760,16 +771,21 @@ class WizardWorker(Worker):
         from ..repair import audit_step, repair_step
         from ..verify import verify_fields
 
+        log = _log.get(f"wizard.{self.ats}")
         self.open(job)
         outcome = FillOutcome(job=job)
         all_ok = True
+        seen_steps: list[str] = []
 
-        for _ in range(self.max_steps):
+        for step_no in range(1, self.max_steps + 1):
             if self.saw_captcha():
+                log.info("step %d: captcha present, stopping", step_no)
                 outcome.saw_captcha = True
                 break
             if self.needs_auth():
+                log.info("step %d: sign-in wall at %s", step_no, self.page.url)
                 ok, detail = self.try_sign_in(job)
+                log.info("step %d: sign-in -> %s (%s)", step_no, ok, detail)
                 outcome.errors.append(f"sign-in: {detail}")
                 if not ok:
                     outcome.needs_auth = True
@@ -779,9 +795,34 @@ class WizardWorker(Worker):
                 continue
 
             fields = self.discover()
+            # A wizard that cannot satisfy a step re-renders the same one, and
+            # without this the run spends every remaining iteration rediscovering
+            # it -- 13 passes over one page reported as 169 fields.
+            fingerprint = "|".join(sorted(f.id for f in fields))
+            repeats = seen_steps.count(fingerprint)
+            seen_steps.append(fingerprint)
+            log.info("step %d: %s -- %d field(s)%s", step_no,
+                     _log.brief(self.page.url, 80), len(fields),
+                     f" (seen {repeats + 1}x)" if repeats else "")
+            if repeats >= 2:
+                log.warning("step %d: same step %d times, stopping rather than "
+                            "looping", step_no, repeats + 1)
+                outcome.errors.append(
+                    f"stuck on the same step after {repeats + 1} attempts")
+                break
+
             mappings = mapper.map_fields(fields, profile, job.ats,
                                          store=store, provider=provider)
+            for m in mappings:
+                log.debug("  map %-34s %-9s %-12s %s",
+                          _log.brief(m.label or m.field_id, 34), m.action,
+                          m.source or "-", _log.brief(m.value, 40))
+
             step = self.fill(job, fields, mappings, screenshot_dir="")
+            log.info("step %d: filled %d/%d", step_no, len(step.filled_ids),
+                     len([m for m in mappings if m.action in ("fill", "generate")]))
+            for err in step.errors:
+                log.debug("  fill error: %s", _log.brief(err, 120))
             outcome.fields.extend(fields)
             outcome.mappings.extend(mappings)
             outcome.filled_ids.extend(step.filled_ids)
@@ -798,10 +839,19 @@ class WizardWorker(Worker):
                 self, fields, mappings, profile, provider=provider,
                 store=store, ats=job.ats)
             if audit_notes:
+                log.info("step %d: audit corrected %d", step_no, audited)
+                for note in audit_notes:
+                    log.debug("  audit: %s", _log.brief(note, 120))
                 outcome.errors.extend(audit_notes)
 
             ok, detail = verify_fields(self.page, fields, mappings,
                                        outcome.filled_ids)
+            for fid, d in detail.items():
+                if isinstance(d, dict) and d.get("ok") is False:
+                    log.debug("  verify FAIL %-28s want=%s got=%s",
+                              _log.brief(d.get("label", fid), 28),
+                              _log.brief(d.get("expected"), 30),
+                              _log.brief(d.get("actual"), 30))
             outcome.verify_detail.update(detail)
             all_ok = all_ok and ok
 
@@ -816,6 +866,11 @@ class WizardWorker(Worker):
                 repaired, notes = repair_step(
                     self, fields, mappings, profile, provider=provider,
                     store=store, ats=job.ats)
+                if notes:
+                    log.info("step %d: form rejected it, repaired %d",
+                             step_no, repaired)
+                    for note in notes:
+                        log.debug("  repair: %s", _log.brief(note, 120))
                 outcome.errors.extend(notes)
                 if repaired:
                     ok2, detail2 = verify_fields(self.page, fields, mappings,
