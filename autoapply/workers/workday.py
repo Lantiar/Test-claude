@@ -20,6 +20,9 @@ from .base import WizardWorker, query_first
 
 FORM_FIELD = "div[data-automation-id^='formField-']"
 
+# The prompt sitting at the top of a dropdown, which is not one of its choices.
+PLACEHOLDER_OPTION = re.compile(r"^(select|choose)\b|^-{2,}|^please\s+select", re.I)
+
 
 class WorkdayWorker(WizardWorker):
     ats = "workday"
@@ -222,7 +225,11 @@ class WorkdayWorker(WizardWorker):
                 except Exception:
                     continue
                 text = (el.inner_text() or "").strip()
-                if text and text not in texts:
+                # "Select One" is the prompt, not a choice. Offered as one, the
+                # model picked it for Phone Device Type and the form answered
+                # "The entered value is not one of the options provided" -- and
+                # it would have been taught as the answer for every later run.
+                if text and not PLACEHOLDER_OPTION.match(text) and text not in texts:
                     texts.append(text)
             self.page.keyboard.press("Escape")
             self.page.wait_for_timeout(150)

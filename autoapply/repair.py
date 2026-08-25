@@ -201,9 +201,17 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
     return fixed, notes
 
 
+# A dropdown prompt is not an answer. Teaching one would make every later run
+# fill the field with it and fail the same validation, which is worse than not
+# learning at all -- a wrong taught answer outranks the rules that follow it.
+_NOT_AN_ANSWER = re.compile(r"^(select|choose)\b|^-{2,}|^please\s+select$", re.I)
+
+
 def _teach(store, ats: str, label: str, value: str) -> None:
     """Record an answer so the deterministic pass produces it next time."""
-    if store is None or not label:
+    if store is None or not label or not value:
+        return
+    if _NOT_AN_ANSWER.match(value.strip()):
         return
     from .mapper import signature
     try:

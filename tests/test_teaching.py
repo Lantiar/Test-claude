@@ -106,3 +106,36 @@ def test_a_state_abbreviation_finds_the_full_name_in_a_dropdown():
     assert resolve_option("NJ", options) == "New Jersey"
     assert resolve_option("New Jersey", options) == "New Jersey"
     assert resolve_option("ZZ", options) is None
+
+
+def test_a_dropdown_prompt_is_never_taught_as_an_answer(tmp_path):
+    """"Select One" is the prompt at the top of a dropdown, not a choice.
+
+    Offered as an option the model picked it for Phone Device Type and the form
+    answered "The entered value is not one of the options provided". Teaching it
+    would be worse than not learning at all: a taught answer outranks the rules
+    below it, so every later run would fill the field with the prompt and fail
+    the same validation.
+    """
+    from autoapply.repair import _teach
+
+    store = _store(tmp_path)
+    field = Field(id="phoneType", selector="#phoneType", label="Phone Device Type",
+                  kind="select", options=["Mobile", "Home"], required=True)
+
+    for prompt in ("Select One", "Select...", "Choose an option", "--", ""):
+        _teach(store, "workday", "Phone Device Type", prompt)
+        assert map_fields([field], PROFILE, "workday", store=store)[0].source \
+            != "learned", f"taught the placeholder {prompt!r}"
+
+    _teach(store, "workday", "Phone Device Type", "Mobile")
+    assert map_fields([field], PROFILE, "workday", store=store)[0].value == "Mobile"
+
+
+def test_workday_dropdown_options_exclude_the_prompt():
+    from autoapply.workers.workday import PLACEHOLDER_OPTION
+
+    for prompt in ("Select One", "Select...", "Choose an option", "--"):
+        assert PLACEHOLDER_OPTION.match(prompt), prompt
+    for real in ("Mobile", "Home", "Selected Applicant"):
+        assert not PLACEHOLDER_OPTION.match(real), real
