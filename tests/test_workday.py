@@ -50,3 +50,51 @@ def test_workday_verifies_each_step_internally(tmp_path):
     from autoapply.workers.workday import WorkdayWorker
 
     assert WorkdayWorker.verifies_internally is True
+
+
+# --- regressions found against the live Blackstone tenant ---------------------
+
+import contextlib                                          # noqa: E402
+
+from autoapply.browser import browser_page                 # noqa: E402
+
+
+@contextlib.contextmanager
+def _page_with(html: str):
+    with browser_page() as page:
+        page.set_content(html)
+        yield page
+
+
+def test_workday_no_captcha_wrapper_is_not_a_captcha():
+    """Workday ships div[data-automation-id="noCaptchaWrapper"] on pages with no
+    challenge at all, so a bare "captcha" substring test fires on every Workday
+    page -- and the gate then blocks a submit that nothing was wrong with."""
+    from autoapply.workers.workday import WorkdayWorker
+    with _page_with("<div data-automation-id='noCaptchaWrapper'></div>"
+                    "<div data-automation-id='applyFlowPage'></div>") as page:
+        assert WorkdayWorker(page).saw_captcha() is False
+
+
+def test_workday_real_captcha_is_still_detected():
+    from autoapply.workers.workday import WorkdayWorker
+    with _page_with("<div data-automation-id='noCaptchaWrapper'></div>"
+                    "<div class='g-recaptcha' data-sitekey='x'></div>") as page:
+        assert WorkdayWorker(page).saw_captcha() is True
+
+
+def test_workday_account_wall_is_reported_as_auth():
+    """The Blackstone tenant gates the wizard behind Create Account and ships
+    none of the createAccountLink/createAccountPage ids the first selector list
+    relied on. Missing it sends the run to the agent lane, which the same wall
+    blocks -- so the queue reason has to name the wall, not empty markup."""
+    from autoapply.workers.workday import WorkdayWorker
+    with _page_with(
+        "<div data-automation-id='signInContent'>"
+        "<div data-automation-id='formField-email'><label>Email Address*</label>"
+        "<input data-automation-id='email'></div>"
+        "<div data-automation-id='formField-password'><label>Password*</label>"
+        "<input type='password' data-automation-id='password'></div>"
+        "<button data-automation-id='createAccountSubmitButton'>Create Account</button>"
+        "</div>") as page:
+        assert WorkdayWorker(page).needs_auth() is True

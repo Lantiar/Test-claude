@@ -14,6 +14,11 @@ from ..models import Field, FillOutcome, Job, Mapping
 
 SKIP_TYPES = {"submit", "button", "reset", "image"}
 CAPTCHA_MARKERS = ("recaptcha", "hcaptcha", "cf-turnstile", "captcha")
+# Markers that contain "captcha" but mean the opposite. Workday renders a
+# placeholder div[data-automation-id="noCaptchaWrapper"] on pages with no
+# challenge at all, so a bare substring test reports a CAPTCHA on every
+# Workday page -- and the gate then blocks a submit that nothing was wrong with.
+NON_CAPTCHA_MARKERS = ("nocaptchawrapper", "nocaptcha", "no-captcha")
 
 # Reads the label for a control the way a person would: explicit <label for>,
 # ARIA, an ancestor label, the nearest preceding text, then placeholder/name.
@@ -80,6 +85,8 @@ class Worker:
 
     def saw_captcha(self) -> bool:
         html = self.page.content().lower()
+        for negative in NON_CAPTCHA_MARKERS:
+            html = html.replace(negative, "")
         return any(m in html for m in CAPTCHA_MARKERS)
 
     # Selectors that mean "you must sign in or create an account to continue".
@@ -349,7 +356,12 @@ class WizardWorker(Worker):
 
         outcome.saw_captcha = outcome.saw_captcha or self.saw_captcha()
         outcome.needs_auth = outcome.needs_auth or self.needs_auth()
-        outcome.verified = all_ok and not outcome.missing_required
+        # bool(outcome.fields) matters: a wizard that breaks out on step one
+        # (auth wall, CAPTCHA) has discovered nothing, so all_ok is still True
+        # and missing_required is still empty -- "verified" would be true of a
+        # form we never even read.
+        outcome.verified = (all_ok and not outcome.missing_required
+                            and bool(outcome.fields))
         outcome.filled_ok = not outcome.missing_required
         outcome.screenshot_path = self.screenshot(job, screenshot_dir)
         return outcome

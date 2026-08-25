@@ -23,6 +23,14 @@ def browser_page(storage_state: str | None = None):
         launch["executable_path"] = exe
     if proxy := os.getenv("HTTPS_PROXY") or os.getenv("https_proxy"):
         launch["proxy"] = {"server": proxy}
+    # Some inspecting proxies reset the connection on Chromium's TLS 1.3
+    # ClientHello (it is ~1.7kB with GREASE and split across segments, where
+    # curl's fits one small segment) -- the tunnel opens, then dies mid-handshake
+    # for every host. Capping the offer at TLS 1.2 shrinks the hello enough to
+    # get through. Opt-in only: this is a sandbox workaround, not a default,
+    # and it never disables certificate verification.
+    if tls_max := os.getenv("AUTOAPPLY_TLS_MAX"):
+        launch.setdefault("args", []).append(f"--ssl-version-max={tls_max}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(**launch)

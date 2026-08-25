@@ -17,7 +17,7 @@ from typing import Callable
 
 from . import mapper, router
 from .browser import browser_page
-from .gate import safety_gate
+from .gate import blockers, safety_gate
 from .judge import judge
 from .llm import get_provider
 from .models import ApplyResult, FillOutcome, GateResult, Job
@@ -156,8 +156,16 @@ def _decide(job: Job, outcome: FillOutcome, mode: str, store, dry_run: bool,
     gate = safety_gate(job, outcome, mode, store=store)
 
     if dry_run:
-        return ApplyResult(job, outcome, GateResult("queue", ["dry run"]),
-                           "queued", "dry run: nothing submitted")
+        # Report the verdict rather than discarding it: the point of a dry run
+        # is to see what a real submit would hit, and "dry run" alone says only
+        # what the operator already typed.
+        would_block = blockers(outcome, store)
+        detail = ("dry run: nothing submitted; would block on "
+                  + "; ".join(would_block)) if would_block else (
+                  "dry run: nothing submitted; auto mode would have submitted")
+        return ApplyResult(job, outcome,
+                           GateResult("queue", ["dry run"] + would_block),
+                           "queued", detail)
 
     if gate.decision == "submit":
         ok, detail = submitter()

@@ -27,7 +27,17 @@ KILL_SWITCH = "data/STOP"
 def safety_gate(job: Job, outcome: FillOutcome, mode: str, store=None) -> GateResult:
     if mode != "auto":
         return GateResult("queue", ["approve mode"])
+    reasons = blockers(outcome, store)
+    return GateResult("submit" if not reasons else "queue", reasons)
 
+
+def blockers(outcome: FillOutcome, store=None) -> list[str]:
+    """Everything that would make this submission wrong, independent of mode.
+
+    Split out from safety_gate so a dry run can report what *would* stop a real
+    submit. Without it a dry run only ever says "dry run", which is the one
+    thing the operator already knows.
+    """
     reasons: list[str] = []
 
     if os.path.exists(os.getenv("KILL_SWITCH", KILL_SWITCH)):
@@ -58,4 +68,4 @@ def safety_gate(job: Job, outcome: FillOutcome, mode: str, store=None) -> GateRe
     if not outcome.verified:
         reasons.append("verification failed")
 
-    return GateResult("submit" if not reasons else "queue", reasons)
+    return reasons

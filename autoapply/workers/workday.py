@@ -8,6 +8,7 @@ control type together.
 """
 from __future__ import annotations
 
+import os
 import re
 
 from typing import Optional
@@ -36,10 +37,17 @@ class WorkdayWorker(WizardWorker):
     )
     submit_selector = ("button[data-automation-id='bottom-navigation-submit-button'], "
                        "button:has-text('Submit')")
+    # Tag-agnostic on purpose: tenants render these as either <a> or <button>,
+    # and the Blackstone tenant ships none of the *createAccountLink*/
+    # *createAccountPage* ids the older list relied on -- it gates the wizard
+    # behind a Create Account step whose tells are the password pair and the
+    # account submit button.
     auth_selectors = (
-        "button[data-automation-id='createAccountLink']",
-        "button[data-automation-id='signInLink']",
-        "div[data-automation-id='createAccountPage']",
+        "[data-automation-id='createAccountLink']",
+        "[data-automation-id='signInLink']",
+        "[data-automation-id='createAccountPage']",
+        "[data-automation-id='createAccountSubmitButton']",
+        "input[data-automation-id='verifyPassword']",
         "input[data-automation-id='password']",
     )
     confirm_patterns = (
@@ -49,30 +57,68 @@ class WorkdayWorker(WizardWorker):
         r"we('| ha)ve received your application",
     )
 
+    # Each hop below waits for the state it expects instead of sleeping a fixed
+    # span. Workday is a single-page app whose controls render well after
+    # domcontentloaded -- on a live tenant the old fixed 1.5s/2s waits expired
+    # while the job page was still blank, so the worker never left the job
+    # description, discovered zero fields, and the run fell through to the agent.
+    APPLY_SELECTORS = ("a[data-automation-id='adventureButton']",
+                       "button[data-automation-id='adventureButton']",
+                       "a:has-text('Apply')", "button:has-text('Apply')")
+    MANUAL_SELECTORS = ("a[data-automation-id='applyManually']",
+                        "button[data-automation-id='applyManually']",
+                        "a:has-text('Apply Manually')",
+                        "button:has-text('Apply Manually')")
+    # Any of these means a hop landed: the wizard, or the account wall that
+    # guards it. Both are real destinations -- needs_auth() tells them apart.
+    # Deliberately *not* div[data-automation-id='applyFlowPage']: that is the
+    # outer shell and it mounts before the step content, so waiting on it
+    # returns while the page is still empty and discovery sees nothing.
+    LANDED_SELECTORS = (FORM_FIELD,
+                        "[data-automation-id='signInContent']",
+                        "[data-automation-id='createAccountSubmitButton']",
+                        "input[data-automation-id='password']")
+
+    # Live tenants can take many seconds to render; fixtures and direct apply
+    # links render at once. Overridable so a slow tenant can be given more.
+    nav_timeout = int(os.getenv("AUTOAPPLY_NAV_TIMEOUT_MS", "30000"))
+
+    def _settle(self, selectors: tuple[str, ...]) -> bool:
+        """Wait until any of these is visible. False if none arrives in time."""
+        joined = ", ".join(selectors)
+        try:
+            self.page.wait_for_selector(joined, state="visible",
+                                        timeout=self.nav_timeout)
+            return True
+        except Exception:
+            return False
+
     def open(self, job):
-        super().open(job)
+        self.page.goto(job.url, wait_until="domcontentloaded")
         # The job page has an Apply button before the wizard exists; "Apply
         # Manually" is preferred over Workday's own resume parser, which fills
         # badly and then has to be corrected field by field.
-        for sel in ("a[data-automation-id='adventureButton']",
-                    "button[data-automation-id='adventureButton']",
-                    "a:has-text('Apply')", "button:has-text('Apply')"):
-            btn = query_first(self.page, (sel,))
+        # Wait for the Apply control *or* the form itself: a direct apply link
+        # (and the test fixture) has no Apply button, and waiting on one that
+        # will never appear would burn the whole timeout before discovery.
+        if self._settle(self.APPLY_SELECTORS + self.LANDED_SELECTORS):
+            btn = query_first(self.page, self.APPLY_SELECTORS)
             if btn is not None:
                 try:
                     btn.click()
-                    self.page.wait_for_timeout(2000)
                 except Exception:
                     pass
-                break
-        manual = query_first(self.page, ("a[data-automation-id='applyManually']",
-                                         "button:has-text('Apply Manually')"))
+                # Apply either opens the manual/autofill choice or goes straight
+                # into the flow, so wait for whichever of those turns up.
+                self._settle(self.MANUAL_SELECTORS + self.LANDED_SELECTORS)
+
+        manual = query_first(self.page, self.MANUAL_SELECTORS)
         if manual is not None:
             try:
                 manual.click()
-                self.page.wait_for_timeout(2000)
             except Exception:
                 pass
+            self._settle(self.LANDED_SELECTORS)
 
     def discover(self) -> list[Field]:
         """Walk formField containers; each yields exactly one logical field."""
