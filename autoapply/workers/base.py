@@ -11,6 +11,7 @@ import time
 from typing import Optional
 
 from .. import log as _log
+from ..clicking import click as _click
 from ..models import Field, FillOutcome, Job, Mapping
 
 SKIP_TYPES = {"submit", "button", "reset", "image"}
@@ -514,7 +515,8 @@ class Worker:
         """
         from ..mapper import resolve_option
 
-        el.click()
+        if not _click(el):
+            return None
         self.page.wait_for_timeout(250)
         try:
             el.type(value, delay=20)
@@ -534,7 +536,7 @@ class Worker:
                 return None
             for opt, text in options:
                 if text == chosen:
-                    opt.click()
+                    _click(opt)
                     self.page.wait_for_timeout(250)
                     return text
         self.page.keyboard.press("Escape")
@@ -578,7 +580,8 @@ class Worker:
     def _probe_options(self, el, frame=None) -> list[str]:
         """Open a combobox just long enough to read its choices, then close it."""
         try:
-            el.click()
+            if not _click(el):
+                return []
             self.page.wait_for_timeout(350)
             texts = [text for _, text in self._combobox_options(el, frame)]
             self.page.keyboard.press("Escape")

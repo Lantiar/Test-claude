@@ -13,6 +13,7 @@ import re
 
 from typing import Optional
 
+from ..clicking import click as _click
 from ..mapper import match_rule
 from ..models import Field
 from .base import WizardWorker, query_first
@@ -209,7 +210,8 @@ class WorkdayWorker(WizardWorker):
         if button is None:
             return []
         try:
-            button.click()
+            if not _click(button):
+                return []
             self.page.wait_for_timeout(450)
             texts = []
             for el in self.page.query_selector_all(
@@ -245,7 +247,10 @@ class WorkdayWorker(WizardWorker):
             button = self.page.query_selector(f.selector)
             if button is None:
                 return None
-            button.click()
+            # Workday paints a click_filter div over this button; a plain
+            # click waits 30s for an obstruction that never clears.
+            if not _click(button):
+                return None
             self.page.wait_for_timeout(600)
 
             # Options only exist once the listbox is open, so they can't be known
@@ -271,10 +276,10 @@ class WorkdayWorker(WizardWorker):
             if chosen is not None:
                 for el, text in options:
                     if text == chosen:
-                        el.click()
+                        _click(el)
                         self.page.wait_for_timeout(300)
                         return text
-            button.click()          # close the listbox we opened
+            _click(button)          # close the listbox we opened
             return None
 
         # Radio groups fall through to the base worker. It matches the answer
