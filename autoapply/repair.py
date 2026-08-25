@@ -257,14 +257,49 @@ def _explore(worker, field, profile, provider, store, ats, notes):
 
 
 def _teach(store, ats: str, label: str, value: str) -> None:
-    """Record an answer so the deterministic pass produces it next time."""
+    """Stage an answer to be learned if -- and only if -- the step is accepted.
+
+    Writing it here would be learning from a proxy. Everything this code can
+    observe about a field is a guess at correctness: a chip appeared, the
+    displayed value changed, no fresh options came back. Each of those has
+    already been wrong once, and a lesson learned from a wrong one is worse
+    than no lesson, because a taught answer outranks the rules beneath it and
+    gets replayed confidently forever.
+
+    The form's own acceptance of the step is the only ground truth available,
+    so lessons wait for it. commit_lessons() is called when the wizard actually
+    advances; anything staged for a step that never passed is dropped.
+    """
     if store is None or not label or not usable(value):
         return
+    _PENDING.setdefault(id(store), {})[label] = (ats, value)
+
+
+# label -> (ats, value), per store, awaiting the form's verdict on the step.
+_PENDING: dict[int, dict[str, tuple[str, str]]] = {}
+
+
+def commit_lessons(store, ats: str = "") -> list[str]:
+    """The step was accepted, so what was staged for it is now known good."""
+    staged = _PENDING.pop(id(store), {}) if store is not None else {}
+    if not staged:
+        return []
     from .mapper import signature
-    try:
-        store.record_correction(signature(ats, label), label, value)
-    except Exception:
-        pass
+
+    learned = []
+    for label, (field_ats, value) in staged.items():
+        try:
+            store.record_correction(signature(field_ats or ats, label),
+                                    label, value)
+            learned.append(f"{label} = {value}")
+        except Exception:
+            continue
+    return learned
+
+
+def drop_lessons(store) -> int:
+    """The step was rejected; nothing staged for it can be trusted."""
+    return len(_PENDING.pop(id(store), {})) if store is not None else 0
 
 
 def read_errors(worker) -> list[dict]:

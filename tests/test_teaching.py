@@ -63,7 +63,7 @@ def test_teaching_is_scoped_to_the_ats(tmp_path):
 def test_a_repair_is_reused_by_the_next_run(tmp_path):
     """End to end: what the audit teaches, the deterministic pass produces --
     with no model involved the second time."""
-    from autoapply.repair import _teach
+    from autoapply.repair import _teach, commit_lessons
 
     store = _store(tmp_path)
     field = Field(id="phoneType", selector="#phoneType", label="Phone Device Type",
@@ -74,6 +74,7 @@ def test_a_repair_is_reused_by_the_next_run(tmp_path):
     assert first.action == "unknown", "profile has no answer for this"
 
     _teach(store, "workday", "Phone Device Type", "Mobile")
+    commit_lessons(store, "workday")          # the form accepted the step
 
     second = map_fields([field], PROFILE, "workday", store=store,
                         provider=None)[0]
@@ -117,7 +118,7 @@ def test_a_dropdown_prompt_is_never_taught_as_an_answer(tmp_path):
     below it, so every later run would fill the field with the prompt and fail
     the same validation.
     """
-    from autoapply.repair import _teach
+    from autoapply.repair import _teach, commit_lessons
 
     store = _store(tmp_path)
     field = Field(id="phoneType", selector="#phoneType", label="Phone Device Type",
@@ -125,10 +126,12 @@ def test_a_dropdown_prompt_is_never_taught_as_an_answer(tmp_path):
 
     for prompt in ("Select One", "Select...", "Choose an option", "--", ""):
         _teach(store, "workday", "Phone Device Type", prompt)
+        commit_lessons(store, "workday")
         assert map_fields([field], PROFILE, "workday", store=store)[0].source \
             != "learned", f"taught the placeholder {prompt!r}"
 
     _teach(store, "workday", "Phone Device Type", "Mobile")
+    commit_lessons(store, "workday")
     assert map_fields([field], PROFILE, "workday", store=store)[0].value == "Mobile"
 
 
@@ -139,3 +142,30 @@ def test_workday_dropdown_options_exclude_the_prompt():
         assert PLACEHOLDER_OPTION.match(prompt), prompt
     for real in ("Mobile", "Home", "Selected Applicant"):
         assert not PLACEHOLDER_OPTION.match(real), real
+
+
+def test_nothing_is_learned_from_a_step_the_form_rejected(tmp_path):
+    """The form accepting the step is the only evidence a fill was right.
+
+    Everything the code can observe about a field is a proxy -- a chip
+    appeared, the displayed value changed, no fresh options came back -- and
+    each of those has already been wrong once on a real form. A lesson drawn
+    from a wrong one is worse than no lesson: a taught answer outranks the
+    rules beneath it and gets replayed confidently on every later run.
+    """
+    from autoapply.repair import _teach, commit_lessons, drop_lessons
+
+    store = _store(tmp_path)
+    field = Field(id="src", selector="#src", label="How Did You Hear About Us?",
+                  kind="combobox", options=["Job Board"], required=True)
+
+    # A plausible-looking fill that the form then refused.
+    _teach(store, "workday", "How Did You Hear About Us?", "Job Board")
+    assert drop_lessons(store) == 1
+    assert map_fields([field], PROFILE, "workday", store=store)[0].source != "learned"
+
+    # The same answer, on a step that was accepted.
+    _teach(store, "workday", "How Did You Hear About Us?", "Job Board")
+    assert commit_lessons(store, "workday") == [
+        "How Did You Hear About Us? = Job Board"]
+    assert map_fields([field], PROFILE, "workday", store=store)[0].source == "learned"

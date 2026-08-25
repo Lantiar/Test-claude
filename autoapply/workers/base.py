@@ -835,7 +835,8 @@ class WizardWorker(Worker):
     def run(self, job: Job, profile: dict, store, provider,
             screenshot_dir: str) -> FillOutcome:
         from .. import mapper
-        from ..repair import audit_step, repair_step
+        from ..repair import (audit_step, commit_lessons, drop_lessons,
+                              repair_step)
         from ..verify import verify_fields
 
         log = _log.get(f"wizard.{self.ats}")
@@ -933,6 +934,9 @@ class WizardWorker(Worker):
             # to the corrections store, so the next application answers it right
             # the first time instead of relearning it here.
             if not self.at_review() and self.advance():
+                # Advancing does not yet mean accepted: a rejected step
+                # re-renders itself with the offending fields marked, and we
+                # are still standing on it. repair_step reads that verdict.
                 repaired, notes = repair_step(
                     self, fields, mappings, profile, provider=provider,
                     store=store, ats=job.ats)
@@ -948,6 +952,21 @@ class WizardWorker(Worker):
                     outcome.verify_detail.update(detail2)
                     all_ok = all_ok and ok2
                     self.advance()
+
+                # Whether anything was learned here rests on the form, not on
+                # our own reading of the page. A step we are no longer standing
+                # on was accepted; one that came back is not evidence of
+                # anything, so what was staged for it is discarded.
+                moved = "|".join(sorted(f.id for f in self.discover()))
+                if moved != fingerprint:
+                    if learned := commit_lessons(store, job.ats):
+                        log.info("step %d accepted; learned %d answer(s)",
+                                 step_no, len(learned))
+                        for lesson in learned:
+                            log.debug("  learned: %s", _log.brief(lesson, 100))
+                elif dropped := drop_lessons(store):
+                    log.info("step %d rejected; discarded %d unproven answer(s)",
+                             step_no, dropped)
                 continue
 
             if self.at_review():
