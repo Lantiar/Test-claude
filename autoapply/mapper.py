@@ -103,9 +103,26 @@ def get_value(profile: dict, path: str) -> str:
     return "" if node is None else str(node)
 
 
+# Questions a rule will match and always answer wrongly. Workday's My
+# Information asks four phone-shaped questions -- Phone Device Type, Country
+# Phone Code, Phone Number, Phone Extension -- and the phone rule claimed all
+# four, filling every one with the phone number. Rather than making the phone
+# pattern ever more baroque, these are held out of rule matching entirely and
+# handed to the model tier, which can read what the question is asking and pick
+# from the options actually offered. Whatever it settles on is then taught, so
+# the deterministic pass answers them directly from the next run on.
+RULE_EXEMPT = (
+    r"phone\s*(device\s*)?type|device\s*type",
+    r"phone\s*ext(ension)?\b|\bext(ension)?\s*(number)?$",
+    r"country\s*(phone\s*)?code|phone\s*country",
+)
+
+
 def match_rule(label: str) -> Optional[str]:
     norm = normalize_label(label)
     if not norm:
+        return None
+    if any(re.search(p, norm) for p in RULE_EXEMPT):
         return None
     for pattern, path in RULES:
         if re.search(pattern, norm):
@@ -141,7 +158,34 @@ def resolve_option(value: str, options: list[str]) -> Optional[str]:
         for opt in options:
             if any(h in opt.lower() for h in DECLINE_HINTS):
                 return opt
+    # A profile carries "NJ" and the dropdown lists "New Jersey". Neither
+    # containment test can bridge that, so the state came back "Select One" and
+    # the step would not validate.
+    if len(want) == 2 and (full := US_STATES.get(want.upper())):
+        for opt in options:
+            if opt.strip().lower() == full.lower():
+                return opt
     return None
+
+
+US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut",
+    "DE": "Delaware", "DC": "District of Columbia", "FL": "Florida",
+    "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois",
+    "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky",
+    "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana",
+    "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire",
+    "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio",
+    "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania",
+    "PR": "Puerto Rico", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington",
+    "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+}
 
 
 # Below this the model is telling us the profile does not back the answer.

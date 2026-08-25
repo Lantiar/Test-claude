@@ -18,36 +18,34 @@ from autoapply.mapper import map_fields, match_rule, signature   # noqa: E402
 from autoapply.models import Field                               # noqa: E402
 from autoapply.store import Store                                # noqa: E402
 
-PROFILE = {"identity": {"first_name": "Nideesh", "phone": "224-333-1045"}}
+PROFILE = {"identity": {"first_name": "Nideesh", "phone": "224-333-1045"},
+           "location": {"city": "Monroe Township", "state": "NJ"}}
 
 
 def _store(tmp_path) -> Store:
     return Store(str(tmp_path / "teach.sqlite"))
 
 
-def test_a_rule_gets_phone_extension_wrong():
-    """The premise. 'Phone Extension' matches the phone rule, so the
-    deterministic pass fills it with the entire phone number."""
-    assert match_rule("Phone Extension") == "identity.phone"
-
-
 def test_a_taught_answer_outranks_a_rule_that_matches(tmp_path):
-    """The fix. Without it the teaching store is inert for every field a rule
-    already claims -- which is exactly the set of fields that need teaching."""
+    """The precedence fix, on a field whose rule is right in general.
+
+    Teaching has to be able to override a matching rule, not merely fill the
+    gaps between rules. A rule is a guess from a label pattern; a taught answer
+    was confirmed once, by a person or by the form accepting it. Consulted
+    after the rules, the store was inert for every field a rule already
+    claimed -- which is exactly where a rule goes wrong.
+    """
     store = _store(tmp_path)
-    field = Field(id="ext", selector="#ext", label="Phone Extension")
+    field = Field(id="city", selector="#city", label="City")
 
     before = map_fields([field], PROFILE, "workday", store=store)[0]
-    assert before.value == "224-333-1045", "expected the rule to misfire first"
+    assert before.source == "rules" and before.value == "Monroe Township"
 
-    store.record_correction(signature("workday", "Phone Extension"),
-                            "Phone Extension", "")
-    store.record_correction(signature("workday", "Phone Extension"),
-                            "Phone Extension", "N/A")
+    store.record_correction(signature("workday", "City"), "City", "Jersey City")
 
     after = map_fields([field], PROFILE, "workday", store=store)[0]
     assert after.source == "learned"
-    assert after.value == "N/A"
+    assert after.value == "Jersey City"
 
 
 def test_teaching_is_scoped_to_the_ats(tmp_path):
@@ -82,3 +80,29 @@ def test_a_repair_is_reused_by_the_next_run(tmp_path):
     assert second.action == "fill"
     assert second.value == "Mobile"
     assert second.source == "learned"
+
+
+# --- what the live Mastercard form exposed ----------------------------------
+
+def test_phone_shaped_questions_are_not_all_the_phone_number():
+    """Workday's My Information asks four phone-shaped questions and the phone
+    rule claimed all four, filling every one with the phone number. Only the
+    one actually asking for the number should match a rule; the rest go to the
+    model, which can read the question and pick from the real options."""
+    assert match_rule("Phone Number*") == "identity.phone"
+    assert match_rule("Mobile Phone") == "identity.phone"
+
+    for label in ("Phone Device Type*", "Phone Extension", "Country Phone Code*"):
+        assert match_rule(label) is None, f"{label} should not resolve to a rule"
+
+
+def test_a_state_abbreviation_finds_the_full_name_in_a_dropdown():
+    """The profile carries NJ and the form lists New Jersey. Neither
+    containment test bridges that, so State came back 'Select One' and the
+    step would not validate."""
+    from autoapply.mapper import resolve_option
+
+    options = ["Alabama", "Missouri", "New Jersey", "New York"]
+    assert resolve_option("NJ", options) == "New Jersey"
+    assert resolve_option("New Jersey", options) == "New Jersey"
+    assert resolve_option("ZZ", options) is None
