@@ -179,21 +179,32 @@ class Worker:
                 return True
         return False
 
-    def settle_after_sign_in(self, timeout_ms: int = 30000,
-                             reloads: int = 2) -> bool:
-        """Wait for the form to render once a sign-in wall is behind us."""
+    def settle_step(self, timeout_ms: int = 30000, reloads: int = 2) -> bool:
+        """Wait for a step to finish rendering, reloading if it failed to.
+
+        Used after passing a sign-in wall and whenever a step comes back empty:
+        an SPA step that fails to load looks exactly like a step with nothing on
+        it, and the run would otherwise conclude the application is over.
+
+        Waits for the field count to hold steady rather than returning on the
+        first non-empty read. A half-rendered Workday step reported one field
+        where it had thirteen, and the run filled that one and moved on.
+        """
         log = _log.get(f"worker.{self.ats}")
         for attempt in range(reloads + 1):
             deadline = time.time() + timeout_ms / 1000
+            last = -1
             while time.time() < deadline:
                 try:
-                    if self.discover():
-                        return True
+                    count = len(self.discover())
                 except Exception:
-                    pass
-                if self.showing_transient_error():
+                    count = -1
+                if count > 0 and count == last:
+                    return True
+                last = count
+                if count <= 0 and self.showing_transient_error():
                     break
-                self.page.wait_for_timeout(500)
+                self.page.wait_for_timeout(700)
 
             if attempt >= reloads:
                 break
@@ -910,10 +921,16 @@ class WizardWorker(Worker):
                 # discovery ran 28ms later against an empty document -- the run
                 # then found nothing to advance with and stopped, having lost
                 # the whole application to a race. Wait for the form.
-                self.settle_after_sign_in()
+                self.settle_step()
                 continue
 
             fields = self.discover()
+            if not fields and not self.at_review():
+                # Empty is ambiguous: a step that failed to load is
+                # indistinguishable from one with nothing on it, and treating
+                # the first as the second abandons the application.
+                self.settle_step()
+                fields = self.discover()
             # A wizard that cannot satisfy a step re-renders the same one, and
             # without this the run spends every remaining iteration rediscovering
             # it -- 13 passes over one page reported as 169 fields.
