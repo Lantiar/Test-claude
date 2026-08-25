@@ -175,6 +175,21 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
     unresolved: list[Field] = []
 
     for f in fields:
+        # A taught answer outranks everything, including a rule that matches.
+        # It has to: the fields most in need of teaching are the ones a rule
+        # gets confidently wrong. "Phone Extension" matches the phone rule and
+        # gets filled with the whole phone number, and while the rule won that
+        # race no correction -- typed by a human in the dashboard or learned
+        # from the form rejecting the step -- could ever take effect. Consulted
+        # last, the teaching store was inert for exactly the cases it exists for.
+        if store is not None:
+            learned = store.literal_for(signature(ats, f.label))
+            if learned:
+                mappings.append(Mapping(field_id=f.id, action="fill", value=learned,
+                                        confidence=1.0, source="learned",
+                                        label=f.label))
+                continue
+
         path = match_rule(f.label) or match_rule(f.id)
         source = "rules"
 
@@ -184,13 +199,6 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
                 path, source = row["profile_path"], "cache"
 
         if path is None:
-            if store is not None:
-                learned = store.literal_for(signature(ats, f.label))
-                if learned:
-                    mappings.append(Mapping(field_id=f.id, action="fill", value=learned,
-                                            confidence=1.0, source="learned",
-                                            label=f.label))
-                    continue
             unresolved.append(f)
             continue
 

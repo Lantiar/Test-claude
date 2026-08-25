@@ -79,6 +79,24 @@ READ_ERRORS_JS = r"""
 }
 """
 
+AUDIT_SYSTEM = (
+    "A job application was filled in automatically by pattern-matching field "
+    "labels against a candidate's profile. Audit what it produced.\n"
+    "You are given each question and the answer that was entered. Flag only "
+    "answers that are WRONG -- not ones that are merely terse or unremarkable.\n"
+    "Wrong means: it contradicts the profile; it answers a different question "
+    "than the one asked (a phone EXTENSION field holding the full phone number, "
+    "a device TYPE field holding a number, a yes/no question holding a school "
+    "name); it is a placeholder or a fragment; or it asserts something the "
+    "profile does not support.\n"
+    "For each wrong answer give the value that should be there instead, using "
+    "only the profile plus ordinary sense about what the question asks. If the "
+    "field lists options, return exactly one of them, verbatim. If nothing "
+    "defensible can be given, return null and it will be left for a human.\n"
+    'Reply with JSON only: {"wrong":[{"label":..,"value":..|null,'
+    '"why":"a few words","confidence":0.0-1.0}]}'
+)
+
 REPAIR_SYSTEM = (
     "A job application form rejected some answers. For each one you are given "
     "the question, the answer that was sent, the form's own complaint, and the "
@@ -95,6 +113,103 @@ REPAIR_SYSTEM = (
     'Reply with JSON only: {"fixes":[{"label":..,"value":..|null,'
     '"confidence":0.0-1.0}]}'
 )
+
+
+def audit_step(worker, fields: list[Field], mappings: list[Mapping],
+               profile: dict, provider=None, store=None,
+               ats: str = "") -> tuple[int, list[str]]:
+    """Check what the deterministic fill produced, and correct what is wrong.
+
+    The tier between the script and the form's own verdict. The form only
+    objects to what is missing or malformed -- it will happily accept a phone
+    extension field containing the full phone number, because that is a valid
+    string. Only a reader who knows what the question meant catches that.
+
+    Every correction is taught, so the deterministic pass gets it right next
+    time and this tier stops being consulted for that field at all. The point
+    is for the model to be needed less over time, not the same amount forever.
+    """
+    notes: list[str] = []
+    if provider is None or getattr(provider, "name", "rules") == "rules":
+        return 0, notes
+
+    by_id = {f.id: f for f in fields}
+    filled = [m for m in mappings
+              if m.action in ("fill", "generate") and m.value
+              and m.field_id in by_id]
+    # A taught answer was already confirmed once; re-auditing it every run costs
+    # a model call to relearn what is on file.
+    filled = [m for m in filled if m.source != "learned"]
+    if not filled:
+        return 0, notes
+
+    payload = [{"label": m.label or m.field_id,
+                "entered": m.value,
+                "options": by_id[m.field_id].options,
+                "kind": by_id[m.field_id].kind} for m in filled]
+    try:
+        raw = provider._chat(
+            AUDIT_SYSTEM,
+            "Candidate profile:\n" + json.dumps(profile, indent=2)
+            + "\n\nWhat was entered:\n" + json.dumps(payload, indent=2))
+    except Exception as exc:
+        notes.append(f"audit unavailable: {type(exc).__name__}")
+        return 0, notes
+
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end < 0:
+        return 0, notes
+    try:
+        wrong = json.loads(raw[start:end + 1]).get("wrong") or []
+    except json.JSONDecodeError:
+        return 0, notes
+
+    by_label = {_norm(m.label or m.field_id): m for m in filled}
+    fixed = 0
+    for item in wrong:
+        mapping = by_label.get(_norm(item.get("label", "")))
+        if mapping is None:
+            continue
+        field = by_id.get(mapping.field_id)
+        value = item.get("value")
+        why = item.get("why") or "audited as wrong"
+        if not value:
+            notes.append(f"{mapping.label}: flagged ({why}), no replacement offered")
+            continue
+        if field.options and value not in field.options:
+            from .mapper import resolve_option
+            value = resolve_option(str(value), field.options) or ""
+            if not value:
+                notes.append(f"{mapping.label}: flagged ({why}), no matching option")
+                continue
+        try:
+            written = worker._write(field, str(value))
+        except Exception as exc:
+            notes.append(f"{mapping.label}: rewrite failed ({exc})")
+            continue
+        if written is None:
+            notes.append(f"{mapping.label}: '{value}' would not stick")
+            continue
+
+        mapping.value = written
+        mapping.source = "audit"
+        mapping.confidence = float(item.get("confidence", 0.6))
+        fixed += 1
+        notes.append(f"{mapping.label}: {why} -> '{written}'")
+        _teach(store, ats, mapping.label, written)
+
+    return fixed, notes
+
+
+def _teach(store, ats: str, label: str, value: str) -> None:
+    """Record an answer so the deterministic pass produces it next time."""
+    if store is None or not label:
+        return
+    from .mapper import signature
+    try:
+        store.record_correction(signature(ats, label), label, value)
+    except Exception:
+        pass
 
 
 def read_errors(worker) -> list[dict]:
@@ -221,12 +336,6 @@ def repair_step(worker, fields: list[Field], mappings: list[Mapping],
 
         # Remember it. This is the part that makes the next run start correct
         # rather than making the same mistake and repairing it again.
-        if store is not None and field.label:
-            from .mapper import signature
-            try:
-                store.record_correction(signature(ats, field.label),
-                                        field.label, written)
-            except Exception:
-                pass
+        _teach(store, ats, field.label, written)
 
     return repaired, notes

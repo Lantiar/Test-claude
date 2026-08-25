@@ -757,7 +757,7 @@ class WizardWorker(Worker):
     def run(self, job: Job, profile: dict, store, provider,
             screenshot_dir: str) -> FillOutcome:
         from .. import mapper
-        from ..repair import repair_step
+        from ..repair import audit_step, repair_step
         from ..verify import verify_fields
 
         self.open(job)
@@ -786,6 +786,19 @@ class WizardWorker(Worker):
             outcome.mappings.extend(mappings)
             outcome.filled_ids.extend(step.filled_ids)
             outcome.errors.extend(step.errors)
+
+            # Tier two: the script filled from rules, so audit what it produced
+            # before the form ever sees it. The form will accept a phone
+            # extension containing the whole phone number -- it is a valid
+            # string -- so only a reader who knows what the question meant
+            # catches that one. Corrections are taught, so the deterministic
+            # pass gets it right next time and this tier stops being consulted
+            # for that field.
+            audited, audit_notes = audit_step(
+                self, fields, mappings, profile, provider=provider,
+                store=store, ats=job.ats)
+            if audit_notes:
+                outcome.errors.extend(audit_notes)
 
             ok, detail = verify_fields(self.page, fields, mappings,
                                        outcome.filled_ids)
