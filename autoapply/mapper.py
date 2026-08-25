@@ -146,6 +146,19 @@ def resolve_option(value: str, options: list[str]) -> Optional[str]:
     for opt in options:                                    # exact
         if opt.strip().lower() == want:
             return opt
+    # A bare number or a two-letter token matches incidentally. "1" is a whole
+    # word inside "American Samoa (+1)", so a country phone code answered as
+    # "1" resolved to American Samoa -- which Workday accepted, because it is a
+    # real +1 country, and which was then taught as the answer for every later
+    # run. Short tokens have to match exactly or not at all; the state
+    # abbreviations below are handled by name.
+    if want.isdigit() or len(want) <= 2:
+        if len(want) == 2 and (full := US_STATES.get(want.upper())):
+            for opt in options:
+                if opt.strip().lower() == full.lower():
+                    return opt
+        return None
+
     for opt in options:                                    # whole-word either way
         low = opt.strip().lower()
         if not low:
