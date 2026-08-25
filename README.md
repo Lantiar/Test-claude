@@ -183,6 +183,12 @@ but never submits.
   and account creation are not built.
 - **CAPTCHA.** Greenhouse and Ashby both load reCAPTCHA. Detection is correct
   and blocks auto-submit; there is no handoff yet.
+- **Verification codes.** A run that hits an emailed one-time code can read it
+  with `autoapply mailcode --contains workday`, if Gmail is configured. The
+  mailbox is opened read-only, only messages arriving after the wait starts are
+  examined, only ones matching the run's filter are opened, and only the code
+  is returned. Nothing calls it automatically yet -- no worker has a sign-in
+  step to call it from.
 - **Questions the profile does not answer.** A required field with no matching
   option and no basis in the profile is deliberately left empty rather than
   guessed, and queues for review. Your answer is remembered for next time.

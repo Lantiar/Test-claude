@@ -40,12 +40,25 @@ def main(argv: list[str] | None = None) -> int:
                         "unfiltered wait would read whatever arrives first.")
     m.add_argument("--timeout", type=int, default=180)
 
+    sub.add_parser("mailauth",
+                   help="one-time: authorize Gmail read access, print a refresh token")
+
     sub.add_parser("stats", help="show counts")
     q = sub.add_parser("queue", help="list the review queue")
     q.add_argument("--all", action="store_true")
 
     args = ap.parse_args(argv)
     store = Store()
+
+    if args.cmd == "mailauth":
+        from .mailcode import MailUnavailable, authorize
+        try:
+            print("\nGMAIL_REFRESH_TOKEN=" + authorize())
+            print("\nPut that line in your .env. Treat it like a password.")
+        except MailUnavailable as exc:
+            print(f"could not authorize: {exc}")
+            return 2
+        return 0
 
     if args.cmd == "mailcode":
         from .mailcode import MailUnavailable, wait_for_code
