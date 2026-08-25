@@ -222,41 +222,148 @@ class WorkdayWorker(WizardWorker):
                 labels.append(text)
         return labels
 
-    def _multiselect_options(self, box) -> list[str]:
-        """The choices a multiselect offers, read by opening it briefly.
+    # Workday prompts nest. "How Did You Hear About Us?" offers Job Board,
+    # Talent Acquisition Team and University/College, and none of those is an
+    # answer: clicking one drills into the boards underneath it. Reading the top
+    # level and calling those the options meant the model was choosing between
+    # category names, so even a sensible pick could never satisfy the field.
+    # Options are therefore collected as "Category > Leaf" and written by
+    # walking the same path.
+    PATH_SEP = " > "
+    MAX_MENU_DEPTH = 3
 
-        Scoped to the leaf nodes of the menu this widget opened: several
-        prompt menus can be mounted at once -- the Country Phone Code picker
-        sits right beside this one -- and an unscoped sweep mixes their
-        options together.
+    def _visible_options(self, sel: str, exclude: set[str] | None = None) -> list:
+        """Visible options, minus any that were already on screen.
+
+        Scoping by exclusion rather than by container: Workday keeps several
+        prompt menus mounted at once, and the Country Phone Code picker sits
+        directly beside this one with its selection rendered as a promptOption
+        of its own. Reading them all produced a list that began "United States
+        of America (+1) > Job Board" and then drilled into every country on
+        earth. Whatever was on screen before this widget opened is not one of
+        its choices.
+        """
+        exclude = exclude or set()
+        out = []
+        for opt in self.page.query_selector_all(f"[data-automation-id='{sel}']"):
+            try:
+                if not opt.is_visible():
+                    continue
+            except Exception:
+                continue
+            text = (opt.inner_text() or "").strip()
+            if text and text not in exclude and not PLACEHOLDER_OPTION.match(text):
+                out.append((opt, text))
+        return out
+
+    def _options_on_screen(self) -> set[str]:
+        return {t for _, t in self._visible_options("promptOption")}
+
+    def _multiselect_options(self, box) -> list[str]:
+        """Every selectable answer, including ones a level down.
+
+        A leaf reachable only by opening a category is still an answer to this
+        question, and the model cannot pick what it was never shown.
         """
         el = box.query_selector("input")
         if el is None:
             return []
         try:
+            # Anything already showing belongs to a neighbouring picker.
+            outside = self._options_on_screen()
             if not _click(el):
                 return []
             self.page.wait_for_timeout(700)
-            texts: list[str] = []
-            for sel in ("[data-automation-id='promptLeafNode']",
-                        "[data-automation-id='promptOption']"):
-                for opt in self.page.query_selector_all(sel):
-                    try:
-                        if not opt.is_visible():
-                            continue
-                    except Exception:
-                        continue
-                    text = (opt.inner_text() or "").strip()
-                    if (text and not PLACEHOLDER_OPTION.match(text)
-                            and text not in texts):
-                        texts.append(text)
-                if texts:
+
+            top = [t for _, t in self._visible_options("promptOption", outside)]
+            leaves = {t for _, t in self._visible_options("promptLeafNode", outside)}
+            paths: list[str] = []
+
+            for text in top:
+                if text in leaves:
+                    paths.append(text)          # selectable where it stands
+                    continue
+                # A category: open it, take what is underneath, come back.
+                match = [o for o, t in self._visible_options("promptOption", outside)
+                         if t == text]
+                if not match or not _click(match[0]):
+                    continue
+                self.page.wait_for_timeout(900)
+                for _, child in self._visible_options("promptLeafNode",
+                                                      outside | {text}):
+                    paths.append(f"{text}{self.PATH_SEP}{child}")
+                # Reopen at the top for the next category.
+                self.page.keyboard.press("Escape")
+                self.page.wait_for_timeout(250)
+                if not _click(el):
                     break
+                self.page.wait_for_timeout(700)
+
             self.page.keyboard.press("Escape")
             self.page.wait_for_timeout(200)
-            return texts
+            return paths or top
         except Exception:
             return []
+
+    def _write_multiselect(self, f: Field, value: str) -> Optional[str]:
+        """Select a value that may sit behind one or more categories."""
+        el = self.page.query_selector(f.selector)
+        if el is None:
+            return None
+        outside = self._options_on_screen()
+        if not _click(el):
+            return None
+        self.page.wait_for_timeout(700)
+
+        from ..mapper import resolve_option
+
+        def chip() -> str:
+            """The committed selection, which is the only proof of success."""
+            el = self.page.query_selector(
+                f"{FORM_FIELD}[data-automation-id='formField-{f.id}'] "
+                "[data-automation-id='selectedItem']")
+            return (el.inner_text() or "").strip() if el is not None else ""
+
+        # The markup does not say which options select and which descend --
+        # promptLeafNode marks all three of these as leaves, and Job Board
+        # descends anyway. So click and look: a chip means done, fresh options
+        # mean we went a level deeper and should carry on.
+        wanted = [s.strip() for s in value.split(self.PATH_SEP) if s.strip()]
+        seen = set(outside)
+        walked: list[str] = []
+
+        for depth in range(self.MAX_MENU_DEPTH):
+            available = self._visible_options("promptOption", seen)
+            if not available:
+                break
+            target = wanted[depth] if depth < len(wanted) else (
+                wanted[-1] if wanted else "")
+            chosen = resolve_option(target, [t for _, t in available]) if target else None
+            # Nothing matched by name: at the top that is a real failure, but a
+            # level down it just means the menu is narrower than the answer --
+            # a single remaining choice is the answer.
+            match = [o for o, t in available if t == chosen] if chosen else (
+                [available[0][0]] if depth and len(available) == 1 else [])
+            if not match:
+                break
+            seen |= {t for _, t in available}
+            walked.append(next(t for o, t in available if o == match[0]))
+            if not _click(match[0]):
+                break
+            self.page.wait_for_timeout(900)
+            if chip():
+                self.page.keyboard.press("Escape")
+                self.page.wait_for_timeout(200)
+                # The route, not just the destination. This value is what gets
+                # taught, and "Handshake" alone is not on the top-level menu --
+                # replaying it next run would find nothing and fail. The chip
+                # text still matches this for verification, since one contains
+                # the other.
+                return self.PATH_SEP.join(walked)
+
+        self.page.keyboard.press("Escape")
+        self.page.wait_for_timeout(200)
+        return chip() or None
 
     def _listbox_options(self, box) -> list[str]:
         """Open a Workday dropdown far enough to read it, then close it.
@@ -343,6 +450,9 @@ class WorkdayWorker(WizardWorker):
                         return text
             _click(button)          # close the listbox we opened
             return None
+
+        if f.kind == "combobox":
+            return self._write_multiselect(f, value)
 
         # Radio groups fall through to the base worker. It matches the answer
         # against the members' labels with the same resolver the options were
