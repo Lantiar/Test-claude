@@ -162,14 +162,28 @@ def solve_field(worker, field: Field, profile: dict, provider,
             f"{choice['tag']}") if (e.inner_text() or "").strip() == choice["label"]]
         if not target or not _click(target[0]):
             break
+        before = {i["label"] for i in items}
         path.append(choice["label"])
         log.debug("step %d: clicked %r", step + 1, choice["label"])
         worker.page.wait_for_timeout(800)
 
-        if value := read_value():
-            if value != current:
-                log.info("%s solved in %d click(s): %s",
-                         field.label, len(path), " > ".join(path))
-                return value, path
+        # "The displayed value changed" is not success. Opening a category
+        # changes what the control shows while committing nothing -- the first
+        # live run of this stopped at "Job Board" and reported it solved, with
+        # the real answer still one level down. Options that were not there a
+        # moment ago mean we descended, so keep going.
+        try:
+            after = {i["label"] for i in ctx.evaluate(CANDIDATES_JS, root or container)}
+        except Exception:
+            after = before
+        if after - before:
+            log.debug("  descended a level (%d new choice(s))", len(after - before))
+            continue
+
+        value = read_value()
+        if value and value != current:
+            log.info("%s solved in %d click(s): %s",
+                     field.label, len(path), " > ".join(path))
+            return value, path
 
     return read_value(), path
