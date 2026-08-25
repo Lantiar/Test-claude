@@ -18,7 +18,14 @@ Working prototype with two lanes.
 |---|---|---|
 | Greenhouse, Lever | DOM worker, single page | no |
 | Workday | DOM worker, multi-step wizard | no |
-| iCIMS, Ashby, Oracle Cloud HCM / Taleo, unknown | browser-use agent + playbook | yes |
+| Ashby, and anything else with an ordinary form | generic DOM worker | only for novel questions |
+| iCIMS, Oracle Cloud HCM / Taleo, unknown, anything the DOM lane cannot read | browser-use agent + playbook | yes |
+
+Every ATS gets the deterministic DOM pass first, including ones with no
+dedicated worker: the generic worker reads labels the way a person does, groups
+radio and checkbox sets into one field per question, drives `react-select`-style
+comboboxes and uploads files. Ashby fills with no Ashby-specific code. Only when
+that discovers nothing does the run fall through to the agent.
 
 The DOM lane is deterministic and free. The agent lane drives
 [browser-use](https://github.com/browser-use/browser-use) with a per-ATS
@@ -113,7 +120,8 @@ url → router → worker.discover → mapper → worker.fill → verify → gat
 
 | Module | Job |
 |---|---|
-| `router.py` | URL → ATS, and which lane handles it. A data table; adding an ATS is one line. |
+| `router.py` | URL → ATS. A data table; adding an ATS is one line. |
+| `workers/generic.py` | The DOM worker for any ATS without a dedicated one. |
 | `mapper.py` | Field → value: rules, then cache, then learned answers, then LLM. |
 | `workers/base.py` | Discovery, fill, submit. `WizardWorker` adds multi-step flows. |
 | `workers/workday.py` | The wizard: `data-automation-id` containers, button+listbox dropdowns. |
@@ -146,10 +154,38 @@ docker compose up dashboard
 
 Greenhouse, Lever and Workday are tested end to end against local fixtures that
 replicate their real markup — including a React controlled input and Workday's
-button+listbox dropdowns, neither of which a naive filler can drive. **None of
-the workers has been run against a live ATS tenant yet**, so treat the selectors
-as needing one validation pass. Use `--dry-run` for that: it fills and verifies
+button+listbox dropdowns, neither of which a naive filler can drive.
+
+Three live postings have now been dry-run end to end, and each one broke
+something the fixtures did not:
+
+| Posting | Result |
+|---|---|
+| Cloudflare (Greenhouse) | 24 fields discovered, 17 filled |
+| Notion (Ashby, via the generic worker) | 23 discovered, 15 filled |
+| Blackstone (Workday) | reaches the wizard, stops at the Create Account wall |
+
+What the live markup broke, and the fixtures could not: Workday's SPA render
+timing, its `noCaptchaWrapper` reading as a CAPTCHA, byte-exact verification of
+values the widget reformats, file inputs that report empty once the upload is
+swapped for a filename chip, `react-select` comboboxes that ignore a written
+value while still *reading back* as verified, radio and checkbox groups
+discovered one-field-per-option, and `#id` selectors against UUID ids that begin
+with a digit.
+
+Use `--dry-run` against a new tenant before trusting it: it fills and verifies
 but never submits.
+
+### Known limits
+
+- **Account walls.** Most Workday tenants gate the application behind Create
+  Account / Sign In. The run stops there and queues with that reason; sign-in
+  and account creation are not built.
+- **CAPTCHA.** Greenhouse and Ashby both load reCAPTCHA. Detection is correct
+  and blocks auto-submit; there is no handoff yet.
+- **Questions the profile does not answer.** A required field with no matching
+  option and no basis in the profile is deliberately left empty rather than
+  guessed, and queues for review. Your answer is remembered for next time.
 
 ## Not built yet
 
