@@ -152,6 +152,21 @@ def _first(scope, selectors, allow_account_creation: bool = False):
     return None
 
 
+def _on_registration_form(frames) -> bool:
+    """Is this the Create Account form rather than the sign-in one?
+
+    Keyed on what only registration has -- a confirm-password field, or a
+    create-account submit button. A password field is not a signal: both forms
+    have one, and the create form has two.
+    """
+    for fr in frames:
+        if _first(fr, VERIFY_PASSWORD_SELECTORS) is not None:
+            return True
+        if _first(fr, CREATE_SUBMIT_SELECTORS, allow_account_creation=True) is not None:
+            return True
+    return False
+
+
 def _find_switch(frames):
     """The Sign In control on a page that opened on Create Account."""
     for fr in frames:
@@ -253,15 +268,24 @@ def sign_in(worker, creds: dict, wait_for_code=None, log=None) -> tuple[bool, st
         raise LoginUnavailable("no credentials for this host")
 
     # --- get onto the Sign In form, not the Create Account one beside it ---
-    if _find(worker.frames(), PASSWORD_SELECTORS)[0] is None:
+    # Detect registration by what is unique to it. Asking "is there a password
+    # field?" does not work: the Create Account form has two, so that test says
+    # "already on the sign-in form", the run fills the registration form
+    # believing it is signing in, and then finds no button it is allowed to
+    # press -- the only one there is Create Account, which the guard rightly
+    # refuses. Mastercard's tenant opens on exactly that page.
+    if _on_registration_form(worker.frames()):
         switch, _ = _find_switch(worker.frames())
-        if switch is not None:
-            try:
-                switch.click()
-                page.wait_for_timeout(2500)
-                say("switched to the sign-in form")
-            except Exception:
-                pass
+        if switch is None:
+            return False, "on a create-account form with no sign-in link"
+        try:
+            switch.click()
+            page.wait_for_timeout(3000)
+            say("switched from create-account to the sign-in form")
+        except Exception as exc:
+            return False, f"could not reach the sign-in form: {exc}"
+        if _on_registration_form(worker.frames()):
+            return False, "still on the create-account form after clicking sign-in"
 
     # --- email, then password, which may be on this page or the next ---
     el, frame = _find(worker.frames(), EMAIL_SELECTORS)

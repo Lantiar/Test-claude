@@ -98,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  verified : {o.verified}")
         if o.missing_required:
             print(f"  missing  : {', '.join(o.missing_required)}")
+        # Per-field failures and the sign-in outcome land here. Without them a
+        # run that stops at a wall says only "sign-in required" and the reason
+        # it did not get through has to be reconstructed from the screenshot.
+        for err in o.errors:
+            print(f"  note     : {err.splitlines()[0][:160]}")
         if o.screenshot_path:
             print(f"  shot     : {o.screenshot_path}")
     if result.gate.reasons:
