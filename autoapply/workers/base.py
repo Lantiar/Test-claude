@@ -200,9 +200,22 @@ class Worker:
     # Selectors that mean "you must sign in or create an account to continue".
     auth_selectors: tuple[str, ...] = ()
 
+    # A sign-in step announces itself in the URL. Worth checking on its own:
+    # an email-first login (iCIMS asks for the address before the password)
+    # has no password field on the page yet, so selector matching alone reads
+    # it as an ordinary form and the run tries to fill it as an application.
+    AUTH_URL_MARKERS = ("/login", "/signin", "/sign-in", "/sign_in",
+                        "/register", "/createaccount", "/create-account")
+
     def needs_auth(self) -> bool:
-        return any(query_first(fr, self.auth_selectors) is not None
-                   for fr in self.frames())
+        if any(query_first(fr, self.auth_selectors) is not None
+               for fr in self.frames()):
+            return True
+        try:
+            path = (self.page.url or "").lower().split("?")[0]
+        except Exception:
+            return False
+        return any(marker in path for marker in self.AUTH_URL_MARKERS)
 
     def discover(self) -> list[Field]:
         """Every frame, not just the top one -- embedded forms are the norm."""

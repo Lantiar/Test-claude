@@ -50,7 +50,9 @@ class GenericWorker(Worker):
         from ..router import detect
 
         here = urlparse(self.page.url).hostname or ""
-        best = None
+        ats_any = None          # a known ATS host, but not an Apply control
+        offsite_apply = None    # an Apply control on a host we do not recognise
+
         for a in self.page.query_selector_all("a[href]"):
             href = (a.get_attribute("href") or "").strip()
             if not href or href.startswith(("#", "javascript:", "mailto:")):
@@ -59,12 +61,24 @@ class GenericWorker(Worker):
             host = urlparse(url).hostname or ""
             if not host or host == here:
                 continue
-            if detect(url) == "unknown":
-                continue
-            text = ((a.inner_text() or "") + " " + href).lower()
-            # Prefer an actual Apply control; a careers page also links to the
-            # ATS from "Returning User Login", which lands on a sign-in wall.
-            if "apply" in text:
-                return url
-            best = best or url
-        return best
+
+            text = (a.inner_text() or "").strip().lower()
+            known = detect(url) != "unknown"
+            # "Apply", "Apply to this job" -- but not "Applying to TikTok",
+            # which is an advice page, nor "How we hire".
+            is_apply = text.startswith("apply") and not text.startswith("applying")
+
+            if known:
+                # Best case: a known ATS reached through an Apply control. A
+                # careers page also links to the same ATS from "Returning User
+                # Login", which lands on a sign-in wall instead of the form.
+                if is_apply or "apply" in href.lower():
+                    return url
+                ats_any = ats_any or url
+            elif is_apply and "/apply" in urlparse(url).path.lower():
+                # An in-house careers host we have no worker for. Following it
+                # still beats discovering the marketing page it was linked from;
+                # whatever is there gets the generic treatment.
+                offsite_apply = offsite_apply or url
+
+        return ats_any or offsite_apply
