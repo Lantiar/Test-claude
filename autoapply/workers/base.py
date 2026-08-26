@@ -553,6 +553,15 @@ class Worker:
         if el is None:
             return None
         if f.kind == "file":
+            # Workday's upload is a list, and every retry of a rejected step
+            # appended another copy -- the run left three identical resumes on
+            # My Experience. Uploading is only ever done once per field.
+            already = ctx.query_selector(
+                f"{f.selector} ~ [data-automation-id='file-upload-item'], "
+                "[data-automation-id='file-upload-item']")
+            if already is not None and os.path.basename(value) in (
+                    (already.inner_text() or "")):
+                return value
             path = os.path.expanduser(value)
             if not os.path.exists(path):
                 # A mislabelled upload zone can be mapped to a name or an email

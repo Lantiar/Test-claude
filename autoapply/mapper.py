@@ -245,7 +245,27 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
     mappings: list[Mapping] = []
     unresolved: list[Field] = []
 
+    # Repeatable sections put several identically-labelled fields on one step:
+    # Workday's My Experience has a Websites list where every entry is "URL*".
+    # Filling them all from the same rule gave both entries the portfolio, and
+    # the form answered "You can't add duplicate website URLs". Only the first
+    # of a repeated label is answered from rules; the rest go to the model,
+    # which is shown what its neighbours already hold and can pick a different
+    # link the profile actually has.
+    seen_labels: dict[str, int] = {}
+    repeated: set[str] = set()
     for f in fields:
+        key = normalize_label(f.label)
+        if not key:
+            continue
+        seen_labels[key] = seen_labels.get(key, 0) + 1
+        if seen_labels[key] > 1:
+            repeated.add(f.id)
+
+    for f in fields:
+        if f.id in repeated:
+            unresolved.append(f)
+            continue
         # A taught answer outranks everything, including a rule that matches.
         # It has to: the fields most in need of teaching are the ones a rule
         # gets confidently wrong. "Phone Extension" matches the phone rule and
