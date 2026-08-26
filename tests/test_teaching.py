@@ -510,3 +510,56 @@ def test_a_successful_repair_clears_the_failure_that_prompted_it():
     if repaired:
         step_ok = ok_after          # replaces, does not AND
     assert step_ok is True
+
+
+def test_a_redirect_to_a_marketing_page_is_not_an_application():
+    """A closed Ashby posting redirects to Ashby's own marketing homepage.
+
+    The run landed there, discovery found the "Get in Touch" lead-capture box,
+    the filler typed the candidate's email address into it, verification
+    confirmed the address was indeed in the box, and the outcome came back
+    verified=True. The only thing between that and auto mode mailing his
+    address to an ATS vendor's sales team was an unrelated CAPTCHA check
+    happening to fire.
+
+    Listings close; this is ordinary, not exceptional.
+    """
+    from autoapply.workers.base import _same_posting
+
+    ashby = "https://jobs.ashbyhq.com/notion/3fba1c39-c5cb-47d7-9ad2-1cec4d7e9d0c/application"
+    assert not _same_posting(ashby, "https://www.ashbyhq.com/")
+    assert not _same_posting(ashby, "https://jobs.ashbyhq.com/notion/9999zzzz/application")
+
+    # An ATS rewriting its own URL is normal and must still match.
+    wd = ("https://mastercard.wd1.myworkdayjobs.com/Campus/job/OFallon-Missouri/"
+          "Software-Engineer-Intern--Summer-2027---United-States_R-287618-1")
+    assert _same_posting(wd, wd.replace("/Campus", "/en-US/Campus") + "/apply/applyManually")
+    gh = "https://boards.greenhouse.io/cloudflare/jobs/1234567"
+    assert _same_posting(gh, "https://job-boards.greenhouse.io/cloudflare/jobs/1234567?gh_src=x")
+
+
+def test_the_gate_refuses_a_page_that_is_not_an_application():
+    """The second line of defence, for a page reached without a redirect."""
+    from autoapply.gate import looks_like_an_application
+    from autoapply.models import FillOutcome, Job
+
+    job = Job(url="https://x", ats="ashby")
+
+    lead_capture = FillOutcome(job=job)
+    lead_capture.fields = [Field(id="email", selector="#e", label="Email")]
+    lead_capture.filled_ids = ["email"]
+    assert not looks_like_an_application(lead_capture)
+
+    real = FillOutcome(job=job)
+    real.fields = [Field(id="n", selector="#n", label="First Name"),
+                   Field(id="e", selector="#e", label="Email"),
+                   Field(id="r", selector="#r", label="Resume", kind="file")]
+    real.filled_ids = ["n", "e", "r"]
+    assert looks_like_an_application(real)
+
+    # What is asked decides it, not how much: one recognisable question is
+    # enough, and a marketing page's lone "Email" is not one.
+    one_real = FillOutcome(job=job)
+    one_real.fields = [Field(id="n", selector="#n", label="First name")]
+    one_real.filled_ids = ["n"]
+    assert looks_like_an_application(one_real)

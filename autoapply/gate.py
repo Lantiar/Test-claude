@@ -23,6 +23,47 @@ from .models import FillOutcome, GateResult, Job
 
 KILL_SWITCH = "data/STOP"
 
+# What every job application asks for, whatever the ATS. A page holding none of
+# these is not one, however many inputs it has.
+_APPLICATION_SIGNS = ("resum", "cv", "cover letter", "first name", "last name",
+                      "full name", "linkedin", "phone", "work authoriz",
+                      "sponsor", "portfolio", "github", "why do you",
+                      "resume", "attach")
+
+
+def looks_like_an_application(outcome: FillOutcome) -> bool:
+    """Is this page the thing we came here to fill in?
+
+    Nothing checked. A closed Ashby posting redirects to Ashby's own marketing
+    homepage, where the run found the "Get in Touch" lead-capture box, typed
+    the candidate's email address into it, verified that the email address was
+    indeed in the box, and reported success. The only thing between that and
+    auto mode mailing his address to an ATS vendor's sales team was an
+    unrelated CAPTCHA check happening to fire.
+
+    A dead posting is normal -- listings close -- so this will happen again on
+    any ATS that redirects rather than 404s. Two inputs and no sign of a
+    resume, a name or a work-authorization question is not an application, and
+    a single field never is.
+    """
+    fields = outcome.fields
+    if not fields:
+        return False
+    haystack = " ".join(
+        f"{f.label or ''} {f.id or ''}".lower() for f in fields)
+    # What is being asked decides this, not how much of it there is. A form
+    # with one "First name" on it is an application; the count is what the
+    # marketing page and the real form have in common, and "Email" alone is
+    # what they do not.
+    if any(sign in haystack for sign in _APPLICATION_SIGNS):
+        return True
+    if any(f.kind == "file" for f in fields):
+        return True
+    # No recognisable question, so fall back to bulk: a lead-capture box is one
+    # or two inputs, and a form long enough to be an application is unlikely to
+    # ask nothing a person would recognise.
+    return len(fields) >= 6
+
 
 def safety_gate(job: Job, outcome: FillOutcome, mode: str, store=None,
                 profile: dict | None = None, provider=None) -> GateResult:
@@ -58,6 +99,8 @@ def blockers(outcome: FillOutcome, store=None, profile: dict | None = None,
         reasons.append("no form fields discovered")
     elif not outcome.filled_ids:
         reasons.append("nothing was filled")
+    elif not looks_like_an_application(outcome):
+        reasons.append("the page does not look like a job application")
 
     # A wizard that stalls on step one still fills and verifies everything on
     # that step, so verified reads True and nothing else here objects -- while

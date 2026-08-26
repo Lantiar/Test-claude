@@ -496,6 +496,24 @@ class Worker:
                 # the application rather than the sign-in page it replaced.
                 self.open(job)
         fields = self.discover()
+
+        # Do not type into a page we were redirected to. A closed Ashby posting
+        # redirects to Ashby's marketing homepage, where discovery found the
+        # "Get in Touch" lead-capture box and the run put the candidate's email
+        # address in it. The gate refuses to submit such a page, but by then
+        # the address has already been typed into a stranger's form, and a
+        # listing closing between runs is ordinary rather than exceptional.
+        if not _same_posting(job.url, self.page.url) and len(fields) < 3:
+            log = _log.get(f"worker.{self.ats}")
+            log.warning("landed on %s, which is not %s -- not filling anything",
+                        _log.brief(self.page.url, 70), _log.brief(job.url, 70))
+            outcome = FillOutcome(job=job, fields=fields)
+            outcome.errors.append(
+                f"redirected to {self.page.url} -- the posting is probably "
+                "closed; nothing was filled")
+            outcome.reached_end = False
+            return outcome
+
         mappings = mapper.map_fields(fields, profile, job.ats,
                                      store=store, provider=provider)
         outcome = self.fill(job, fields, mappings, screenshot_dir)
@@ -1200,3 +1218,34 @@ class WizardWorker(Worker):
         outcome.filled_ok = not outcome.missing_required
         outcome.screenshot_path = self.screenshot(job, screenshot_dir)
         return outcome
+
+
+def _same_posting(wanted: str, landed: str) -> bool:
+    """Are we still on the job we asked for?
+
+    Compared on host and on the identifying parts of the path, because an ATS
+    rewrites a job URL constantly and legitimately: Workday adds /en-US and
+    /apply/applyManually, Greenhouse moves between job-boards.greenhouse.io and
+    the company's own domain, and every one of them appends tracking. What does
+    not survive a redirect to a marketing homepage is the job's own identifier
+    -- the long id or slug that names this posting and nothing else.
+    """
+    from urllib.parse import urlparse
+
+    def marks(url: str) -> tuple[str, set[str]]:
+        parsed = urlparse(url or "")
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        # Registrable-ish suffix, so jobs.ashbyhq.com and www.ashbyhq.com match
+        # but ashbyhq.com and workday.com do not.
+        host = ".".join(host.split(".")[-2:])
+        ids = {seg.lower() for seg in re.split(r"[/?&=]", parsed.path or "")
+               if len(seg) >= 6 and re.search(r"\d", seg)}
+        return host, ids
+
+    want_host, want_ids = marks(wanted)
+    got_host, got_ids = marks(landed)
+    if want_host != got_host:
+        return False
+    if not want_ids:
+        return True          # nothing identifying to check; give it the benefit
+    return bool(want_ids & got_ids)
