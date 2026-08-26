@@ -11,3 +11,7 @@ screenshots/
 *.db
 .pytest_cache/
 config/files/
+
+# Skyvern writes run artifacts, browser profiles and a current-task pointer
+# into ./temp when it runs embedded. Runtime state, not source.
+temp/
