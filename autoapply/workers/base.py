@@ -167,6 +167,69 @@ class Worker:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
         self.dismiss_consent()
+        if self.start_application():
+            self.page.wait_for_timeout(2500)
+            self.dismiss_consent()
+
+    # A job posting is not an application, and only the Workday worker knew to
+    # click through from one to the other. On BNY's Oracle site the run stayed
+    # on the posting and filled the careers site's own furniture -- a "City,
+    # state, country" location search and a dropzone reading "Upload or drag
+    # and drop your PDF resume file here to get AI recommended jobs", which is
+    # a job-recommendation widget and not the application's resume field at
+    # all. It then reported five fields discovered and one filled, on a page
+    # with no application on it.
+    START_JS = r"""
+    () => {
+      const clean = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      // Already looking at an application? Then there is nothing to click
+      // through to, and an "Apply" further down the page is a different job.
+      //
+      // Asking for the candidate's name is the signal. Matching "resume" is
+      // not: BNY's posting carries "Upload or drag and drop your PDF resume
+      // file here to get AI recommended jobs", so a page whose only resume
+      // mention is a recommendation widget reads as an application and the
+      // Apply button never gets clicked -- which is the exact bug this is
+      // meant to fix.
+      const signs = /first name|last name|full name|legal name|cover letter|work authoriz|sponsorship/;
+      for (const el of document.querySelectorAll('label, legend')) {
+        if (signs.test(clean(el.innerText))) return '';
+      }
+      // Whole-label match: "Apply filters" on a search page is not this, and
+      // neither is "Apply" inside a sentence.
+      const want = /^(apply|apply now|apply for this job|apply to this job|apply manually|apply online|apply for job|start application|start your application|i'?m interested)$/;
+      for (const n of document.querySelectorAll(
+              'a, button, [role=button], input[type=button], input[type=submit]')) {
+        const label = clean(n.getAttribute('aria-label') || n.innerText || n.value);
+        if (!want.test(label)) continue;
+        const r = n.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        n.setAttribute('data-autoapply-start', '1');
+        return label;
+      }
+      return '';
+    }
+    """
+
+    def start_application(self) -> str:
+        """Click through from a job posting to the application. Returns what
+        was clicked, or "" if we were already on the form."""
+        for frame in self.frames():
+            try:
+                label = frame.evaluate(self.START_JS)
+            except Exception:
+                continue
+            if not label:
+                continue
+            try:
+                button = frame.query_selector("[data-autoapply-start]")
+                if button is not None and _click(button):
+                    _log.get(f"worker.{self.ats}").info(
+                        "clicked through to the application (%r)", label)
+                    return label
+            except Exception:
+                continue
+        return ""
 
     # A cookie banner is not a hard problem, it is just always there. AMD's
     # covers the whole iCIMS form with a modal, so discovery found zero fields

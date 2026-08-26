@@ -224,3 +224,52 @@ def test_a_rendered_challenge_is_still_caught():
         assert worker.saw_captcha()
     finally:
         browser.close(); p.stop()
+
+
+# --- getting from the posting to the application ----------------------------
+
+def test_it_clicks_through_from_a_job_posting_to_the_application():
+    """Only the Workday worker knew a posting is not an application.
+
+    On BNY's Oracle site the run stayed on the posting and filled the careers
+    page's own furniture: a "City, state, country" location search and a
+    dropzone reading "Upload or drag and drop your PDF resume file here to get
+    AI recommended jobs" -- a job-recommendation widget, not the application's
+    resume field. It reported five fields discovered and one filled, on a page
+    with no application on it.
+    """
+    from autoapply.models import Job
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        worker = GenericWorker(pg)
+        worker.open(Job(url=(FIXTURES / "job_posting.html").as_uri(),
+                        ats="generic"))
+
+        assert pg.url.endswith("apply.html"), f"still on {pg.url}"
+        labels = {(f.label or "").lower() for f in worker.discover()}
+        assert any("first name" in x for x in labels), labels
+        browser.close()
+
+
+def test_it_does_not_click_apply_when_already_on_the_form():
+    """An "Apply" further down an application page is a different job, and
+    "Apply filters" on a search page is not an application at all."""
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "apply.html").as_uri())
+        assert GenericWorker(pg).start_application() == ""
+        browser.close()
