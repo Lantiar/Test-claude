@@ -1,4 +1,7 @@
-playwright>=1.48
+# 1.62+ required: 1.46 launches Chromium with --headless=old, which
+# this container's build has removed, so every launch fails. Installing
+# skyvern pulls playwright backwards and breaks every browser test.
+playwright>=1.62
 fastapi>=0.115
 uvicorn[standard]>=0.30
 jinja2>=3.1
