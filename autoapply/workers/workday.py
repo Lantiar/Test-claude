@@ -140,6 +140,11 @@ class WorkdayWorker(WizardWorker):
             label = self._label_for(box, automation_id)
             required = "*" in label or bool(box.query_selector("[aria-required='true']"))
 
+            # A segmented date control: separate Month / Day / Year spinners,
+            # not a text box. Writing "2028-05" into one produced "12".
+            date_parts = box.query_selector_all(
+                "input[aria-label='Month'], input[aria-label='Day'], "
+                "input[aria-label='Year']")
             listbox = box.query_selector("button[aria-haspopup='listbox']")
             # Workday's other picklist: a search box that commits a choice as a
             # removable chip. Typing into it only sets the search text, so the
@@ -153,7 +158,10 @@ class WorkdayWorker(WizardWorker):
             radios = box.query_selector_all("input[type=radio]")
             checkboxes = box.query_selector_all("input[type=checkbox]")
 
-            if file_zone is not None or box.query_selector("input[type=file]"):
+            if date_parts:
+                kind = "date"
+                selector = f"{FORM_FIELD}[data-automation-id='{automation_id}']"
+            elif file_zone is not None or box.query_selector("input[type=file]"):
                 kind, selector = "file", f"{FORM_FIELD}[data-automation-id='{automation_id}'] input[type=file]"
             elif listbox is not None:
                 kind = "select"
@@ -369,6 +377,66 @@ class WorkdayWorker(WizardWorker):
             self.page.wait_for_timeout(400)
         return None
 
+    # Setting a date spinner's value directly does not register: Workday reads
+    # the change off its own keyboard handling. The trick, from
+    # berellevy/job_app_filler's fillDatePart, is to set the segment one below
+    # the target and send ArrowUp, so Workday increments it itself and the
+    # change goes through the path it expects.
+    FILL_DATE_PART_JS = r"""
+    ([el, target]) => {
+      const n = parseInt(target, 10);
+      if (isNaN(n)) return false;
+      el.value = String(n - 1);
+      el.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowUp', code: 'ArrowUp', keyCode: 38, which: 38,
+        bubbles: true, cancelable: true,
+      }));
+      el.click();
+      return true;
+    }
+    """
+
+    def _write_date(self, f: Field, value: str) -> Optional[str]:
+        """Fill a Month/Day/Year control from an ISO-ish date string."""
+        box = self.page.query_selector(f.selector)
+        if box is None:
+            return None
+
+        parts = re.findall(r"\d+", value or "")
+        if not parts:
+            return None
+        # Accept 2028-05, 05/2028 and 2028-05-31 alike: the four-digit group is
+        # the year wherever it sits, and what is left is month then day.
+        year = next((p for p in parts if len(p) == 4), "")
+        rest = [p for p in parts if p != year]
+        month = rest[0] if rest else ""
+        day = rest[1] if len(rest) > 1 else ""
+
+        wrote = []
+        for label, part in (("Month", month), ("Day", day), ("Year", year)):
+            if not part:
+                continue
+            el = box.query_selector(f"input[aria-label='{label}']")
+            if el is None:
+                continue
+            try:
+                if self.page.evaluate(self.FILL_DATE_PART_JS, [el, part]):
+                    wrote.append(part)
+                    self.page.wait_for_timeout(200)
+            except Exception:
+                continue
+        if not wrote:
+            return None
+
+        shown = []
+        for label in ("Month", "Day", "Year"):
+            el = box.query_selector(f"input[aria-label='{label}']")
+            if el is not None:
+                got = (el.evaluate("e => e.value || ''") or "").strip()
+                if got:
+                    shown.append(got)
+        return "-".join(shown) or None
+
     def _write_multiselect(self, f: Field, value: str) -> Optional[str]:
         """Select a value that may sit behind one or more categories."""
         el = self.page.query_selector(f.selector)
@@ -548,6 +616,9 @@ class WorkdayWorker(WizardWorker):
                         return text
             _click(button)          # close the listbox we opened
             return None
+
+        if f.kind == "date":
+            return self._write_date(f, value)
 
         if f.kind == "combobox":
             return self._write_multiselect(f, value)
