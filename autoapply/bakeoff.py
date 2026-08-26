@@ -46,8 +46,13 @@ def prepare(page, job: Job, profile: dict) -> tuple[bool, str]:
         log.info("sign-in -> %s (%s)", ok, detail)
         if not ok:
             return False, f"sign-in failed: {detail}"
-        worker.open(job)
-    if hasattr(worker, "settle_step"):
+        # Settle, do not re-open. Signing in leaves the browser inside the
+        # flow; navigating back to the job URL sends Workday through Apply
+        # again on an application already in progress, and what comes back is
+        # a page with no form on it -- "page did not render (timed out)" twice
+        # and then a contender scored zero for a reason that was mine.
+        worker.settle_step()
+    if not worker.discover():
         worker.settle_step()
 
     from .gate import looks_like_an_application
