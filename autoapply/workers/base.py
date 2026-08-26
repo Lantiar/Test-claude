@@ -1110,7 +1110,7 @@ class WizardWorker(Worker):
                               _log.brief(d.get("expected"), 30),
                               _log.brief(d.get("actual"), 30))
             outcome.verify_detail.update(detail)
-            all_ok = all_ok and ok
+            step_ok = ok
 
             # A wizard validates on Save and Continue: if it rejects the step it
             # re-renders it with the offending fields marked, and we are still
@@ -1133,10 +1133,26 @@ class WizardWorker(Worker):
                         log.debug("  repair: %s", _log.brief(note, 120))
                 outcome.errors.extend(notes)
                 if repaired:
+                    # A field the repair tier answered is answered. It was
+                    # never written by fill(), so its id is not in filled_ids,
+                    # and the gate then blocks on a required field that is
+                    # sitting there correctly filled in -- the run reached
+                    # Review with "no answer for required: disabilityStatus"
+                    # three lines under the log saying what it had answered it
+                    # with, and the step being accepted.
+                    for m in mappings:
+                        if (m.source in ("form-repair", "audit") and m.value
+                                and m.field_id not in outcome.filled_ids):
+                            outcome.filled_ids.append(m.field_id)
+
                     ok2, detail2 = verify_fields(self.page, fields, mappings,
                                                  outcome.filled_ids)
                     outcome.verify_detail.update(detail2)
-                    all_ok = all_ok and ok2
+                    # The state after the repair is the state of the step. The
+                    # pre-repair reading is what the repair was for, so keeping
+                    # it in the verdict makes a successful repair unable to
+                    # clear the failure that prompted it.
+                    step_ok = ok2
                     self.advance()
 
                 # Whether anything was learned here rests on the form, not on
@@ -1157,8 +1173,10 @@ class WizardWorker(Worker):
                 elif dropped := drop_lessons(store):
                     log.info("step %d rejected; discarded %d unproven answer(s)",
                              step_no, dropped)
+                all_ok = all_ok and step_ok
                 continue
 
+            all_ok = all_ok and step_ok
             if self.at_review():
                 log.info("step %d: reached the review step", step_no)
                 break

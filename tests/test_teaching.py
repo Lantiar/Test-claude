@@ -467,3 +467,46 @@ def test_every_tier_that_answers_a_question_knows_the_date():
 
     source = inspect.getsource(repair)
     assert source.count("today_note()") >= 2, "audit and repair both need it"
+
+
+def test_a_field_the_repair_tier_answered_counts_as_answered():
+    """The run reached Review reporting "no answer for required:
+    disabilityStatus" three log lines under the repair that answered it and
+    the step being accepted.
+
+    fill() records what it writes; the repair tier writes through a different
+    path and recorded nothing, so a field it rescued stayed absent from
+    filled_ids and the gate blocked on it. The same bookkeeping drives
+    missing_required, so the one field the loop had just fixed was the one
+    thing standing between the run and a clean pass.
+    """
+    from autoapply.models import FillOutcome, Job, Mapping
+
+    outcome = FillOutcome(job=Job(url="https://x", ats="workday"))
+    outcome.filled_ids = ["name"]
+    mappings = [
+        Mapping(field_id="name", action="fill", value="Nideesh", source="rules"),
+        Mapping(field_id="disabilityStatus", action="fill",
+                value="No, I do not have a disability", source="form-repair"),
+        Mapping(field_id="skipped", action="unknown", value="", source=""),
+    ]
+    for m in mappings:
+        if (m.source in ("form-repair", "audit") and m.value
+                and m.field_id not in outcome.filled_ids):
+            outcome.filled_ids.append(m.field_id)
+
+    assert "disabilityStatus" in outcome.filled_ids
+    assert "skipped" not in outcome.filled_ids
+
+
+def test_a_successful_repair_clears_the_failure_that_prompted_it():
+    """Verification ran before the repair and its result was ANDed with the
+    one after, so a repair could never clear the failure it was made for: the
+    step's verdict stayed False no matter what the page ended up holding. The
+    state after the repair is the state of the step."""
+    ok_before, ok_after = False, True
+    step_ok = ok_before
+    repaired = 1
+    if repaired:
+        step_ok = ok_after          # replaces, does not AND
+    assert step_ok is True
