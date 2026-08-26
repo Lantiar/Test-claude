@@ -405,7 +405,47 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
     for f in unresolved:
         mappings.append(Mapping(field_id=f.id, action="unknown", label=f.label))
 
+    if repeated:
+        _spread_repeated_values(mappings, repeated, profile)
     return mappings
+
+
+# Links the profile offers, in the order a second or third entry should reach
+# for them.
+_LINK_PATHS = ("links.portfolio", "links.linkedin", "links.github",
+               "links.other_website")
+
+
+def _spread_repeated_values(mappings: list[Mapping], repeated: set[str],
+                            profile: dict) -> None:
+    """Give repeated fields distinct values.
+
+    Routing them to the model was not enough: asked separately, it answered
+    both "URL*" entries with the same GitHub link, and Workday rejects the step
+    with "You can't add duplicate website URLs". The value has to be made
+    distinct where it is assigned, not argued about afterwards -- by the time
+    the audit noticed, both were already written.
+    """
+    available = [v for v in (get_value(profile, p) for p in _LINK_PATHS) if v]
+    used = {m.value for m in mappings
+            if m.field_id not in repeated and m.action == "fill" and m.value}
+
+    for m in mappings:
+        if m.field_id not in repeated:
+            continue
+        if m.action == "fill" and m.value and m.value not in used:
+            used.add(m.value)
+            continue
+        # Either a duplicate of a value already on the form, or a repeated
+        # field nothing answered. Both want the next link not yet used.
+        spare = next((v for v in available if v not in used), "")
+        if spare:
+            m.action, m.value, m.source = "fill", spare, "spread"
+            used.add(spare)
+        elif m.action == "fill":
+            # Nothing distinct left to say. Leaving it empty is honest; the
+            # gate blocks on it if the form requires it.
+            m.action, m.value = "unknown", ""
 
 
 def _build(f: Field, path: str, profile: dict, source: str, confidence: float) -> Mapping:
