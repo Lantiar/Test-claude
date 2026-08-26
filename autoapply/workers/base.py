@@ -697,6 +697,30 @@ class Worker:
         # address in it. The gate refuses to submit such a page, but by then
         # the address has already been typed into a stranger's form, and a
         # listing closing between runs is ordinary rather than exceptional.
+        # Whether this is an application is asked before anything is typed, not
+        # after. BNY's posting had expired and Oracle swapped in the careers
+        # home page client-side, without changing the URL -- so the redirect
+        # check below saw nothing wrong, and the run typed the job title into
+        # the site's search box, a location into its location filter, and the
+        # candidate's portfolio URL into a customer-service chat widget. The
+        # gate refused to submit it, correctly and far too late: refusing to
+        # submit does not un-type anything.
+        from ..gate import looks_like_an_application
+
+        probe = FillOutcome(job=job, fields=fields)
+        if fields and not looks_like_an_application(probe):
+            log = _log.get(f"worker.{self.ats}")
+            log.warning("%s does not look like an application (%s) -- not "
+                        "filling anything", _log.brief(self.page.url, 60),
+                        ", ".join((f.label or f.id or "?")[:28]
+                                  for f in fields[:4]))
+            outcome = FillOutcome(job=job, fields=fields)
+            outcome.errors.append(
+                "this page is not a job application: "
+                + ", ".join((f.label or f.id or "?")[:40] for f in fields[:4]))
+            outcome.reached_end = False
+            return outcome
+
         if not _same_posting(job.url, self.page.url) and len(fields) < 3:
             log = _log.get(f"worker.{self.ats}")
             log.warning("landed on %s, which is not %s -- not filling anything",
@@ -855,6 +879,13 @@ class Worker:
                 self.form_frame_url = f.frame_url
                 break
 
+        # What the run actually ended up looking at, for the tier that judges
+        # whether any of this was plausible.
+        try:
+            outcome.verify_detail["_landed_url"] = self.page.url
+            outcome.verify_detail["_page_title"] = self.page.title() or ""
+        except Exception:
+            pass
         outcome.saw_captcha = self.saw_captcha()
         outcome.needs_auth = self.needs_auth()
         outcome.filled_ok = not outcome.missing_required

@@ -121,6 +121,21 @@ def blockers(outcome: FillOutcome, store=None, profile: dict | None = None,
     if not outcome.verified:
         reasons.append("verification failed")
 
+    # The model's read of the run itself, as opposed to of the answers. Every
+    # other tier here can only be wrong about a value; this one is the only
+    # thing that can notice the page was never an application, or that a
+    # verdict does not match the evidence behind it.
+    if provider is not None:
+        from .sanity import review_run
+
+        plausible, problems = review_run(
+            outcome, outcome.verify_detail.get("_landed_url", ""),
+            outcome.verify_detail.get("_page_title", ""), provider)
+        if not plausible:
+            reasons.extend(problems or ["the run does not look plausible"])
+        outcome.verify_detail["_sanity"] = {
+            "plausible": plausible, "problems": problems}
+
     # The model's read of the answers themselves. Runs in both submit modes:
     # verification passing only means the form holds what we meant to type, not
     # that we meant the right thing, and in approve mode a human sees a list of

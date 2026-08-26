@@ -166,3 +166,68 @@ def test_a_wizard_that_never_reached_review_cannot_submit():
 
     outcome.reached_end = True
     assert not any("review step" in r for r in blockers(outcome, None))
+
+
+# --- auditing the run rather than the answers -------------------------------
+
+def test_the_run_review_catches_a_page_that_was_never_an_application():
+    """BNY's posting had expired and Oracle swapped in the careers home page
+    client-side, without changing the URL. The run typed the job title into the
+    site's search box, a location into its location filter, and the candidate's
+    portfolio URL into a customer-service chat widget -- and nothing objected,
+    so every tier below the perception layer reported success and the loop
+    learned "Tech - Software Engineering filter 106".
+
+    No other tier here can notice this. They can only be wrong about a value.
+    """
+    from autoapply.sanity import review_run
+
+    job = Job(url="https://eofe.fa.us2.oraclecloud.com/.../job/81251", ats="oracle")
+    outcome = FillOutcome(
+        job=job,
+        fields=[Field(id="q", selector="#q", label="Job title, skill, keyword"),
+                Field(id="l", selector="#l", label="City, state, country")],
+        mappings=[Mapping(field_id="q", action="fill",
+                          value="Software Engineer Intern",
+                          label="Job title, skill, keyword")],
+        filled_ids=["q"], verified=True,
+    )
+    p = _Provider('{"plausible": false, "problems": ["this is a job search '
+                  'page, not an application"]}')
+    plausible, problems = review_run(outcome, "https://...", "EXPLORE BNY CAREERS", p)
+    assert plausible is False
+    assert "job search page" in problems[0]
+    # It is shown what it needs to reach that conclusion.
+    assert "EXPLORE BNY CAREERS" in p.seen
+    assert "Job title, skill, keyword" in p.seen
+
+
+def test_the_run_review_only_ever_adds_blockers():
+    """A reviewer that could clear a block would be able to talk itself past
+    the deterministic checks, which is the opposite of the point."""
+    from autoapply.gate import blockers
+
+    job = Job(url="https://jobs.lever.co/acme/1", ats="lever")
+    empty = FillOutcome(job=job, verified=True)
+    p = _Provider('{"plausible": true, "problems": []}')
+    assert "no form fields discovered" in blockers(empty, None, profile=PROFILE,
+                                                   provider=p)
+
+
+def test_an_unreachable_reviewer_does_not_silently_approve():
+    """The failure mode this whole tier exists for is a check that stops
+    running and looks like a check that found nothing."""
+    from autoapply.sanity import review_run
+
+    class Dead:
+        name = "openai"
+
+        def _chat(self, system, user):
+            raise RuntimeError("429")
+
+    outcome = FillOutcome(
+        job=Job(url="https://x", ats="oracle"),
+        fields=[Field(id="a", selector="#a", label="First name")])
+    plausible, problems = review_run(outcome, "", "", Dead())
+    # It cannot invent a verdict, but it must not pretend it reached one.
+    assert plausible is True and problems == []
