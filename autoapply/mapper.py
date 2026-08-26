@@ -448,12 +448,43 @@ def _spread_repeated_values(mappings: list[Mapping], repeated: set[str],
             m.action, m.value = "unknown", ""
 
 
+# A question phrased as one. Workday's application questions are nearly all of
+# this shape, and a rule matching a word inside one answers it with a fact:
+# "In your current role, do you engage with Mastercard employees..." took the
+# current-role rule and was answered "Software Engineer Intern", and "Are you
+# currently engaged in any outside employment... please state..." took the
+# state rule and was answered "NJ".
+# The question phrase can sit anywhere: "In your current role, do you engage
+# with Mastercard employees..." is a yes/no question that does not begin like
+# one. A wh-question is excluded -- "What is your current role?" wants the role,
+# and "How did you hear about us?" wants the source.
+YES_NO_QUESTION = re.compile(
+    r"\b(do|does|did|are|were|have|has|had|will|would|can|could|should)\s+you(r)?\b")
+WH_QUESTION = re.compile(r"^(what|which|when|where|who|whom|whose|how|why)\b")
+YES_NO_ANSWERS = {"yes", "no", "y", "n", "true", "false"}
+
+
+def _looks_like_yes_no(label: str, value: str) -> bool:
+    """A yes/no question about to be answered with something that is neither."""
+    norm = normalize_label(label)
+    if WH_QUESTION.match(norm) or not YES_NO_QUESTION.search(norm):
+        return False
+    low = value.strip().lower()
+    return low not in YES_NO_ANSWERS and not any(h in low for h in DECLINE_HINTS)
+
+
 def _build(f: Field, path: str, profile: dict, source: str, confidence: float) -> Mapping:
     value = get_value(profile, path)
     if not value:
         # Optional and unanswerable is fine; required and unanswerable blocks auto.
         return Mapping(field_id=f.id, action="unknown" if f.required else "skip",
                        source=source, label=f.label)
+    # A fact is not an answer to a yes/no question. Leave it unknown so the
+    # model answers it -- which is what happened to every question on this step
+    # that a rule did not claim first.
+    if _looks_like_yes_no(f.label, value):
+        return Mapping(field_id=f.id, action="unknown", source=source, label=f.label)
+
     if f.kind in ("select", "radio", "combobox") and f.options:
         chosen = resolve_option(value, f.options)
         if chosen is None:
