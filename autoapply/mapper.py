@@ -324,7 +324,15 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
         payload = [{"field_id": f.id, "label": f.label, "kind": f.kind,
                     "options": f.options, "required": f.required}
                    for f in unresolved]
+        # What the deterministic pass already put on this form. Without it the
+        # model sees each unanswered field alone and cannot tell "Phone
+        # Extension" from the "Phone Number" sitting above it.
+        answered = [{"label": m.label or m.field_id, "value": m.value}
+                    for m in mappings
+                    if m.action in ("fill", "generate") and m.value]
         try:
+            answers = provider.answer_fields(payload, profile, answered)
+        except TypeError:
             answers = provider.answer_fields(payload, profile)
         except Exception:
             answers = {}

@@ -39,6 +39,12 @@ ANSWER_SYSTEM = (
     "- For free-text questions write 1-3 truthful sentences grounded in the "
     "profile. No placeholders, no invented enthusiasm about specifics you were "
     "not told.\n"
+    "- You are also shown the fields already answered on this same form, as "
+    "context. Use them to tell neighbouring questions apart: a form asking both "
+    "\"Phone Number\" and \"Phone Extension\" is asking two different things, "
+    "and a second \"URL\" beside one already holding a portfolio wants a "
+    "different link. Do not repeat a value already given to another field "
+    "unless the question genuinely calls for the same answer.\n"
     "- confidence is 0.0-1.0: how well the profile supports the answer."
 )
 
@@ -61,13 +67,24 @@ class LLMProvider(Protocol):
         """Free text for an open question (cover letter, 'why this company')."""
 
 
-def _prompt(fields: list[dict], profile: dict) -> str:
-    return (
-        "Candidate profile (dotted paths are what you may reference):\n"
-        + json.dumps(profile, indent=2)
-        + "\n\nForm fields needing a mapping:\n"
-        + json.dumps(fields, indent=2)
-    )
+def _prompt(fields: list[dict], profile: dict,
+            answered: list[dict] | None = None) -> str:
+    """The profile, what still needs answering, and what is already on the form.
+
+    The last part matters more than it looks. Rules match a label in isolation,
+    which is how "Phone Extension" got the phone number and how two fields both
+    labelled "URL" both got the portfolio. Showing the model what its
+    neighbours already hold is what lets it tell them apart.
+    """
+    parts = [
+        "Candidate profile (dotted paths are what you may reference):",
+        json.dumps(profile, indent=2),
+    ]
+    if answered:
+        parts += ["", "Already answered on this same form (context, do not "
+                      "re-answer these):", json.dumps(answered, indent=2)]
+    parts += ["", "Form fields needing a mapping:", json.dumps(fields, indent=2)]
+    return "\n".join(parts)
 
 
 class RulesProvider:
@@ -208,11 +225,11 @@ class OpenAICompatProvider:
             for m in data.get("mappings", []) if m.get("field_id")
         }
 
-    def answer_fields(self, fields, profile):
+    def answer_fields(self, fields, profile, answered=None):
         raw = self._chat(
             ANSWER_SYSTEM + ' Reply with JSON only: {"answers":[{"field_id":..,'
                             '"value":..,"confidence":0.0-1.0}]}',
-            _prompt(fields, profile),
+            _prompt(fields, profile, answered),
         )
         return _parse_answers(raw)
 
