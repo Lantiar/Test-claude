@@ -52,6 +52,13 @@ class FillReport:
     completion_tokens: int = 0
     errors: list[str] = field(default_factory=list)
     screenshot: str = ""
+    # How `verified` was arrived at. A single-page form can be read back by the
+    # harness after the fact, which is the fairest possible check. A wizard
+    # cannot: advancing destroys the previous step's DOM, so the review page
+    # holds nothing and an end-of-run readback scores every contender zero.
+    # There the count comes from each step being verified as it was filled --
+    # still a DOM readback, just taken at the only moment it exists.
+    scored_by: str = "harness readback"
 
     @property
     def filled(self) -> int:
@@ -70,6 +77,15 @@ class FillReport:
         first is an application. Coverage breaks ties, and time is a small
         tiebreak after that -- a filler twice as slow is worth having if it
         actually finishes.
+
+        Coverage is deliberately the small term. On a multi-step form it is
+        not comparable between contenders: the incumbent can be scored field
+        by field as it fills each step, and an agent that walks the same steps
+        on its own cannot be, because by the time anyone can look the earlier
+        steps no longer exist. Reaching the end and how far it got are
+        measurable identically for everyone, so the ranking rests on those and
+        coverage only breaks ties. On a single-page form every contender is
+        read back the same way and it means what it says.
         """
         return (100.0 * self.reached_review
                 + 10.0 * self.steps_advanced

@@ -120,11 +120,16 @@ def run_one(filler_name: str, job: Job, profile: dict,
         report.filler = filler_name
         report.seconds = time.time() - started
         try:
-            report.verified = read_back(page, job)
-            report.fields_found = max(report.fields_found,
-                                      len(report.verified))
+            held = read_back(page, job)
         except Exception as exc:
+            held = {}
             report.errors.append(f"readback failed: {exc}")
+        # Only when there is something to read. On a wizard's review page there
+        # is not, and letting an empty scan overwrite what was verified step by
+        # step scored dom at 0 filled on a form it had just walked to the end.
+        if held:
+            report.verified = held
+            report.fields_found = max(report.fields_found, len(held))
         try:
             os.makedirs(shots, exist_ok=True)
             path = os.path.join(shots, f"bakeoff-{filler_name}-{int(time.time())}.png")
@@ -153,7 +158,7 @@ def table(reports: list[FillReport]) -> str:
             f"{'steps':>6} {'review':>7} {'secs':>6}  notes"]
     rows.append("-" * 86)
     for r in reports:
-        note = r.errors[0][:34] if r.errors else ""
+        note = r.errors[0][:30] if r.errors else r.scored_by
         rows.append(f"{r.filler:<14} {r.score():>6.1f} {r.filled:>7} "
                     f"{r.fields_found:>6} {r.steps_advanced:>6} "
                     f"{'yes' if r.reached_review else 'no':>7} "

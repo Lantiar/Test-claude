@@ -41,11 +41,18 @@ class DomFiller:
             outcome = worker.walk(job, profile, store, provider, "")
             report.fields_found = len(outcome.fields)
             report.reached_review = outcome.reached_end
-            report.steps_advanced = max(0, len(
-                {f.frame_url for f in outcome.fields}) - 1)
+            report.steps_advanced = outcome.steps_done
             report.answers = {m.label or m.field_id: str(m.value)
                               for m in outcome.mappings
                               if m.action in ("fill", "generate") and m.value}
+            # Verified per step, as each was filled -- the only moment a
+            # wizard's fields exist to be read.
+            by_id = {f.id: f for f in outcome.fields}
+            report.verified = {
+                (by_id[fid].label or fid): str(d.get("actual", ""))
+                for fid, d in outcome.verify_detail.items()
+                if isinstance(d, dict) and d.get("ok") and fid in by_id}
+            report.scored_by = "per-step verification"
             report.errors.extend(outcome.errors[:5])
             return report
 

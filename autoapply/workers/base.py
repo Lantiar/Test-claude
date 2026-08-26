@@ -1480,6 +1480,7 @@ class WizardWorker(Worker):
                 # anything, so what was staged for it is discarded.
                 moved = "|".join(sorted(f.id for f in self.discover()))
                 if moved != fingerprint:
+                    outcome.steps_done += 1
                     # Past step one, the page we are on is reachable only by
                     # having walked here. A fresh browser on the job URL gets
                     # step one, so the agent lane can no longer help.

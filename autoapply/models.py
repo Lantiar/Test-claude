@@ -72,6 +72,11 @@ class FillOutcome:
     # never even opened. Single-page workers leave this True; only the wizard
     # clears it, and only when it stopped somewhere other than the review page.
     reached_end: bool = True
+    # How many wizard steps were accepted. A multi-step form cannot be scored
+    # by reading it back at the end -- advancing destroys the previous step's
+    # DOM, so the review page holds nothing at all -- and this is what an
+    # external observer can honestly count instead.
+    steps_done: int = 0
     # Does the state this run reached depend on a session? A signed-in Workday
     # wizard five steps deep exists only inside this browser's cookies. The
     # agent fallback launches a *fresh* browser on a fresh profile and navigates
