@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- A cookie modal over an application form, which is what AMD serves: the
+     form is complete and entirely unreachable until the banner is gone. The
+     page also carries the two things a careless "click anything that says
+     accept" would hit instead -- a terms checkbox and the submit button. -->
+<html>
+<head><title>Application behind a consent banner</title></head>
+<body>
+<div id="cookie-notice" role="dialog" style="position:fixed;top:0;left:0;right:0;background:#fff">
+  <h2>Cookie Notice</h2>
+  <p>This site uses cookies from us and our partners to make your browsing
+     experience more efficient. Refer to our privacy notice and cookie policy.</p>
+  <button id="cookie-settings">Cookie Settings</button>
+  <button id="cookie-reject">Reject All</button>
+  <button id="cookie-accept"
+          onclick="document.getElementById('cookie-notice').remove()">Accept Cookies</button>
+</div>
+
+<form>
+  <label for="fn">First Name</label><input id="fn" name="fn" required>
+  <label for="em">Email</label><input id="em" name="em" type="email" required>
+  <label for="rs">Resume</label><input id="rs" name="rs" type="file">
+  <label for="terms">I agree to the terms and conditions</label>
+  <input id="terms" name="terms" type="checkbox">
+  <button type="submit">I agree</button>
+</form>
+</body>
+</html>

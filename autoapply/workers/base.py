@@ -166,6 +166,67 @@ class Worker:
     def open(self, job: Job) -> None:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
+        self.dismiss_consent()
+
+    # A cookie banner is not a hard problem, it is just always there. AMD's
+    # covers the whole iCIMS form with a modal, so discovery found zero fields
+    # on a page that had a complete application on it -- the run reported "no
+    # form fields discovered" about a form it never saw. Most careers sites in
+    # any EU-facing company have one, so this is worth doing once here rather
+    # than being rediscovered per ATS.
+    CONSENT_JS = r"""
+    () => {
+      const clean = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      // Only inside something that is talking about cookies or consent: a bare
+      // "Accept" or "I agree" elsewhere on an application page is a terms
+      // checkbox or a submit, and clicking those is the opposite of harmless.
+      const banners = [];
+      document.querySelectorAll(
+        '[id*="cookie" i], [class*="cookie" i], [id*="consent" i],' +
+        ' [class*="consent" i], [aria-label*="cookie" i], [role="dialog"]'
+      ).forEach(n => {
+        const t = clean(n.innerText);
+        if (t && t.length < 3000 && /cookie|consent|privacy|gdpr/.test(t)) {
+          banners.push(n);
+        }
+      });
+      // Accept-shaped, and never a settings/reject/manage control -- those open
+      // a second dialog and leave the page just as blocked.
+      const yes = /^(accept|accept all|accept cookies|accept all cookies|allow|allow all|allow all cookies|i accept|i agree|agree|ok|got it|continue|understood|close)$/;
+      for (const banner of banners) {
+        for (const b of banner.querySelectorAll(
+                'button, a[role=button], [role=button], input[type=button], input[type=submit]')) {
+          const label = clean(b.getAttribute('aria-label') || b.innerText || b.value);
+          if (!yes.test(label)) continue;
+          const r = b.getBoundingClientRect();
+          if (!r.width || !r.height) continue;
+          b.setAttribute('data-autoapply-consent', '1');
+          return label;
+        }
+      }
+      return '';
+    }
+    """
+
+    def dismiss_consent(self) -> str:
+        """Click a cookie/consent banner away. Returns what was clicked."""
+        for frame in self.frames():
+            try:
+                label = frame.evaluate(self.CONSENT_JS)
+            except Exception:
+                continue
+            if not label:
+                continue
+            try:
+                button = frame.query_selector("[data-autoapply-consent]")
+                if button is not None and _click(button):
+                    _log.get(f"worker.{self.ats}").info(
+                        "dismissed a consent banner (%r)", label)
+                    self.page.wait_for_timeout(600)
+                    return label
+            except Exception:
+                continue
+        return ""
 
     # Single-page apps fail to load a step and say so. Workday renders
     # "Something went wrong -- Please refresh the page" while still showing the
