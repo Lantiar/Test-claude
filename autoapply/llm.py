@@ -9,7 +9,27 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Protocol
+
+from . import budget as _budget
+from . import log as _log
+
+
+def _retry_after(detail: str, headers=None) -> float:
+    """How long the API asked us to wait, in seconds."""
+    for key in ("retry-after-ms", "x-ratelimit-reset-tokens", "retry-after"):
+        raw = (headers or {}).get(key) if headers else None
+        if raw:
+            try:
+                value = float(str(raw).rstrip("ms").rstrip("s"))
+                return min(max(value / 1000 if "ms" in key else value, 0.5), 30)
+            except ValueError:
+                pass
+    if m := re.search(r"try again in ([\d.]+)(ms|s)", detail or "", re.I):
+        seconds = float(m.group(1)) / (1000 if m.group(2).lower() == "ms" else 1)
+        return min(max(seconds, 0.5), 30)
+    return 2.0
 
 SYSTEM = (
     "You map job-application form fields onto a candidate profile. "
@@ -45,6 +65,7 @@ ANSWER_SYSTEM = (
     "and a second \"URL\" beside one already holding a portfolio wants a "
     "different link. Do not repeat a value already given to another field "
     "unless the question genuinely calls for the same answer.\n"
+    + _budget.SAMPLED_NOTE + "\n"
     "- confidence is 0.0-1.0: how well the profile supports the answer."
 )
 
@@ -190,21 +211,49 @@ class OpenAICompatProvider:
             headers={"Content-Type": "application/json",
                      "Authorization": f"Bearer {self.api_key}"},
         )
-        try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                return json.loads(r.read())["choices"][0]["message"]["content"]
-        except urllib.error.HTTPError as exc:
-            # "HTTPError" alone says nothing: a 429 means slow down, a 400 means
-            # the request is malformed or too long, and they need opposite
-            # responses. Carry the code and the body's message.
-            detail = ""
+        return self._send(req)
+
+    # A rate limit is not a failure, it is a queue. The audit and repair tiers
+    # were being silently switched off by 429s for whole runs -- "audit
+    # corrected 0" meant the audit never ran, not that the form was clean -- and
+    # the answer they would have given was sitting one retry away. The window
+    # resets in well under a second.
+    RETRY_STATUSES = {429, 500, 502, 503, 504}
+    MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", "5"))
+
+    def _send(self, req) -> str:
+        import time
+        import urllib.error
+        import urllib.request
+
+        last = ""
+        for attempt in range(self.MAX_ATTEMPTS):
             try:
-                body = json.loads(exc.read().decode("utf-8", "replace"))
-                detail = (body.get("error") or {}).get("message", "")
-            except Exception:
-                pass
-            raise RuntimeError(
-                f"{exc.code} {exc.reason}: {detail[:200]}") from exc
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    return json.loads(r.read())["choices"][0]["message"]["content"]
+            except urllib.error.HTTPError as exc:
+                detail = ""
+                try:
+                    body = json.loads(exc.read().decode("utf-8", "replace"))
+                    detail = (body.get("error") or {}).get("message", "")
+                except Exception:
+                    pass
+                last = f"{exc.code} {exc.reason}: {detail[:200]}"
+                if exc.code not in self.RETRY_STATUSES:
+                    raise RuntimeError(last) from exc
+                # OpenAI says how long to wait; believe it, with a floor so a
+                # "try again in 261ms" does not turn into a spin.
+                wait = _retry_after(detail, exc.headers)
+                _log.get("llm").info(
+                    "%s -- retrying in %.1fs (attempt %d/%d)",
+                    last[:80], wait, attempt + 1, self.MAX_ATTEMPTS)
+                time.sleep(wait)
+            except Exception as exc:
+                last = f"{type(exc).__name__}: {exc}"
+                if attempt + 1 >= self.MAX_ATTEMPTS:
+                    break
+                time.sleep(1.5 * (attempt + 1))
+        raise RuntimeError(f"gave up after {self.MAX_ATTEMPTS} attempts: {last}")
 
     def map_fields(self, fields, profile):
         raw = self._chat(

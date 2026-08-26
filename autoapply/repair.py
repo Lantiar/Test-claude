@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import re
 
+from . import budget
 from .models import Field, Mapping
 
 # Fields a form has marked invalid, and the text explaining why. aria-invalid
@@ -93,6 +94,7 @@ AUDIT_SYSTEM = (
     "only the profile plus ordinary sense about what the question asks. If the "
     "field lists options, return exactly one of them, verbatim. If nothing "
     "defensible can be given, return null and it will be left for a human.\n"
+    + budget.SAMPLED_NOTE + "\n"
     'Reply with JSON only: {"wrong":[{"label":..,"value":..|null,'
     '"why":"a few words","confidence":0.0-1.0}]}'
 )
@@ -111,6 +113,7 @@ REPAIR_SYSTEM = (
     "- Read the question carefully: a field asking for a phone EXTENSION is not "
     "asking for the phone number, and a field asking for a device TYPE wants "
     "something like Mobile, not a number.\n"
+    + budget.SAMPLED_NOTE + "\n"
     'Reply with JSON only: {"fixes":[{"label":..,"value":..|null,'
     '"confidence":0.0-1.0}]}'
 )
@@ -146,8 +149,10 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
 
     payload = [{"label": m.label or m.field_id,
                 "entered": m.value,
-                "options": by_id[m.field_id].options,
-                "kind": by_id[m.field_id].kind} for m in filled]
+                "kind": by_id[m.field_id].kind,
+                **budget.describe(by_id[m.field_id].options,
+                                  hints=(m.label or "", m.value or ""))}
+               for m in filled]
     try:
         raw = provider._chat(
             AUDIT_SYSTEM,
@@ -386,8 +391,10 @@ def repair_step(worker, fields: list[Field], mappings: list[Mapping],
         "label": field.label or field.id,
         "sent": (mapping.value if mapping else ""),
         "complaint": entry.get("error") or "rejected",
-        "options": field.options,
         "kind": field.kind,
+        **budget.describe(field.options,
+                          hints=(field.label or "",
+                                 (mapping.value if mapping else ""))),
     } for entry, field, mapping in targets]
 
     try:
@@ -418,6 +425,19 @@ def repair_step(worker, fields: list[Field], mappings: list[Mapping],
         if not value:
             notes.append(f"{field.label or field.id}: no better answer available")
             continue
+        if field.options and value not in field.options:
+            # The audit tier always did this; this one wrote the model's wording
+            # straight into the control and let the form reject it a second
+            # time. It is not optional now: a long picklist is only sampled for
+            # the prompt, so the model answers in its own words by design and
+            # the match back onto the real list happens here.
+            from .mapper import resolve_option
+            resolved = resolve_option(str(value), field.options)
+            if not resolved:
+                notes.append(f"{field.label or field.id}: '{value}' is not one "
+                             "of the options offered")
+                continue
+            value = resolved
         try:
             written = worker._write(field, str(value))
         except Exception as exc:

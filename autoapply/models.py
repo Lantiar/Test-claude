@@ -72,6 +72,15 @@ class FillOutcome:
     # never even opened. Single-page workers leave this True; only the wizard
     # clears it, and only when it stopped somewhere other than the review page.
     reached_end: bool = True
+    # Does the state this run reached depend on a session? A signed-in Workday
+    # wizard five steps deep exists only inside this browser's cookies. The
+    # agent fallback launches a *fresh* browser on a fresh profile and navigates
+    # to the job URL, so it lands on the logged-out posting and cannot see any
+    # of it -- it reports the whole form missing, burns the token budget the
+    # audit tier needs, and its failures get merged into the queue reasons on
+    # top of the real ones. Fall back for markup we could not read, never for a
+    # session we could not hand over.
+    session_bound: bool = False
     verify_detail: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 

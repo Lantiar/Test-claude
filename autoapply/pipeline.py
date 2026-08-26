@@ -100,6 +100,16 @@ def _needs_agent_fallback(outcome: FillOutcome | None) -> bool:
         return True
     if outcome.saw_captcha or outcome.needs_auth:
         return False
+    if outcome.session_bound:
+        # The DOM lane signed in, or walked several steps into a wizard. Both
+        # states live in a browser the fallback does not get: it launches a
+        # fresh profile and navigates to the job URL, so it sees step one of a
+        # logged-out posting and reports every field missing. That verdict is
+        # noise, it lands on top of the real findings in the queue row, and the
+        # tokens it spends are the ones the audit tier needs. When the failure
+        # is one widget on step six, the tier for it is exploring that widget on
+        # the page we are already standing on -- not starting over.
+        return False
     return (not outcome.fields) or (not outcome.filled_ids) or (not outcome.verified)
 
 

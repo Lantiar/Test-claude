@@ -955,6 +955,9 @@ class WizardWorker(Worker):
                 ok, detail = self.try_sign_in(job)
                 log.info("step %d: sign-in -> %s (%s)", step_no, ok, detail)
                 outcome.errors.append(f"sign-in: {detail}")
+                if ok:
+                    # Everything past this point lives in this browser's session.
+                    outcome.session_bound = True
                 if not ok:
                     outcome.needs_auth = True
                     outcome.reached_end = False
@@ -1072,6 +1075,10 @@ class WizardWorker(Worker):
                 # anything, so what was staged for it is discarded.
                 moved = "|".join(sorted(f.id for f in self.discover()))
                 if moved != fingerprint:
+                    # Past step one, the page we are on is reachable only by
+                    # having walked here. A fresh browser on the job URL gets
+                    # step one, so the agent lane can no longer help.
+                    outcome.session_bound = True
                     if learned := commit_lessons(store, job.ats):
                         log.info("step %d accepted; learned %d answer(s)",
                                  step_no, len(learned))

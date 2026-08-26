@@ -10,7 +10,32 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from . import budget as _budget
 from .models import Field, Mapping
+
+
+def _profile_hints(profile: dict) -> list[str]:
+    """The candidate's own scalar facts, flattened.
+
+    Used to decide which entries of a long picklist are worth showing the
+    model: the ones that look like something the candidate actually is.
+    """
+    out: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node[:8]:
+                walk(v)
+        elif isinstance(node, (str, int, float)) and node not in (None, "", True, False):
+            text = str(node).strip()
+            if 2 <= len(text) <= 60:
+                out.append(text)
+
+    walk(profile)
+    return out[:60]
 
 # (label pattern, dotted profile path). First match wins, so order is specific -> general.
 RULES: list[tuple[str, str]] = [
@@ -308,7 +333,9 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
     # Only genuinely novel fields reach the model.
     if unresolved and provider is not None and provider.name != "rules":
         payload = [{"field_id": f.id, "label": f.label, "kind": f.kind,
-                    "options": f.options, "required": f.required} for f in unresolved]
+                    "required": f.required,
+                    **_budget.describe(f.options, hints=(f.label, f.id))}
+                   for f in unresolved]
         try:
             suggested = provider.map_fields(payload, profile)
         except Exception:
@@ -343,7 +370,13 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
     # application with one is blocked.
     if unresolved and provider is not None and provider.name != "rules":
         payload = [{"field_id": f.id, "label": f.label, "kind": f.kind,
-                    "options": f.options, "required": f.required}
+                    "required": f.required,
+                    # The candidate's own facts are what an answer is likely to
+                    # resemble, so a sampled list keeps the entries that match
+                    # them -- "United States of America (+1)" survives even when
+                    # the other 249 countries do not.
+                    **_budget.describe(f.options,
+                                       hints=(f.label, *_profile_hints(profile)))}
                    for f in unresolved]
         # What the deterministic pass already put on this form. Without it the
         # model sees each unanswered field alone and cannot tell "Phone

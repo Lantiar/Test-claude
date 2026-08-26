@@ -186,3 +186,95 @@ def test_nothing_is_learned_from_a_step_the_form_rejected(tmp_path):
     assert commit_lessons(store, "workday") == [
         "How Did You Hear About Us? = Job Board"]
     assert map_fields([field], PROFILE, "workday", store=store)[0].source == "learned"
+
+
+# --- keeping the tiers affordable enough to actually run --------------------
+
+def test_a_long_picklist_is_sampled_but_keeps_the_likely_answer():
+    """A 429 does not look like a failure, it looks like a clean form.
+
+    "audit corrected 0" meant the audit never ran. The tier was switched off by
+    a rate limit for whole runs, and the bulk of every request was two ~250-entry
+    country dropdowns that any model already knows by heart. Sampling them is
+    what keeps the tier inside the budget -- but the sample is worthless if it
+    drops the entry the candidate actually needs.
+    """
+    from autoapply.budget import digest_options
+
+    options = ([f"Country{i} (+{i})" for i in range(2, 250)]
+               + ["American Samoa (+1)", "United States of America (+1)"])
+    shown, total = digest_options(options, hints=("Country Phone Code",
+                                                  "United States", "NJ"))
+    assert total == 250, "the model is told the real size of the list"
+    assert len(shown) <= 40
+    assert "United States of America (+1)" in shown
+
+
+def test_a_bespoke_picklist_is_sent_whole():
+    """Sampling a "How did you hear about us?" would destroy the question --
+    there the options *are* the information, and none of them resembles
+    anything in the profile."""
+    from autoapply.budget import digest_options
+
+    options = ["Job Board", "University Career Fair", "Employee Referral",
+               "LinkedIn", "Other"]
+    assert digest_options(options, hints=()) == (options, None)
+
+
+def test_a_sampled_field_is_labelled_as_sampled():
+    """Without the marker the model treats the sample as exhaustive and returns
+    null for an answer that is in the full list but was not shown."""
+    from autoapply.budget import describe
+
+    small = describe(["Mobile", "Home"], hints=())
+    assert "options_sampled" not in small and "option_count" not in small
+
+    big = describe([f"Option {i}" for i in range(200)], hints=())
+    assert big["options_sampled"] is True
+    assert big["option_count"] == 200
+
+
+def test_a_rate_limit_is_waited_out_not_treated_as_a_failure():
+    """OpenAI says how long to wait; the retry believes it, with a floor so a
+    "try again in 261ms" does not turn into a spin."""
+    from autoapply.llm import _retry_after
+
+    assert _retry_after("", {"retry-after-ms": "261"}) == 0.5
+    assert _retry_after("Please try again in 3s", None) == 3.0
+    assert _retry_after("", None) == 2.0
+    # Never sleep for minutes on end.
+    assert _retry_after("", {"retry-after": "600"}) == 30
+
+
+def test_a_signed_in_run_does_not_restart_in_a_fresh_browser():
+    """The agent fallback is for markup we could not read, not a session we
+    cannot hand over.
+
+    Mastercard filled 29 fields across five steps behind a sign-in, failed to
+    verify, and the fallback launched a fresh browser on a fresh profile at the
+    job URL. That browser sees the logged-out posting -- step one -- so it
+    reported the entire form missing (agent-missing-0, agent-missing-1), merged
+    that into the queue reasons on top of the real ones, and spent the token
+    budget the audit tier needed on it.
+    """
+    from autoapply.models import FillOutcome, Job
+    from autoapply.pipeline import _needs_agent_fallback
+
+    job = Job(url="https://example.wd1.myworkdayjobs.com/x", ats="workday")
+
+    stuck = FillOutcome(job=job, verified=False)
+    stuck.fields = [Field(id="a", selector="#a", label="A")]
+    stuck.filled_ids = ["a"]
+    assert _needs_agent_fallback(stuck), "unverified and no session: agent may help"
+
+    stuck.session_bound = True
+    assert not _needs_agent_fallback(stuck)
+
+
+def test_empty_discovery_still_falls_back():
+    """The case the fallback exists for must survive the guard."""
+    from autoapply.models import FillOutcome, Job
+    from autoapply.pipeline import _needs_agent_fallback
+
+    job = Job(url="https://jobs.example.com/x", ats="icims")
+    assert _needs_agent_fallback(FillOutcome(job=job))
