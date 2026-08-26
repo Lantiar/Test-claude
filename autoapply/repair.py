@@ -143,7 +143,15 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
               and m.field_id in by_id]
     # A taught answer was already confirmed once; re-auditing it every run costs
     # a model call to relearn what is on file.
-    filled = [m for m in filled if m.source != "learned"]
+    #
+    # An answer the account already held is not ours to second-guess either.
+    # The audit judges it against the profile, finds https://www.nideesh.ai
+    # where the profile says https://nideesh.ai, calls it wrong over the www,
+    # and rewrites a field the filler had correctly left alone -- which is the
+    # duplicate-URL rejection that the prefilled protection exists to avoid,
+    # arrived at from the other direction. The audit's job is to check the
+    # answers we gave.
+    filled = [m for m in filled if m.source not in ("learned", "account")]
     if not filled:
         return 0, notes
 

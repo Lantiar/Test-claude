@@ -396,3 +396,34 @@ def test_no_errors_and_nothing_unwritten_costs_no_model_call():
 
     assert repair_step(Worker(), [], [], PROFILE, provider=Provider(),
                        store=None, ats="workday") == (0, [])
+
+
+def test_the_audit_leaves_the_accounts_own_answers_alone(tmp_path):
+    """An answer the account already held is not ours to second-guess.
+
+    Workday keeps the candidate profile between applications, so a repeatable
+    section arrives populated and the filler correctly leaves it alone. Once
+    the mapping records what is actually there, the audit sees
+    https://www.nideesh.ai where the profile says https://nideesh.ai, calls it
+    wrong over the www, and rewrites a field nobody should be touching -- which
+    is the "You can't add duplicate website URLs" rejection that the prefilled
+    protection exists to prevent, reached from the other direction. The step
+    then re-renders and the run loops on it.
+    """
+    from autoapply.models import Mapping
+    from autoapply.repair import audit_step
+
+    class Provider:
+        name = "openai"
+
+        def _chat(self, system, user):
+            raise AssertionError("the account's own answer was sent to the audit")
+
+    field = Field(id="url", selector="#url", label="URL")
+    mapping = Mapping(field_id="url", action="fill",
+                      value="https://www.nideesh.ai", label="URL",
+                      source="account")
+
+    assert audit_step(object(), [field], [mapping], PROFILE,
+                      provider=Provider(), store=_store(tmp_path),
+                      ats="workday") == (0, [])
