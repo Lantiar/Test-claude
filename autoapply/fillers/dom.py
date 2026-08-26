@@ -33,9 +33,12 @@ class DomFiller:
         store = Store(os.getenv("DB_PATH", "data/autoapply.sqlite"))
         worker = get_worker(job.ats, page) or get_worker("generic", page)
 
-        # A wizard walks itself; a single-page form is one pass.
-        if hasattr(worker, "max_steps"):
-            outcome = worker.run(job, profile, store, provider, "")
+        # walk(), not run(): the harness has already signed in and navigated
+        # to the application, and run() would re-open the job URL on top of
+        # that. It did -- the harness reported 13 fields and this reported 0 a
+        # moment later, on the same page.
+        if hasattr(worker, "walk"):
+            outcome = worker.walk(job, profile, store, provider, "")
             report.fields_found = len(outcome.fields)
             report.reached_review = outcome.reached_end
             report.steps_advanced = max(0, len(

@@ -1310,13 +1310,25 @@ class WizardWorker(Worker):
 
     def run(self, job: Job, profile: dict, store, provider,
             screenshot_dir: str) -> FillOutcome:
+        self.open(job)
+        return self.walk(job, profile, store, provider, screenshot_dir)
+
+    def walk(self, job: Job, profile: dict, store, provider,
+             screenshot_dir: str) -> FillOutcome:
+        """The step loop alone, on a browser already standing on the form.
+
+        Split out from run() so that whoever got us here does not have their
+        work thrown away. The bake-off harness signs in and navigates to the
+        application, and a filler calling run() re-opened the job URL on top
+        of that -- the harness reported 13 fields and the filler reported 0 a
+        moment later, on the same page.
+        """
         from .. import mapper
         from ..repair import (audit_step, commit_lessons, drop_lessons,
                               repair_step, teach_paths)
         from ..verify import verify_fields
 
         log = _log.get(f"wizard.{self.ats}")
-        self.open(job)
         outcome = FillOutcome(job=job)
         all_ok = True
         seen_steps: list[str] = []
