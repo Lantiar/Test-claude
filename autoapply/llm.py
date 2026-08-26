@@ -31,6 +31,20 @@ def _retry_after(detail: str, headers=None) -> float:
         return min(max(seconds, 0.5), 30)
     return 2.0
 
+_UNSUPPORTED = re.compile(
+    r"[Uu]nsupported (?:value|parameter)s?:?\s*'?\"?([a-z_]+)"
+    r"|[Uu]nrecognized request argument supplied:?\s*'?([a-z_]+)"
+    r"|'([a-z_]+)' is not supported")
+
+
+def _unsupported_param(detail: str) -> str | None:
+    """The parameter an API just rejected, if it named one."""
+    m = _UNSUPPORTED.search(detail or "")
+    if not m:
+        return None
+    return next((g for g in m.groups() if g), None)
+
+
 def today_note() -> str:
     """The one fact about the world every self-identification form needs.
 
@@ -229,22 +243,45 @@ class OpenAICompatProvider:
         self.model = model
         self.api_key = api_key
 
-    def _chat(self, system: str, user: str) -> str:
+    # Newer families reject parameters older ones require. gpt-5.x refuses
+    # temperature=0 outright -- "does not support 0 with this model, only the
+    # default (1)" -- so every call this makes would 400, and a 400 is not
+    # retryable, so switching to a bigger model would have failed every tier at
+    # once. Rather than keep a list of which model wants what, drop the
+    # offending parameter when the API names it and try once more.
+    _DROPPED: set[str] = set()
+
+    def _post(self, payload: dict) -> str:
         import urllib.error
         import urllib.request
 
-        body = json.dumps({
-            "model": self.model,
-            "messages": [{"role": "system", "content": system},
-                         {"role": "user", "content": user}],
-            "temperature": 0,
-        }).encode()
+        for key in list(self._DROPPED):
+            payload.pop(key, None)
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions", data=body,
             headers={"Content-Type": "application/json",
                      "Authorization": f"Bearer {self.api_key}"},
         )
-        return self._send(req)
+        try:
+            return self._send(req)
+        except RuntimeError as exc:
+            offender = _unsupported_param(str(exc))
+            if offender is None or offender not in payload:
+                raise
+            _log.get("llm").info(
+                "%s does not accept %r; dropping it", self.model, offender)
+            self._DROPPED.add(offender)
+            payload.pop(offender, None)
+            return self._post(payload)
+
+    def _chat(self, system: str, user: str) -> str:
+        return self._post({
+            "model": self.model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "temperature": 0,
+        })
 
     # A rate limit is not a failure, it is a queue. The audit and repair tiers
     # were being silently switched off by 429s for whole runs -- "audit
@@ -290,9 +327,7 @@ class OpenAICompatProvider:
 
     def _chat_vision(self, system: str, user: str, png_b64: str) -> str:
         """Same call with a screenshot attached, for the vision contender."""
-        import urllib.request
-
-        body = json.dumps({
+        payload = {
             "model": os.getenv("VISION_MODEL", self.model),
             "messages": [
                 {"role": "system", "content": system},
@@ -304,13 +339,8 @@ class OpenAICompatProvider:
                 ]},
             ],
             "temperature": 0,
-        }).encode()
-        req = urllib.request.Request(
-            f"{self.base_url}/chat/completions", data=body,
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {self.api_key}"},
-        )
-        return self._send(req)
+        }
+        return self._post(payload)
 
     def map_fields(self, fields, profile):
         raw = self._chat(

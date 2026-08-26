@@ -156,7 +156,10 @@ def bake_off(url: str, profile: dict, only: list[str] | None = None
 def table(reports: list[FillReport]) -> str:
     rows = [f"{'filler':<14} {'score':>6} {'filled':>7} {'found':>6} "
             f"{'steps':>6} {'review':>7} {'secs':>6}  notes"]
-    rows.append("-" * 86)
+    rows.append("-" * 92)
+    rows.append("  (moves counts whatever each contender calls a step -- wizard "
+                "steps for dom, actions for an\n   agent -- so it is shown, not "
+                "scored.)")
     for r in reports:
         note = r.errors[0][:30] if r.errors else r.scored_by
         rows.append(f"{r.filler:<14} {r.score():>6.1f} {r.filled:>7} "

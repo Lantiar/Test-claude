@@ -72,25 +72,28 @@ class FillReport:
     def score(self) -> float:
         """One number, so a bake-off has an ordering.
 
-        Reaching the end dominates: an application that is 60% filled and
-        submitted beats one that is 95% filled and stuck, because only the
-        first is an application. Coverage breaks ties, and time is a small
-        tiebreak after that -- a filler twice as slow is worth having if it
-        actually finishes.
+        Reaching the end dominates: an application 60% filled and finished
+        beats one 95% filled and stuck, because only the first is an
+        application. Then the count of fields actually holding a value, then
+        time.
 
-        Coverage is deliberately the small term. On a multi-step form it is
-        not comparable between contenders: the incumbent can be scored field
-        by field as it fills each step, and an agent that walks the same steps
-        on its own cannot be, because by the time anyone can look the earlier
-        steps no longer exist. Reaching the end and how far it got are
-        measurable identically for everyone, so the ranking rests on those and
-        coverage only breaks ties. On a single-page form every contender is
-        read back the same way and it means what it says.
+        steps_advanced is deliberately NOT in here. It cannot mean the same
+        thing for every contender -- the incumbent reports wizard steps
+        accepted, a browser-use agent reports how many actions it took, a
+        vision loop reports iterations -- and scoring on it ranked an agent
+        that never reached the review step at 415 against 159 for the one
+        contender that finished the application, on the strength of 40 agent
+        actions counted as 40 steps. It stays as a column because it is worth
+        seeing; it is not a measure of progress.
+
+        The count is absolute rather than a ratio for a related reason: a
+        contender that stops on step two is read back against the two fields
+        in front of it and scores 12/12, while one that walked to the end is
+        read back against 41. The denominators are not the same question.
         """
         return (100.0 * self.reached_review
-                + 10.0 * self.steps_advanced
-                + 20.0 * self.coverage
-                - min(self.seconds, 600) / 120.0)
+                + 2.0 * self.filled
+                - min(self.seconds, 900) / 120.0)
 
 
 class Filler(Protocol):
