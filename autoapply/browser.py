@@ -82,6 +82,14 @@ def browser_page(storage_state: str | None = None):
         launch["proxy"] = {"server": proxy}
     if tls_max := tls_ceiling(proxy):
         launch.setdefault("args", []).append(f"--ssl-version-max={tls_max}")
+    # An agent contender attaches to this browser rather than launching its
+    # own. browser-use opening its own is what made it useless on Workday: it
+    # landed on a logged-out posting, could not see the five signed-in steps
+    # already walked, and reported the whole form missing. Off unless asked
+    # for, since a debugging port is not something to open by default.
+    if port := os.getenv("AUTOAPPLY_CDP_PORT"):
+        launch.setdefault("args", []).append(f"--remote-debugging-port={port}")
+        os.environ["AUTOAPPLY_CDP_URL"] = f"http://127.0.0.1:{port}"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(**launch)

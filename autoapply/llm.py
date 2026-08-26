@@ -288,6 +288,30 @@ class OpenAICompatProvider:
                 time.sleep(1.5 * (attempt + 1))
         raise RuntimeError(f"gave up after {self.MAX_ATTEMPTS} attempts: {last}")
 
+    def _chat_vision(self, system: str, user: str, png_b64: str) -> str:
+        """Same call with a screenshot attached, for the vision contender."""
+        import urllib.request
+
+        body = json.dumps({
+            "model": os.getenv("VISION_MODEL", self.model),
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": [
+                    {"type": "text", "text": user},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/png;base64,{png_b64}",
+                        "detail": os.getenv("VISION_DETAIL", "high")}},
+                ]},
+            ],
+            "temperature": 0,
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions", data=body,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self.api_key}"},
+        )
+        return self._send(req)
+
     def map_fields(self, fields, profile):
         raw = self._chat(
             SYSTEM + ' Reply with JSON only: {"mappings":[{"field_id":..,'
