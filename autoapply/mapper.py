@@ -294,12 +294,13 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
             continue
 
         built = _build(f, path, profile, source, RULE_CONFIDENCE)
-        if built.action == "unknown" and f.options:
-            # A rule matched the label but its value is not one of the choices
-            # actually on the form: "are you currently enrolled?" pattern-matches
-            # the education rules, but the form wants Yes/No, not a school name.
-            # The model can pick from the real list, so let it try before this
-            # gives up.
+        if built.action == "unknown":
+            # A rule matched the label but could not produce a usable answer:
+            # its value is not among the form's choices, or the question is a
+            # yes/no one and the value is a fact. Either way the model gets a
+            # look before this gives up -- refusing the rule and then not asking
+            # anyone else just leaves a required field empty, which is what
+            # happened to two questions on Application Questions 2 of 2.
             unresolved.append(f)
             continue
         mappings.append(built)
