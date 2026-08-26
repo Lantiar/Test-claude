@@ -551,7 +551,16 @@ class Worker:
                     # the profile spells it; record what is actually on the form.
                     m.value = written
                     outcome.filled_ids.append(f.id)
+                else:
+                    # We know the answer and the control would not take it. Say
+                    # so, and hand the field to the repair tier -- waiting for
+                    # the form to object means never, for anything it does not
+                    # validate.
+                    outcome.unwritten.append(f.id)
+                    outcome.errors.append(
+                        f"{f.label or f.id}: could not write '{_log.brief(m.value, 40)}'")
             except Exception as exc:                       # one field never kills the run
+                outcome.unwritten.append(f.id)
                 outcome.errors.append(f"{f.label or f.id}: {exc}")
 
         for m in mappings:
@@ -1077,7 +1086,7 @@ class WizardWorker(Worker):
                 # are still standing on it. repair_step reads that verdict.
                 repaired, notes = repair_step(
                     self, fields, mappings, profile, provider=provider,
-                    store=store, ats=job.ats)
+                    store=store, ats=job.ats, unwritten=step.unwritten)
                 if notes:
                     log.info("step %d: form rejected it, repaired %d",
                              step_no, repaired)

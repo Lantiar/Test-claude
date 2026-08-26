@@ -376,28 +376,53 @@ def _norm(s: str) -> str:
 
 def repair_step(worker, fields: list[Field], mappings: list[Mapping],
                 profile: dict, provider=None, store=None,
-                ats: str = "") -> tuple[int, list[str]]:
-    """Fix what the form objected to. Returns (repaired count, notes).
+                ats: str = "", unwritten: list[str] | None = None
+                ) -> tuple[int, list[str]]:
+    """Fix what the form objected to, and what we could not write. Returns
+    (repaired count, notes).
 
     Anything that works is written to the corrections store, so the next
     application answers it correctly the first time.
     """
     notes: list[str] = []
     entries = read_errors(worker)
-    if not entries:
-        return 0, notes
 
     by_id = {m.field_id: m for m in mappings}
     targets: list[tuple[dict, Field, Mapping | None]] = []
+    claimed: set[str] = set()
+    matched = 0
     for entry in entries:
         field = _match_field(entry, fields)
         if field is not None:
             targets.append((entry, field, by_id.get(field.id)))
+            claimed.add(field.id)
+            matched += 1
+
+    # A field we had an answer for and could not write belongs here too. The
+    # form's complaint is one way to learn a field is wrong; our own failure to
+    # write it is another, known earlier and more reliably -- and for anything
+    # the form does not validate, the only way. Waiting for an objection that
+    # never comes is how "Have you ever served in the military?" stayed empty
+    # while the run reported no error against it.
+    for fid in (unwritten or []):
+        if fid in claimed:
+            continue
+        field = next((f for f in fields if f.id == fid), None)
+        if field is None:
+            continue
+        mapping = by_id.get(fid)
+        targets.append((
+            {"error": f"the filler could not enter "
+                      f"'{(mapping.value if mapping else '')}' into this control"},
+            field, mapping))
+        claimed.add(fid)
 
     if not targets:
+        return 0, notes
+
+    if entries and not matched:
         notes.append(f"form reported {len(entries)} error(s) on fields we did "
                      "not discover")
-        return 0, notes
 
     if provider is None or getattr(provider, "name", "rules") == "rules":
         notes.append(f"{len(targets)} field(s) rejected; no model to repair them")

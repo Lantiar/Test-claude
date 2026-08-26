@@ -337,3 +337,62 @@ def test_the_tls_cap_follows_the_proxy_not_an_exported_variable(monkeypatch):
     assert tls_ceiling("http://proxy:8080") == "tls1.3", "explicit setting wins"
     monkeypatch.setenv("AUTOAPPLY_TLS_MAX", "none")
     assert tls_ceiling("http://proxy:8080") == "", "and can force it off"
+
+
+def test_a_field_we_could_not_write_is_repaired_without_the_form_complaining():
+    """The form's objection is one way to learn a field is wrong. Our own
+    failure to write it is another -- known earlier, and for anything the form
+    does not validate, the only one.
+
+    "Have you ever served in the military?" was answered 'No', the radio would
+    not take it, and nothing said so: the write returned a bare None, the form
+    raised no error against a field it does not require, and the run ended
+    reporting it missing with no note that anything had been attempted.
+    """
+    from autoapply.models import Mapping
+    from autoapply.repair import repair_step
+
+    field = Field(id="mil", selector="#mil", label="Have you ever served?",
+                  kind="radio", options=["Yes", "No"])
+    mapping = Mapping(field_id="mil", action="fill", value="No",
+                      label="Have you ever served?", source="rules")
+
+    seen = {}
+
+    class Provider:
+        name = "openai"
+
+        def _chat(self, system, user):
+            seen["user"] = user
+            return '{"fixes":[{"label":"Have you ever served?","value":"No",'\
+                   '"confidence":0.9}]}'
+
+    class Worker:
+        def frames(self):
+            return []
+
+        def _write(self, f, value):
+            return value            # the second attempt sticks
+
+    repaired, notes = repair_step(Worker(), [field], [mapping], PROFILE,
+                                  provider=Provider(), store=None,
+                                  ats="workday", unwritten=["mil"])
+    assert repaired == 1, notes
+    assert "could not enter" in seen["user"], "the model is told what happened"
+
+
+def test_no_errors_and_nothing_unwritten_costs_no_model_call():
+    from autoapply.repair import repair_step
+
+    class Provider:
+        name = "openai"
+
+        def _chat(self, system, user):
+            raise AssertionError("a clean step must not reach the model")
+
+    class Worker:
+        def frames(self):
+            return []
+
+    assert repair_step(Worker(), [], [], PROFILE, provider=Provider(),
+                       store=None, ats="workday") == (0, [])

@@ -81,6 +81,13 @@ class FillOutcome:
     # top of the real ones. Fall back for markup we could not read, never for a
     # session we could not hand over.
     session_bound: bool = False
+    # Fields we had an answer for and could not write. Distinct from an
+    # unanswered field: the answer exists and the control defeated us, which is
+    # a filler problem, not a knowledge one. Left silent these just show up as
+    # "missing" at the end of the run with no note saying anything was even
+    # attempted -- and they only ever got a second chance if the form happened
+    # to mark them invalid, which it does not do for an optional one.
+    unwritten: list[str] = field(default_factory=list)
     verify_detail: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
