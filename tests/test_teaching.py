@@ -278,3 +278,42 @@ def test_empty_discovery_still_falls_back():
 
     job = Job(url="https://jobs.example.com/x", ats="icims")
     assert _needs_agent_fallback(FillOutcome(job=job))
+
+
+def test_an_unchanged_step_is_not_audited_twice(tmp_path):
+    """A wizard that will not accept a step re-renders it, and the loop fills
+    and audits it again -- three times, same questions, same answers, a full
+    set of model calls each. The verdict on identical content is identical;
+    only the tokens are new, and they are the ones the repair tier then cannot
+    get. A repair that changes a value must still be re-audited."""
+    from autoapply.repair import _AUDITED, audit_step
+    from autoapply.models import Mapping
+
+    calls = []
+
+    class Provider:
+        name = "openai"
+
+        def _chat(self, system, user):
+            calls.append(user)
+            return '{"wrong":[]}'
+
+    class Worker:
+        pass
+
+    worker = Worker()
+    _AUDITED.pop(id(worker), None)
+    fields = [Field(id="a", selector="#a", label="Phone Extension")]
+    mapping = Mapping(field_id="a", action="fill", value="224-333-1045",
+                      label="Phone Extension", source="rules")
+
+    audit_step(worker, fields, [mapping], PROFILE, provider=Provider(),
+               store=_store(tmp_path), ats="workday")
+    audit_step(worker, fields, [mapping], PROFILE, provider=Provider(),
+               store=_store(tmp_path), ats="workday")
+    assert len(calls) == 1, "the same step was audited twice"
+
+    mapping.value = "N/A"
+    audit_step(worker, fields, [mapping], PROFILE, provider=Provider(),
+               store=_store(tmp_path), ats="workday")
+    assert len(calls) == 2, "a changed answer must be audited again"

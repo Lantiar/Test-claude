@@ -153,6 +153,17 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
                 **budget.describe(by_id[m.field_id].options,
                                   hints=(m.label or "", m.value or ""))}
                for m in filled]
+    # A wizard that will not accept a step re-renders it, and the loop fills and
+    # audits it again -- up to three times, for the same questions holding the
+    # same answers, at a full set of model calls each. The audit's verdict on
+    # identical content is identical; only the tokens are new, and they are the
+    # ones the repair tier then cannot get.
+    fingerprint = json.dumps(payload, sort_keys=True)
+    seen = _AUDITED.setdefault(id(worker), set())
+    if fingerprint in seen:
+        return 0, notes
+    seen.add(fingerprint)
+
     try:
         raw = provider._chat(
             AUDIT_SYSTEM,
@@ -299,6 +310,11 @@ def teach_paths(store, worker, fields, ats: str) -> None:
 
 # label -> (ats, value), per store, awaiting the form's verdict on the step.
 _PENDING: dict[int, dict[str, tuple[str, str]]] = {}
+
+# Step content already audited this run, per worker. Keyed on the questions and
+# the answers together, so a repair that changes a value is audited again and
+# only a genuinely unchanged step is skipped.
+_AUDITED: dict[int, set[str]] = {}
 
 
 def commit_lessons(store, ats: str = "") -> list[str]:

@@ -61,8 +61,10 @@ def build_llm():
 def build_browser():
     from browser_use import Browser
 
+    from ..browser import find_chromium
+
     kwargs: dict = {"headless": os.getenv("HEADLESS", "1") != "0"}
-    if exe := os.getenv("AUTOAPPLY_CHROMIUM"):
+    if exe := find_chromium():
         kwargs["executable_path"] = exe
         # An explicit binary and a browser channel are mutually exclusive;
         # leaving a channel set makes the launch look for a browser that is

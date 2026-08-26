@@ -709,6 +709,10 @@ class Worker:
                 return value
             return None
 
+        # "'No' would not stick" names the symptom and not one of the four
+        # different causes behind it, which is a diagnosis that costs a whole
+        # run to make. Each branch says which one it was.
+        log = _log.get(f"write.{self.ats}")
         ctx = self.frame_for(f)
         members = ctx.query_selector_all(f.selector)
         labelled = []
@@ -717,10 +721,15 @@ class Worker:
             if text:
                 labelled.append((m, text))
         if not labelled:
+            log.debug("choice %s: %d member(s), none with a readable label",
+                      _log.brief(f.label or f.id, 40), len(members))
             return None
 
         chosen = resolve_option(value, [text for _, text in labelled])
         if chosen is None:
+            log.debug("choice %s: %r matches none of %s",
+                      _log.brief(f.label or f.id, 40), value,
+                      [t for _, t in labelled][:8])
             return None
         for m, text in labelled:
             if text == chosen:
@@ -728,10 +737,23 @@ class Worker:
                 # overlay-aware click, so a radio painted over by a custom
                 # control times out after 30s exactly like the buttons did.
                 if not _click(m):
+                    log.debug("choice %s: '%s' found but not clickable",
+                              _log.brief(f.label or f.id, 40), text)
                     return None
                 try:
                     if not m.is_checked():
                         m.check(timeout=4000)
+                except Exception:
+                    pass
+                # A radio that reports unchecked after both a click and a
+                # check() is one the widget is driving itself, and reporting it
+                # written would teach the answer as good on a field that is
+                # still empty.
+                try:
+                    if not m.is_checked():
+                        log.debug("choice %s: clicked '%s', still unchecked",
+                                  _log.brief(f.label or f.id, 40), text)
+                        return None
                 except Exception:
                     pass
                 return text
