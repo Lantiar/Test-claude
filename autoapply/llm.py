@@ -31,6 +31,29 @@ def _retry_after(detail: str, headers=None) -> float:
         return min(max(seconds, 0.5), 30)
     return 2.0
 
+def today_note() -> str:
+    """The one fact about the world every self-identification form needs.
+
+    Workday's Self Identify page carries a required "Date" beside the
+    signature, and nothing in a candidate profile says what day it is -- so
+    every tier correctly declined to answer it, the step could never validate,
+    and the answers the same step *had* worked out were discarded on each retry
+    because a rejected step teaches nothing. The date of signing is a fact
+    about the world, not an invented fact about the candidate, so supplying it
+    is not a guess. Which dates it may be used for is spelled out, because
+    answering a date of birth with today would be.
+    """
+    from datetime import date
+
+    today = date.today()
+    return (f"Today's date is {today:%Y-%m-%d} ({today:%B %-d, %Y}). Use it "
+            "only for a field asking when the form was signed or completed -- "
+            "a signature date, an acknowledgement date, \"today's date\". "
+            "Never for a date of birth, a graduation date, an employment date "
+            "or a date available to start: those come from the profile or "
+            "nowhere.")
+
+
 SYSTEM = (
     "You map job-application form fields onto a candidate profile. "
     "For each field return the dotted profile path whose value answers it, or "
@@ -106,6 +129,8 @@ def _prompt(fields: list[dict], profile: dict,
     neighbours already hold is what lets it tell them apart.
     """
     parts = [
+        today_note(),
+        "",
         "Candidate profile (dotted paths are what you may reference):",
         json.dumps(profile, indent=2),
     ]

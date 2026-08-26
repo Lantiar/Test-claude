@@ -427,3 +427,43 @@ def test_the_audit_leaves_the_accounts_own_answers_alone(tmp_path):
     assert audit_step(object(), [field], [mapping], PROFILE,
                       provider=Provider(), store=_store(tmp_path),
                       ats="workday") == (0, [])
+
+
+def test_the_model_is_told_what_day_it_is():
+    """Workday's Self Identify page has a required "Date" beside the signature.
+
+    Nothing in a candidate profile says what day it is, so every tier correctly
+    declined to answer it -- and because the step could then never validate,
+    the answers that same step *had* worked out were discarded on every retry,
+    since a rejected step teaches nothing. The run stalled one page short of
+    Review on a field whose answer is simply today.
+
+    The date of signing is a fact about the world, not an invented fact about
+    the candidate. Which dates it may be used for has to be spelled out, since
+    answering a date of birth with today would be an invention.
+    """
+    from datetime import date
+    from autoapply.llm import today_note
+
+    note = today_note()
+    assert f"{date.today():%Y-%m-%d}" in note
+    for permitted in ("signed", "acknowledgement"):
+        assert permitted in note
+    for forbidden in ("date of birth", "graduation date", "available to start"):
+        assert forbidden in note, f"{forbidden} must be ruled out"
+
+
+def test_every_tier_that_answers_a_question_knows_the_date():
+    """The mapper's answering pass and both repair-side prompts. A tier that
+    does not know the date cannot fix the field that stalls the run."""
+    from datetime import date
+    from autoapply.llm import _prompt
+
+    stamp = f"{date.today():%Y-%m-%d}"
+    assert stamp in _prompt([{"label": "Date"}], PROFILE)
+
+    import inspect
+    from autoapply import repair
+
+    source = inspect.getsource(repair)
+    assert source.count("today_note()") >= 2, "audit and repair both need it"

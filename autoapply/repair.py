@@ -26,6 +26,7 @@ import json
 import re
 
 from . import budget
+from .llm import today_note
 from .models import Field, Mapping
 
 # Fields a form has marked invalid, and the text explaining why. aria-invalid
@@ -175,7 +176,7 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
     try:
         raw = provider._chat(
             AUDIT_SYSTEM,
-            "Candidate profile:\n" + json.dumps(profile, indent=2)
+            today_note() + "\n\nCandidate profile:\n" + json.dumps(profile, indent=2)
             + "\n\nWhat was entered:\n" + json.dumps(payload, indent=2))
     except Exception as exc:
         notes.append(f"audit unavailable: {type(exc).__name__}")
@@ -467,7 +468,7 @@ def repair_step(worker, fields: list[Field], mappings: list[Mapping],
     try:
         raw = provider._chat(
             REPAIR_SYSTEM,
-            "Candidate profile:\n" + json.dumps(profile, indent=2)
+            today_note() + "\n\nCandidate profile:\n" + json.dumps(profile, indent=2)
             + "\n\nRejected answers:\n" + json.dumps(payload, indent=2))
     except Exception as exc:
         notes.append(f"repair pass unavailable: {type(exc).__name__}")
