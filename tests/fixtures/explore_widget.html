@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- A control of the shape the explore tier exists for: nothing about it says
+     how to drive it, and the thing you must click first is an <input>, which
+     has no innerText at all. Its visible label comes from aria-label. -->
+<html>
+<head><title>Odd widget</title></head>
+<body>
+<div data-automation-id="formField-veteranStatus">
+  <label>Have you ever served in the military?</label>
+  <input id="vet" aria-label="Have you ever served in the military?"
+         readonly value="Select One"
+         onclick="document.getElementById('menu').style.display='block'">
+  <div id="menu" style="display:none" role="listbox">
+    <div role="option" data-automation-id="promptOption"
+         onclick="document.getElementById('vet').value=this.innerText">I am not a protected veteran</div>
+    <div role="option" data-automation-id="promptOption"
+         onclick="document.getElementById('vet').value=this.innerText">I don't wish to answer</div>
+  </div>
+</div>
+</body>
+</html>

@@ -778,6 +778,35 @@ class Worker:
                 return text
         return None
 
+    # Kinds whose choices are a closed list, so answering off-list is a
+    # guaranteed rejection and asking the model blind is a guaranteed guess.
+    PICKLIST_KINDS = ("select", "combobox", "radio", "checkbox")
+
+    def probe_options(self, f: Field) -> list[str]:
+        """Read a control's real choices from the live page.
+
+        Workday renders a dropdown's options only while it is open, so
+        discovery records the field with options=[] and every tier downstream
+        answers blind. That is how "Have you ever served in the military?" got
+        'No': a sensible answer to the question as written, and not one of the
+        choices, because the real ones are VEVRAA wordings -- "I am not a
+        protected veteran", "I don't wish to answer". There is no "No" to pick,
+        so the write failed, the repair tier asked the model again with the
+        same empty option list, and it answered 'No' again.
+
+        Opening the control costs a second and turns a guess into a choice.
+        """
+        if f.kind not in self.PICKLIST_KINDS:
+            return []
+        ctx = self.frame_for(f)
+        el = ctx.query_selector(f.selector)
+        if el is None:
+            return []
+        try:
+            return self._probe_options(el, ctx)
+        except Exception:
+            return []
+
     def _probe_options(self, el, frame=None) -> list[str]:
         """Open a combobox just long enough to read its choices, then close it."""
         try:

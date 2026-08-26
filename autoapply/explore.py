@@ -24,6 +24,7 @@ DOM afterwards like any other.
 from __future__ import annotations
 
 import json
+import re
 
 from . import log as _log
 from .clicking import click as _click
@@ -57,6 +58,14 @@ CANDIDATES_JS = r"""
       const key = n.tagName + '|' + label;
       if (seen.has(key)) continue;
       seen.add(key);
+      // Tag the node so the click can find this exact element again. Looking
+      // it back up by innerText cannot work: an <input> has none -- its label
+      // here came from aria-label, placeholder or value -- so every
+      // input-backed control failed the lookup and the loop broke without a
+      // word. That is most of them, including the dropdown button this tier
+      // exists to drive. Matching on text also picks the first node with that
+      // text anywhere on the page, which need not be the one in scope.
+      n.setAttribute('data-autoapply-pick', String(out.length));
       out.push({i: out.length, tag: n.tagName.toLowerCase(), label: label,
                 aid: n.getAttribute('data-automation-id') || '',
                 role: n.getAttribute('role') || ''});
@@ -92,8 +101,14 @@ NAVIGATION = ("save and continue", "continue", "next", "submit", "back",
 
 
 def _is_navigation(label: str) -> bool:
-    low = (label or "").strip().lower()
-    return any(low == n or low.startswith(n) for n in NAVIGATION)
+    """Would clicking this leave the field behind?
+
+    Compared on whole words. A bare prefix test refuses "Backend Engineer" as
+    if it were the Back button, and a job title is exactly the kind of thing
+    this loop is picking from.
+    """
+    low = re.sub(r"[^a-z0-9 ]", " ", (label or "").lower()).strip()
+    return any(low == n or low.startswith(n + " ") for n in NAVIGATION)
 
 
 def solve_field(worker, field: Field, profile: dict, provider,
@@ -113,6 +128,8 @@ def solve_field(worker, field: Field, profile: dict, provider,
     for step in range(max_steps):
         container = ctx.query_selector(field.selector)
         if container is None:
+            log.debug("%s: selector %s matches nothing", field.label,
+                      field.selector)
             break
         try:
             root = container.evaluate_handle(
@@ -123,6 +140,7 @@ def solve_field(worker, field: Field, profile: dict, provider,
             log.debug("could not read the page: %s", exc)
             break
         if not items:
+            log.debug("%s: nothing clickable on screen", field.label)
             break
 
         current = read_value()
@@ -139,16 +157,24 @@ def solve_field(worker, field: Field, profile: dict, provider,
 
         start, end = raw.find("{"), raw.rfind("}")
         if start < 0:
+            log.debug("%s: model replied without JSON: %s", field.label,
+                      _log.brief(raw, 80))
             break
         try:
             decision = json.loads(raw[start:end + 1])
         except json.JSONDecodeError:
+            log.debug("%s: model replied with bad JSON: %s", field.label,
+                      _log.brief(raw[start:end + 1], 80))
             break
 
         if decision.get("done"):
+            log.debug("%s: model says the control is already answered (shows "
+                      "%r)", field.label, current)
             break
         index = decision.get("click")
         if not isinstance(index, int) or not 0 <= index < len(items):
+            log.debug("%s: model chose index %r, which is not on offer",
+                      field.label, index)
             break
 
         choice = items[index]
@@ -158,9 +184,12 @@ def solve_field(worker, field: Field, profile: dict, provider,
             log.debug("refused to click navigation: %s", choice["label"])
             break
 
-        target = [e for e in ctx.query_selector_all(
-            f"{choice['tag']}") if (e.inner_text() or "").strip() == choice["label"]]
-        if not target or not _click(target[0]):
+        target = ctx.query_selector(f'[data-autoapply-pick="{index}"]')
+        if target is None:
+            log.debug("chose %r but the element is gone", choice["label"])
+            break
+        if not _click(target):
+            log.debug("chose %r but it would not click", choice["label"])
             break
         before = {i["label"] for i in items}
         path.append(choice["label"])
@@ -185,5 +214,14 @@ def solve_field(worker, field: Field, profile: dict, provider,
             log.info("%s solved in %d click(s): %s",
                      field.label, len(path), " > ".join(path))
             return value, path
+        log.debug("%s: clicked %r, control still shows %r", field.label,
+                  choice["label"], value)
 
-    return read_value(), path
+    final = read_value()
+    if not final:
+        # The tier whose job is to adapt to a widget nobody wrote code for
+        # gave up. Saying so is the difference between a bug that gets fixed
+        # and one that gets worked around somewhere upstream.
+        log.info("%s: could not work it out in %d step(s)%s", field.label,
+                 max_steps, f" (tried {' > '.join(path)})" if path else "")
+    return final, path

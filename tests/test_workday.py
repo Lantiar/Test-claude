@@ -98,3 +98,39 @@ def test_workday_account_wall_is_reported_as_auth():
         "<button data-automation-id='createAccountSubmitButton'>Create Account</button>"
         "</div>") as page:
         assert WorkdayWorker(page).needs_auth() is True
+
+
+def test_a_checkbox_group_is_a_choice_not_a_text_box(tmp_path):
+    """Race/Ethnicity is eight checkboxes, and discovery only recognised a
+    group of exactly one.
+
+    Eight fell through to the text branch, whose selector matches the first
+    checkbox and whose write sets .value on it. Setting .value on a checkbox
+    does nothing whatsoever and raises nothing, so the fill reported success
+    and verification read the field back empty -- want=Asian got= -- on every
+    run, and the step could never validate because the field really was still
+    empty. A lone checkbox stays a consent tick with no choices to offer.
+    """
+    from playwright.sync_api import sync_playwright
+    from autoapply.browser import find_chromium
+    from autoapply.workers.workday import WorkdayWorker
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        page = browser.new_page()
+        page.goto((FIXTURES / "workday_selfid.html").as_uri())
+        fields = {f.label: f for f in WorkdayWorker(page).discover()}
+        browser.close()
+
+    race = next(f for k, f in fields.items() if "Race" in k)
+    assert race.kind == "checkbox", f"discovered as {race.kind}"
+    assert "type=checkbox" in race.selector
+    assert any(o.startswith("Asian") for o in race.options), race.options
+    assert len(race.options) == 8
+
+    consent = next(f for k, f in fields.items() if "consent" in k.lower())
+    assert consent.kind == "checkbox"
+    assert consent.options == [], "a lone checkbox is a tick, not a question"

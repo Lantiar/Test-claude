@@ -2,8 +2,14 @@
 from __future__ import annotations
 
 import os
+import pathlib
+import sys
 
 import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+from autoapply.browser import find_chromium  # noqa: E402
 
 
 def _chromium_available() -> tuple[bool, str]:
@@ -12,7 +18,11 @@ def _chromium_available() -> tuple[bool, str]:
     except ImportError:
         return False, "playwright is not installed"
     launch = {"headless": True}
-    if exe := os.getenv("AUTOAPPLY_CHROMIUM"):
+    # Ask the same resolver the app uses. Reading AUTOAPPLY_CHROMIUM directly
+    # meant every browser test skipped unless the variable happened to be
+    # exported -- 20 of them, quietly, reported as "20 skipped" on a line most
+    # runs never look at. A test that does not run is not a passing test.
+    if exe := find_chromium():
         launch["executable_path"] = exe
     try:
         with sync_playwright() as p:

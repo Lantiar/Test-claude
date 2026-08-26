@@ -424,6 +424,24 @@ def repair_step(worker, fields: list[Field], mappings: list[Mapping],
         notes.append(f"form reported {len(entries)} error(s) on fields we did "
                      "not discover")
 
+    # A picklist whose options were not visible at discovery time is one the
+    # model has been answering blind, which is how a question the form answers
+    # with VEVRAA wordings got 'No' twice in a row. Open it and look before
+    # asking again -- the second ask is worth nothing if it has no more to go
+    # on than the first.
+    for _, field, _ in targets:
+        if field.options or field.kind not in getattr(
+                worker, "PICKLIST_KINDS", ("select", "combobox")):
+            continue
+        try:
+            found = worker.probe_options(field)
+        except Exception:
+            found = []
+        if found:
+            field.options = found
+            notes.append(f"{field.label or field.id}: read {len(found)} option(s) "
+                         "off the live control")
+
     if provider is None or getattr(provider, "name", "rules") == "rules":
         notes.append(f"{len(targets)} field(s) rejected; no model to repair them")
         return 0, notes

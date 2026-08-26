@@ -181,7 +181,14 @@ class WorkdayWorker(WizardWorker):
                 kind = "radio"
                 selector = (f"{FORM_FIELD}[data-automation-id='{automation_id}'] "
                             "input[type=radio]")
-            elif len(checkboxes) == 1:
+            elif len(checkboxes) >= 1:
+                # A group of them is still a checkbox group. Requiring exactly
+                # one sent every multi-select group to the text branch below,
+                # whose selector matches the first checkbox and whose write
+                # sets .value on it -- which does nothing at all to a checkbox
+                # and reports success anyway. "What is your Race/Ethnicity?"
+                # verified as want=Asian got= on every run, and the step could
+                # not validate because the field was genuinely still empty.
                 kind, selector = "checkbox", f"{FORM_FIELD}[data-automation-id='{automation_id}'] input[type=checkbox]"
             else:
                 kind, selector = "text", f"{FORM_FIELD}[data-automation-id='{automation_id}'] input"
@@ -190,9 +197,11 @@ class WorkdayWorker(WizardWorker):
             # profile does not cover -- "Phone Device Type" stayed unknown every
             # run because nothing ever told anyone that Mobile was on offer.
             options: list[str] = []
-            if kind == "radio":
+            if kind == "radio" or (kind == "checkbox" and len(checkboxes) > 1):
                 # Read from the labels already in the DOM: no interaction, so
-                # no risk of disturbing the control.
+                # no risk of disturbing the control. A lone checkbox is a
+                # consent tick and has no choices to offer; a group of them is
+                # a question, and its labels are the answers.
                 options = self._radio_labels(box)
             elif kind == "combobox" and (required or match_rule(label) is None):
                 # Read these even when a rule answers them, because the rule's
@@ -215,9 +224,11 @@ class WorkdayWorker(WizardWorker):
         return fields
 
     def _radio_labels(self, box) -> list[str]:
-        """The choices in a radio group, read without touching the page."""
+        """The choices in a radio or checkbox group, read without touching the
+        page."""
         labels: list[str] = []
-        for radio in box.query_selector_all("input[type=radio]"):
+        for radio in box.query_selector_all(
+                "input[type=radio], input[type=checkbox]"):
             text = ""
             rid = radio.get_attribute("id") or ""
             if rid:
@@ -472,6 +483,11 @@ class WorkdayWorker(WizardWorker):
             available = self._visible_options("promptOption", seen)
             if not available:
                 break
+            # Same reason as the dropdown above: the open menu is the only
+            # place these exist, so whatever else happens, let the tiers that
+            # come after this see what was on offer at the level we failed at.
+            if depth == 0 and not f.options:
+                f.options = [t for _, t in available]
             target = wanted[depth] if depth < len(wanted) else (
                 wanted[-1] if wanted else "")
             chosen = resolve_option(target, [t for _, t in available]) if target else None
@@ -606,6 +622,21 @@ class WorkdayWorker(WizardWorker):
                 text = (el.inner_text() or "").strip()
                 if text:
                     options.append((el, text))
+
+            # Whatever happens next, this is the first and only moment anything
+            # knows what this control actually offers, so record it on the
+            # field. Discovery skips reading a dropdown whose label a rule
+            # matches -- and that is precisely the case that goes wrong, because
+            # a rule matching the label is not the same as the profile's answer
+            # being on the menu. "Have you ever served in the military?" matched
+            # the veteran-status rule, so nothing read the options, so the model
+            # was asked with options=[] and answered "No" -- correct English,
+            # and not one of the choices, which are VEVRAA wordings. It then
+            # answered "No" again on the retry, because the retry told it no
+            # more than the first attempt had. Handing the tiers the real list
+            # is the difference between a guess and a choice.
+            if options:
+                f.options = [t for _, t in options]
 
             chosen = resolve_option(value, [t for _, t in options])
             if chosen is not None:

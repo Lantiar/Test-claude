@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- Mastercard's Voluntary Disclosures step, reduced to the two controls that
+     defeated the filler. Race/Ethnicity is a group of eight checkboxes, which
+     the discovery branch for "exactly one checkbox" missed entirely: the field
+     fell through to the text branch, whose selector matches the first box and
+     whose write sets .value on it. Nothing happens and it reports success. -->
+<html>
+<head><title>Voluntary Disclosures</title></head>
+<body>
+<form>
+  <div data-automation-id="formField-ethnicityMulti">
+    <label>What is your Race/Ethnicity?*</label>
+    <div>
+      <input type="checkbox" id="eth-1"><label for="eth-1">American Indian or Alaska Native (Not Hispanic or Latino) (United States of America)</label>
+      <input type="checkbox" id="eth-2"><label for="eth-2">Asian (Not Hispanic or Latino) (United States of America)</label>
+      <input type="checkbox" id="eth-3"><label for="eth-3">Black or African American (Not Hispanic or Latino) (United States of America)</label>
+      <input type="checkbox" id="eth-4"><label for="eth-4">Hispanic or Latino (United States of America)</label>
+      <input type="checkbox" id="eth-5"><label for="eth-5">Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino) (United States of America)</label>
+      <input type="checkbox" id="eth-6"><label for="eth-6">Prefer Not To Self Identify (United States of America)</label>
+      <input type="checkbox" id="eth-7"><label for="eth-7">Two or More Races (Not Hispanic or Latino) (United States of America)</label>
+      <input type="checkbox" id="eth-8"><label for="eth-8">White (Not Hispanic or Latino) (United States of America)</label>
+    </div>
+  </div>
+
+  <!-- A lone checkbox is a consent tick, not a question with choices. -->
+  <div data-automation-id="formField-consent">
+    <label>Except where consent is not required, I consent to the above terms*</label>
+    <input type="checkbox" id="consent">
+  </div>
+</form>
+</body>
+</html>
