@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 
 from .. import log as _log
 from ..models import Job
@@ -62,8 +63,16 @@ class ComputerUseFiller:
         provider = get_provider()
         max_steps = int(os.getenv("VISION_MAX_STEPS", "25"))
 
+        # A screenshot is thousands of tokens, so a vision loop is the one
+        # contender that can exhaust a per-minute token budget on its own --
+        # it did, at step 8, and gave up mid-application with the form half
+        # answered. Pace it rather than retry harder: the limit is per minute,
+        # so spacing the steps is what actually fits inside it.
+        pace = float(os.getenv("VISION_STEP_SECONDS", "4"))
         for step in range(max_steps):
-            shot = page.screenshot(type="png")
+            if step:
+                time.sleep(pace)
+            shot = page.screenshot(type="png", scale="css")
             b64 = base64.b64encode(shot).decode()
             try:
                 raw = provider._chat_vision(

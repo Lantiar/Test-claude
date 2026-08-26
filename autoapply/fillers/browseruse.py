@@ -69,11 +69,32 @@ class BrowserUseFiller:
             return await agent.run(
                 max_steps=int(os.getenv("AGENT_MAX_STEPS", "40")))
 
-        try:
-            history = asyncio.run(go())
-        except Exception as exc:
-            report.errors.append(f"{type(exc).__name__}: {str(exc)[:120]}")
+        # In its own thread with its own loop. The harness holds the page
+        # through Playwright's *sync* API, which is itself driven by a running
+        # event loop, so asyncio.run() here raises "cannot be called from a
+        # running event loop" and the contender scores zero having never
+        # started. browser-use reaches the browser over CDP rather than through
+        # that page object, so a separate thread is free to drive it.
+        import threading
+
+        box: dict = {}
+
+        def runner():
+            try:
+                box["history"] = asyncio.run(go())
+            except Exception as exc:            # carried back across the thread
+                box["error"] = f"{type(exc).__name__}: {str(exc)[:140]}"
+
+        thread = threading.Thread(target=runner, daemon=True)
+        thread.start()
+        thread.join(timeout=float(os.getenv("AGENT_TIMEOUT", "900")))
+        if thread.is_alive():
+            report.errors.append("agent did not finish within AGENT_TIMEOUT")
             return report
+        if "error" in box:
+            report.errors.append(box["error"])
+            return report
+        history = box.get("history")
 
         try:
             report.steps_advanced = len(getattr(history, "history", []) or [])
