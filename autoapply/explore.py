@@ -124,6 +124,7 @@ def solve_field(worker, field: Field, profile: dict, provider,
 
     ctx = worker.frame_for(field)
     path: list[str] = []
+    clicked: set[str] = set()
 
     for step in range(max_steps):
         container = ctx.query_selector(field.selector)
@@ -178,6 +179,17 @@ def solve_field(worker, field: Field, profile: dict, provider,
             break
 
         choice = items[index]
+        # Clicking the same thing again is not progress. On Oracle's "City,
+        # state, country" the model chose "Search by Location" six times in a
+        # row, and the loop reported the field solved with a recipe reading
+        # "Search by Location > Search by Location > ..." six times -- which was
+        # then taught, so every later run would replay that nonsense in
+        # preference to the rules beneath it.
+        if choice["label"] in clicked:
+            log.debug("%s: model chose %r again; stopping rather than looping",
+                      field.label, choice["label"])
+            break
+        clicked.add(choice["label"])
         if _is_navigation(choice["label"]):
             # The model reaching for Save and Continue means it thinks the field
             # is done. Advancing here would leave the step half-filled.

@@ -249,6 +249,15 @@ def usable(value) -> str:
         return ""
     if _NOT_AN_ANSWER.match(text):
         return ""
+    # A click path that is the same label over and over is a loop that was
+    # mistaken for progress, not a route to an answer. Oracle's "City, state,
+    # country" produced "Search by Location" six times and it was taught, which
+    # is worse than learning nothing: a taught answer outranks the rules
+    # beneath it and would replay that forever.
+    if " > " in text:
+        steps = [s.strip() for s in text.split(" > ") if s.strip()]
+        if len(steps) > 1 and len(set(steps)) == 1:
+            return ""
     return text
 
 

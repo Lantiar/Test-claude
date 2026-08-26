@@ -611,3 +611,37 @@ def test_a_login_url_serving_the_applications_first_page_is_not_a_wall():
     # A password field settles it even on a page that also mentions applying.
     both = W([Frame("Sign in to begin the application process", password=True)])
     assert not both.looks_like_an_entry_step()
+
+
+def test_a_click_path_that_repeats_itself_is_not_an_answer(tmp_path):
+    """Oracle's "City, state, country" made the explore tier click "Search by
+    Location" six times in a row. It reported the field solved with a recipe
+    reading "Search by Location > Search by Location > ..." and, because the
+    form raised no complaint, that got committed as a lesson.
+
+    Learning it is worse than learning nothing: a taught answer outranks the
+    rules beneath it, so every later run would replay the loop in preference
+    to anything that might work.
+    """
+    from autoapply.repair import _teach, commit_lessons, usable
+
+    assert usable("Search by Location > Search by Location > Search by Location") == ""
+    assert usable("A > A") == ""
+    # A genuine nested route keeps its distinct levels.
+    assert usable("Job Board > Handshake") == "Job Board > Handshake"
+    assert usable("Mobile") == "Mobile"
+
+    store = _store(tmp_path)
+    _teach(store, "oracle", "City, state, country", "X > X > X")
+    assert commit_lessons(store, "oracle") == []
+
+
+def test_explore_stops_when_the_model_picks_the_same_thing_twice():
+    """Clicking the same control again is not progress, and six of them in a
+    row is how the loop above got built."""
+    import inspect
+    from autoapply import explore
+
+    source = inspect.getsource(explore.solve_field)
+    assert "clicked" in source
+    assert 'choice["label"] in clicked' in source
