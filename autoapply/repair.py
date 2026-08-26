@@ -95,6 +95,9 @@ AUDIT_SYSTEM = (
     "only the profile plus ordinary sense about what the question asks. If the "
     "field lists options, return exactly one of them, verbatim. If nothing "
     "defensible can be given, return null and it will be left for a human.\n"
+    "- A signature or acknowledgement date holding today's date is CORRECT. Do "
+    "not flag it. You are told today's date above; a date field on a form being "
+    "signed today is supposed to contain it.\n"
     + budget.SAMPLED_NOTE + "\n"
     'Reply with JSON only: {"wrong":[{"label":..,"value":..|null,'
     '"why":"a few words","confidence":0.0-1.0}]}'
