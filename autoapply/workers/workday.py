@@ -305,6 +305,70 @@ class WorkdayWorker(WizardWorker):
         except Exception:
             return []
 
+    # Workday's own search-and-select, reached by calling the React handler the
+    # input already has. Adopted from berellevy/job_app_filler, which the
+    # selector conventions in this file were already cross-checked against --
+    # its DropdownSearchable does this and notes "the dropdown doesn't need to
+    # be opened".
+    #
+    # It is better than clicking through the menu in every way that has cost
+    # this project time: Workday resolves a nested answer itself, so the
+    # category/leaf walk is unnecessary; nothing is clicked, so the click_filter
+    # overlay is irrelevant; and no menu is opened, so there is no neighbouring
+    # popup to accidentally read.
+    REACT_PICK_JS = r"""
+    ([el, value]) => {
+      let props = null;
+      for (const k in el) { if (k.startsWith('__reactProps')) { props = el[k]; break; } }
+      if (!props || typeof props.onKeyDown !== 'function') return 'no-handler';
+      props.onKeyDown({key: 'Tab', target: {value: value}});
+      return 'dispatched';
+    }
+    """
+
+    def _react_pick(self, f: Field, value: str) -> Optional[str]:
+        """Ask Workday to select `value` itself. None if it did not take."""
+        box = self.page.query_selector(
+            f"{FORM_FIELD}[data-automation-id='formField-{f.id}']")
+        if box is None:
+            return None
+        el = box.query_selector("input")
+        if el is None:
+            return None
+        try:
+            if self.page.evaluate(self.REACT_PICK_JS, [el, value]) != "dispatched":
+                return None
+        except Exception:
+            return None
+        self.page.wait_for_timeout(700)
+        # The chosen item appears in the widget's own selected list. Reading
+        # that rather than the input is the point -- the input holds the search
+        # text, which is what made a typed value look filled when it was not.
+        chip = box.query_selector("[data-automation-id='selectedItem'], "
+                                  "ul[data-automation-id='selectedItemList'] li")
+        got = (chip.inner_text() or "").strip() if chip is not None else ""
+        if not got:
+            return None
+
+        # Workday's search is fuzzy and will confidently select the wrong
+        # entry: asked for "United States of America (+1)" it chose "American
+        # Samoa (+1)". Handing that back would put a wrong answer on the form
+        # that the form is perfectly happy to accept. Asked for "Job Board" it
+        # chose "University Job Board", which is the nested leaf and correct --
+        # so the test is whether one contains the other, not equality.
+        want, low = value.strip().lower(), got.lower()
+        if want and low and (want in low or low in want):
+            return got
+
+        # Wrong pick: clear it, so the fallback does not stack a second
+        # selection on top of a bad one.
+        remove = box.query_selector("[data-automation-id='DELETE_charm'], "
+                                    "[data-automation-id='selectedItem'] button")
+        if remove is not None:
+            _click(remove)
+            self.page.wait_for_timeout(400)
+        return None
+
     def _write_multiselect(self, f: Field, value: str) -> Optional[str]:
         """Select a value that may sit behind one or more categories."""
         el = self.page.query_selector(f.selector)
@@ -316,6 +380,10 @@ class WorkdayWorker(WizardWorker):
         self.page.wait_for_timeout(700)
 
         from ..mapper import resolve_option
+
+        # Let Workday do it first; fall back to walking the menu by hand.
+        if committed := self._react_pick(f, value):
+            return committed
 
         def chip() -> str:
             """The committed selection, which is the only proof of success."""
