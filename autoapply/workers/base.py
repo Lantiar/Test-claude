@@ -509,11 +509,40 @@ class Worker:
         outcome = FillOutcome(job=job, fields=fields, mappings=mappings)
         by_id = {f.id: f for f in fields}
 
+        # Workday keeps the candidate profile between applications, so a
+        # repeatable section arrives already populated -- websites, work
+        # history, uploads. Writing into an entry that already holds an answer
+        # is what produced "You can't add duplicate website URLs" even after
+        # the two entries on the page were given different links: the clash was
+        # with what the account had stored from an earlier run, not with each
+        # other. Read what is already there and leave it alone.
+        repeated_labels = {}
+        for f in fields:
+            key = (f.label or "").strip().lower()
+            if key:
+                repeated_labels[key] = repeated_labels.get(key, 0) + 1
+        prefilled: set[str] = set()
+        for f in fields:
+            if repeated_labels.get((f.label or "").strip().lower(), 0) < 2:
+                continue
+            try:
+                el = self.frame_for(f).query_selector(f.selector)
+                current = (el.evaluate("e => e.value || ''") or "").strip() if el else ""
+            except Exception:
+                current = ""
+            if current:
+                prefilled.add(f.id)
+                outcome.filled_ids.append(f.id)
+
         for m in mappings:
             if m.action not in ("fill", "generate") or not m.value:
                 continue
             f = by_id.get(m.field_id)
             if f is None:
+                continue
+            if f.id in prefilled:
+                outcome.errors.append(
+                    f"{f.label or f.id}: already answered on the account, left as is")
                 continue
             try:
                 written = self._write(f, m.value)
