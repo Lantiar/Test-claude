@@ -310,16 +310,57 @@ class Worker:
                 return fr
         return self.page
 
+    # A challenge is a thing on the screen, not a word in the source.
+    #
+    # This used to scan the page HTML for "captcha" and friends. Everything
+    # that merely talks about captchas matched: AMD's iCIMS page embeds a JSON
+    # translation bundle containing
+    # "hcaptcha":{"privacy":"privacy","protected":"protected by hcaptcha."} for
+    # a widget it never renders, and the run reported CAPTCHA present and
+    # refused to proceed on a page with no challenge anywhere on it. Workday's
+    # noCaptchaWrapper had already forced one exception to be hard-coded, which
+    # should have been the clue that the test itself was wrong rather than the
+    # marker list incomplete.
+    #
+    # Only an interactive challenge stops us, and an interactive challenge has
+    # to be visible to be solved. An invisible reCAPTCHA v3 scores silently and
+    # asks nothing of anyone, so blocking on one means blocking on a great many
+    # forms nobody is being challenged by.
+    CAPTCHA_JS = r"""
+    () => {
+      // Widget containers and challenge iframes. grecaptcha-badge is
+      // deliberately absent: the v2 badge sits in the corner of a great many
+      // forms and challenges nobody.
+      const sel = 'iframe[src*="recaptcha" i], iframe[src*="hcaptcha" i],' +
+                  ' iframe[src*="turnstile" i], .g-recaptcha, #g-recaptcha,' +
+                  ' .h-captcha, .cf-turnstile';
+      for (const n of document.querySelectorAll(sel)) {
+        if (n.classList.contains('grecaptcha-badge')) continue;
+        const cs = getComputedStyle(n);
+        // Being hidden on purpose is what separates an invisible v3 -- which
+        // scores silently and asks nothing of anyone -- from a challenge. Size
+        // is not: a container that has not rendered yet measures zero and will
+        // still put a checkbox in front of someone a moment later.
+        if (cs.display === 'none' || cs.visibility === 'hidden'
+            || cs.opacity === '0') continue;
+        return (n.getAttribute('src') || n.className || n.id || 'captcha')
+               .toString().slice(0, 80);
+      }
+      return '';
+    }
+    """
+
     def saw_captcha(self) -> bool:
-        html = ""
-        for fr in self.frames():
+        for frame in self.frames():
             try:
-                html += (fr.content() or "").lower()
+                found = frame.evaluate(self.CAPTCHA_JS)
             except Exception:
                 continue
-        for negative in NON_CAPTCHA_MARKERS:
-            html = html.replace(negative, "")
-        return any(m in html for m in CAPTCHA_MARKERS)
+            if found:
+                _log.get(f"worker.{self.ats}").info(
+                    "captcha challenge on screen: %s", _log.brief(found, 60))
+                return True
+        return False
 
     # Selectors that mean "you must sign in or create an account to continue".
     auth_selectors: tuple[str, ...] = ()

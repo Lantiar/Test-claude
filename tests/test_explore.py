@@ -180,3 +180,47 @@ def test_it_does_not_click_the_forms_own_agree_or_submit():
         assert worker.dismiss_consent() == ""
         assert not pg.eval_on_selector("#terms", "e => e.checked")
         browser.close()
+
+
+# --- captchas ---------------------------------------------------------------
+
+def _worker_on(fixture):
+    from playwright.sync_api import sync_playwright
+    from autoapply.workers.generic import GenericWorker
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    p = sync_playwright().start()
+    browser = p.chromium.launch(**launch)
+    pg = browser.new_page()
+    pg.goto((FIXTURES / fixture).as_uri())
+    return GenericWorker(pg), browser, p
+
+
+def test_talking_about_captchas_is_not_having_one():
+    """AMD's iCIMS page embeds a JSON translation bundle reading
+    "hcaptcha":{"protected":"protected by hcaptcha."} for a widget it never
+    renders, and the run reported CAPTCHA present and refused to proceed on a
+    page with no challenge anywhere on it.
+
+    Workday's noCaptchaWrapper had already forced one exception to be
+    hard-coded into the marker list, which should have been the clue that the
+    test itself was wrong rather than the list incomplete. A challenge is a
+    thing on the screen, not a word in the source.
+    """
+    worker, browser, p = _worker_on("captcha_talk.html")
+    try:
+        assert not worker.saw_captcha()
+    finally:
+        browser.close(); p.stop()
+
+
+def test_a_rendered_challenge_is_still_caught():
+    """The check must not have been loosened into uselessness: a widget of the
+    size a person actually clicks still stops the run."""
+    worker, browser, p = _worker_on("captcha_real.html")
+    try:
+        assert worker.saw_captcha()
+    finally:
+        browser.close(); p.stop()

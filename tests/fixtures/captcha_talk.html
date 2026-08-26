@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- A page that talks about captchas at length and challenges nobody. This is
+     what AMD's iCIMS tenant serves: a JSON translation bundle for an hCaptcha
+     widget it never renders, plus the usual privacy-policy prose. The old
+     substring scan called this "CAPTCHA present" and refused to proceed. -->
+<html>
+<head>
+<title>Talks about captchas, has none</title>
+<script type="application/json" id="i18n">
+{"hcaptcha":{"privacy":"privacy","terms":"terms","protected":"protected by hcaptcha."},
+ "recaptcha":{"label":"reCAPTCHA verification"}}
+</script>
+</head>
+<body>
+<div data-automation-id="noCaptchaWrapper"></div>
+<p>This site is protected by reCAPTCHA and the Google Privacy Policy applies.</p>
+
+<!-- The v2 badge: present on a great many forms, challenges no one. -->
+<div class="grecaptcha-badge" style="width:70px;height:60px"></div>
+<!-- An invisible v3 widget: scores silently, asks nothing. -->
+<div class="g-recaptcha" data-sitekey="abc" style="display:none"></div>
+
+<form>
+  <label for="fn">First Name</label><input id="fn" name="fn">
+  <label for="em">Email</label><input id="em" name="em">
+</form>
+</body>
+</html>
