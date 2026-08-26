@@ -66,8 +66,13 @@ class BrowserUseFiller:
             agent = Agent(
                 task=TASK.format(profile=json.dumps(profile, indent=2)),
                 llm=build_llm(), browser=browser)
+            # A wizard is seven steps and each one takes the agent several
+            # actions: reading the page, opening a dropdown, picking, saving.
+            # At 40 it ran out on Voluntary Disclosures -- "final response
+            # because the step budget is exhausted" -- six steps in and still
+            # working, and was scored as though it had failed.
             return await agent.run(
-                max_steps=int(os.getenv("AGENT_MAX_STEPS", "40")))
+                max_steps=int(os.getenv("AGENT_MAX_STEPS", "150")))
 
         # In its own thread with its own loop. The harness holds the page
         # through Playwright's *sync* API, which is itself driven by a running

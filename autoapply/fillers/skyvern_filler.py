@@ -77,9 +77,22 @@ class SkyvernFiller:
                                      required_env_vars=["OPENAI_API_KEY"],
                                      supports_vision=True,
                                      add_assistant_prefix=False),
+                # Attach, do not launch. Left to itself Skyvern starts its own
+                # browser and dies in under a second on
+                # "Executable doesn't exist at .../chromium-1234/", because its
+                # pinned playwright wants a build this container does not have
+                # -- the same version pin that cost a run on our own launches.
+                # cdp-connect also happens to be the whole point: the browser it
+                # attaches to is the one already signed in and standing on the
+                # form.
+                settings={
+                    "BROWSER_TYPE": "cdp-connect",
+                    "BROWSER_REMOTE_DEBUGGING_URL": cdp,
+                    "CHROME_EXECUTABLE_PATH": _chromium(),
+                    "MAX_STEPS_PER_RUN": int(os.getenv("SKYVERN_MAX_STEPS", "40")),
+                },
             ))
             try:
-                await sky.connect_to_browser_over_cdp(cdp)
                 return await sky.run_task(
                     prompt=TASK.format(profile=json.dumps(profile, indent=2)),
                     url=page.url,
@@ -117,6 +130,14 @@ class SkyvernFiller:
         if "complete" in status.lower():
             report.reached_review = True
         return report
+
+
+def _chromium() -> str:
+    """The browser this machine actually has, for any path Skyvern still
+    launches through."""
+    from ..browser import find_chromium
+
+    return find_chromium()
 
 
 async def _maybe_await(value):
