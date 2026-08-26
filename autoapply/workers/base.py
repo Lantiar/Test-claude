@@ -1223,29 +1223,37 @@ class WizardWorker(Worker):
 def _same_posting(wanted: str, landed: str) -> bool:
     """Are we still on the job we asked for?
 
-    Compared on host and on the identifying parts of the path, because an ATS
-    rewrites a job URL constantly and legitimately: Workday adds /en-US and
-    /apply/applyManually, Greenhouse moves between job-boards.greenhouse.io and
-    the company's own domain, and every one of them appends tracking. What does
-    not survive a redirect to a marketing homepage is the job's own identifier
-    -- the long id or slug that names this posting and nothing else.
+    The posting's own identifier decides it, not the host. A company's careers
+    site handing off to its ATS tenant is how a large share of real links work
+    -- careers.amd.com/careers-home/jobs/91176 becomes
+    campus-amd.icims.com/jobs/91176/login, a different domain and the same job
+    -- so comparing hosts rejects the normal case. The id survives that handoff.
+    What it does not survive is a redirect to a marketing homepage, which is
+    the thing worth catching.
+
+    Host is the fallback for a URL carrying nothing identifiable, where the
+    only question left is whether we are still on the same site at all.
     """
     from urllib.parse import urlparse
 
     def marks(url: str) -> tuple[str, set[str]]:
         parsed = urlparse(url or "")
         host = (parsed.hostname or "").lower().removeprefix("www.")
-        # Registrable-ish suffix, so jobs.ashbyhq.com and www.ashbyhq.com match
-        # but ashbyhq.com and workday.com do not.
+        # Registrable-ish suffix, so jobs.ashbyhq.com and www.ashbyhq.com match.
         host = ".".join(host.split(".")[-2:])
+        # A segment with a digit in it: a job number, a slug ending in one, a
+        # UUID. Four characters is enough -- AMD's is 91176, and requiring six
+        # dropped it and took the host comparison down with it.
         ids = {seg.lower() for seg in re.split(r"[/?&=]", parsed.path or "")
-               if len(seg) >= 6 and re.search(r"\d", seg)}
+               if len(seg) >= 4 and re.search(r"\d", seg)}
         return host, ids
 
     want_host, want_ids = marks(wanted)
     got_host, got_ids = marks(landed)
-    if want_host != got_host:
+    if want_ids and got_ids:
+        return bool(want_ids & got_ids)
+    if want_ids and not got_ids:
+        # We asked for an identifiable posting and ended up somewhere that
+        # names no posting at all. That is the homepage case.
         return False
-    if not want_ids:
-        return True          # nothing identifying to check; give it the benefit
-    return bool(want_ids & got_ids)
+    return want_host == got_host

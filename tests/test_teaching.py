@@ -530,6 +530,15 @@ def test_a_redirect_to_a_marketing_page_is_not_an_application():
     assert not _same_posting(ashby, "https://www.ashbyhq.com/")
     assert not _same_posting(ashby, "https://jobs.ashbyhq.com/notion/9999zzzz/application")
 
+    # A company's careers site handing off to its ATS tenant is how a large
+    # share of real links work: same job, different domain. Comparing hosts
+    # rejected the normal case -- this is the posting AMD actually serves.
+    assert _same_posting("https://careers.amd.com/careers-home/jobs/91176",
+                         "https://campus-amd.icims.com/jobs/91176/login")
+    assert _same_posting("https://careers.bny.com/jobs/81251",
+                         "https://eofe.fa.us2.oraclecloud.com/hcmUI/"
+                         "CandidateExperience/en/sites/BNY-Careers/job/81251")
+
     # An ATS rewriting its own URL is normal and must still match.
     wd = ("https://mastercard.wd1.myworkdayjobs.com/Campus/job/OFallon-Missouri/"
           "Software-Engineer-Intern--Summer-2027---United-States_R-287618-1")
