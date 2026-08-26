@@ -61,7 +61,7 @@ def build_llm():
 def build_browser():
     from browser_use import Browser
 
-    from ..browser import find_chromium
+    from ..browser import find_chromium, tls_ceiling
 
     kwargs: dict = {"headless": os.getenv("HEADLESS", "1") != "0"}
     if exe := find_chromium():
@@ -76,7 +76,8 @@ def build_browser():
     # gets from browser.py have to be handed to it explicitly -- without them
     # it launches a browser that cannot reach anything and the run dies at
     # startup rather than on the page.
-    if proxy := os.getenv("HTTPS_PROXY") or os.getenv("https_proxy"):
+    proxy = os.getenv("HTTPS_PROXY") or os.getenv("https_proxy")
+    if proxy:
         kwargs["proxy"] = {"server": proxy}
     # A dedicated profile directory per run. Sharing the default one makes the
     # launch hang until CDP times out in a container -- browser-use issues #2941,
@@ -84,7 +85,7 @@ def build_browser():
     # 30.0s" with no mention of the profile.
     kwargs["user_data_dir"] = tempfile.mkdtemp(prefix="autoapply-bu-")
     args = ["--no-sandbox", "--disable-dev-shm-usage"]
-    if tls_max := os.getenv("AUTOAPPLY_TLS_MAX"):
+    if tls_max := tls_ceiling(proxy):
         args.append(f"--ssl-version-max={tls_max}")
     kwargs["args"] = args
     return Browser(**kwargs)

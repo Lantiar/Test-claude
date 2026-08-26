@@ -317,3 +317,23 @@ def test_an_unchanged_step_is_not_audited_twice(tmp_path):
     audit_step(worker, fields, [mapping], PROFILE, provider=Provider(),
                store=_store(tmp_path), ats="workday")
     assert len(calls) == 2, "a changed answer must be audited again"
+
+
+def test_the_tls_cap_follows_the_proxy_not_an_exported_variable(monkeypatch):
+    """A workaround nobody remembers to switch on is not a workaround.
+
+    Chromium's TLS 1.3 ClientHello is reset by the inspecting proxy, so every
+    navigation fails with ERR_CONNECTION_RESET -- which reads as "the site is
+    down", not "a setting is missing". A run was lost to exactly that. The
+    condition the cap is for is one we can test for.
+    """
+    from autoapply.browser import tls_ceiling
+
+    monkeypatch.delenv("AUTOAPPLY_TLS_MAX", raising=False)
+    assert tls_ceiling("http://proxy:8080") == "tls1.2"
+    assert tls_ceiling(None) == "", "no proxy, no reason to cap"
+
+    monkeypatch.setenv("AUTOAPPLY_TLS_MAX", "tls1.3")
+    assert tls_ceiling("http://proxy:8080") == "tls1.3", "explicit setting wins"
+    monkeypatch.setenv("AUTOAPPLY_TLS_MAX", "none")
+    assert tls_ceiling("http://proxy:8080") == "", "and can force it off"

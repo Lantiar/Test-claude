@@ -16,6 +16,32 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
 
+def tls_ceiling(proxy: str | None) -> str:
+    """The highest TLS version to offer, or "" for no cap.
+
+    Some inspecting proxies reset the connection on Chromium's TLS 1.3
+    ClientHello -- it is ~1.7kB with GREASE and split across segments, where
+    curl's fits one small segment -- so the tunnel opens and then dies
+    mid-handshake, for every host, with ERR_CONNECTION_RESET. Capping the offer
+    at TLS 1.2 shrinks the hello enough to get through.
+
+    This was opt-in via AUTOAPPLY_TLS_MAX, on the reasoning that a workaround
+    should not be a default. But the variable has to be exported for every
+    invocation, and forgetting it does not look like a missing setting: it
+    looks like the site is down. A run was lost to exactly that. The condition
+    the workaround is for -- egress through an inspecting proxy -- is one we
+    can test for directly, so test for it instead of asking to be told.
+
+    No proxy means no cap and ordinary TLS 1.3. AUTOAPPLY_TLS_MAX still wins
+    either way, including AUTOAPPLY_TLS_MAX=none to force the cap off. Nothing
+    here disables certificate verification, only the version offered.
+    """
+    setting = os.getenv("AUTOAPPLY_TLS_MAX")
+    if setting:
+        return "" if setting.lower() in ("none", "off", "0") else setting
+    return "tls1.2" if proxy else ""
+
+
 def find_chromium() -> str:
     """The Chromium actually on this machine, whichever build it is.
 
@@ -51,15 +77,10 @@ def browser_page(storage_state: str | None = None):
     launch: dict = {"headless": os.getenv("HEADLESS", "1") != "0"}
     if exe := find_chromium():
         launch["executable_path"] = exe
-    if proxy := os.getenv("HTTPS_PROXY") or os.getenv("https_proxy"):
+    proxy = os.getenv("HTTPS_PROXY") or os.getenv("https_proxy")
+    if proxy:
         launch["proxy"] = {"server": proxy}
-    # Some inspecting proxies reset the connection on Chromium's TLS 1.3
-    # ClientHello (it is ~1.7kB with GREASE and split across segments, where
-    # curl's fits one small segment) -- the tunnel opens, then dies mid-handshake
-    # for every host. Capping the offer at TLS 1.2 shrinks the hello enough to
-    # get through. Opt-in only: this is a sandbox workaround, not a default,
-    # and it never disables certificate verification.
-    if tls_max := os.getenv("AUTOAPPLY_TLS_MAX"):
+    if tls_max := tls_ceiling(proxy):
         launch.setdefault("args", []).append(f"--ssl-version-max={tls_max}")
 
     with sync_playwright() as p:
