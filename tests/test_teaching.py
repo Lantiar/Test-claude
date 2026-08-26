@@ -572,3 +572,42 @@ def test_the_gate_refuses_a_page_that_is_not_an_application():
     one_real.fields = [Field(id="n", selector="#n", label="First name")]
     one_real.filled_ids = ["n"]
     assert looks_like_an_application(one_real)
+
+
+def test_a_login_url_serving_the_applications_first_page_is_not_a_wall():
+    """AMD's iCIMS tenant serves the application's own first step from
+    /jobs/91176/login: "Please enter your email to begin the application
+    process", an email box, a privacy acceptance and a Next button, no password
+    anywhere. Read as a sign-in wall, the run tried to authenticate, found
+    nothing to authenticate with, and stopped on the first page of an
+    application it had in fact already filled in."""
+    class Frame:
+        def __init__(self, text, password=False):
+            self.text, self.password = text, password
+
+        def query_selector(self, sel):
+            return object() if (self.password and "password" in sel) else None
+
+        def inner_text(self, sel):
+            return self.text
+
+    class W:
+        from autoapply.workers.base import Worker as _W
+        ENTRY_TEXT = _W.ENTRY_TEXT
+        looks_like_an_entry_step = _W.looks_like_an_entry_step
+
+        def __init__(self, frames):
+            self._frames = frames
+
+        def frames(self):
+            return self._frames
+
+    entry = W([Frame("Please enter your email to begin the application process")])
+    assert entry.looks_like_an_entry_step()
+
+    real_login = W([Frame("Sign in to your account", password=True)])
+    assert not real_login.looks_like_an_entry_step()
+
+    # A password field settles it even on a page that also mentions applying.
+    both = W([Frame("Sign in to begin the application process", password=True)])
+    assert not both.looks_like_an_entry_step()

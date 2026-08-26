@@ -331,6 +331,33 @@ class Worker:
     AUTH_URL_MARKERS = ("/login", "/signin", "/sign-in", "/sign_in",
                         "/register", "/createaccount", "/create-account")
 
+    # An ATS serves the application's own first step from a /login URL. AMD's
+    # iCIMS tenant says "Please enter your email to begin the application
+    # process" at /jobs/91176/login: an email box, a privacy acceptance and a
+    # Next button, no password anywhere. Read as a wall, the run tried to sign
+    # in, found nothing to sign in with, and stopped on the first page of an
+    # application it could have filled -- which it had in fact already filled.
+    ENTRY_TEXT = ("begin the application", "start the application",
+                  "start your application", "begin your application",
+                  "to apply for this", "application process")
+
+    def looks_like_an_entry_step(self) -> bool:
+        """A /login URL that is really the application's own first page."""
+        for frame in self.frames():
+            try:
+                if frame.query_selector("input[type=password]") is not None:
+                    return False
+            except Exception:
+                continue
+        for frame in self.frames():
+            try:
+                text = (frame.inner_text("body") or "").lower()
+            except Exception:
+                continue
+            if any(phrase in text for phrase in self.ENTRY_TEXT):
+                return True
+        return False
+
     def needs_auth(self) -> bool:
         if any(query_first(fr, self.auth_selectors) is not None
                for fr in self.frames()):
@@ -339,7 +366,9 @@ class Worker:
             path = (self.page.url or "").lower().split("?")[0]
         except Exception:
             return False
-        return any(marker in path for marker in self.AUTH_URL_MARKERS)
+        if not any(marker in path for marker in self.AUTH_URL_MARKERS):
+            return False
+        return not self.looks_like_an_entry_step()
 
     # Signing in is attempted at most once per run. A second try after a
     # refusal is how an account gets locked, and the credentials would be the
@@ -578,9 +607,73 @@ class Worker:
         mappings = mapper.map_fields(fields, profile, job.ats,
                                      store=store, provider=provider)
         outcome = self.fill(job, fields, mappings, screenshot_dir)
+        self._review_and_repair(job, fields, mappings, outcome, profile,
+                                store, provider)
         if not fields and self.needs_auth():
             outcome.needs_auth = True
         return outcome
+
+    def _review_and_repair(self, job, fields, mappings, outcome, profile,
+                           store, provider) -> None:
+        """The audit / form-verdict / explore tiers, for a single-page form.
+
+        These lived only in WizardWorker.run, so every single-page ATS --
+        Greenhouse, Lever, Ashby, iCIMS, generic -- had the deterministic pass
+        and nothing else: no reader checking that an answer answers the
+        question asked, no second attempt at a field the form rejected, no
+        exploring a widget the filler cannot drive, and nothing taught to the
+        next run. Cloudflare stalling at 17 of 24 fields and Notion at 15 of 23
+        was that absence, not a shortage of information.
+
+        The form's own validation is the acceptance signal here. A wizard gets
+        one for free -- the step either advances or comes back -- and a
+        single-page form gives the same evidence by whether it still objects.
+        """
+        from ..repair import (audit_step, commit_lessons, drop_lessons,
+                              read_errors, repair_step, teach_paths)
+
+        log = _log.get(f"worker.{self.ats}")
+        if not fields:
+            return
+
+        audited, notes = audit_step(self, fields, mappings, profile,
+                                    provider=provider, store=store,
+                                    ats=job.ats)
+        if notes:
+            log.info("audit corrected %d", audited)
+            for note in notes:
+                log.debug("  audit: %s", _log.brief(note, 120))
+            outcome.errors.extend(notes)
+
+        teach_paths(store, self, fields, job.ats)
+
+        repaired, notes = repair_step(self, fields, mappings, profile,
+                                      provider=provider, store=store,
+                                      ats=job.ats, unwritten=outcome.unwritten)
+        if notes:
+            log.info("repaired %d", repaired)
+            for note in notes:
+                log.debug("  repair: %s", _log.brief(note, 120))
+            outcome.errors.extend(notes)
+
+        if repaired:
+            for m in mappings:
+                if (m.source in ("form-repair", "audit") and m.value
+                        and m.field_id not in outcome.filled_ids):
+                    outcome.filled_ids.append(m.field_id)
+
+        # Nothing left flagged means the form is satisfied with what it holds,
+        # which is the only evidence available that an answer was right. A form
+        # still objecting is not evidence of anything, so what was staged for
+        # it is discarded rather than replayed confidently on every later run.
+        if read_errors(self):
+            if dropped := drop_lessons(store):
+                log.info("the form still objects; discarded %d unproven "
+                         "answer(s)", dropped)
+        elif learned := commit_lessons(store, job.ats):
+            log.info("the form accepts it; learned %d answer(s)", len(learned))
+            for lesson in learned:
+                log.debug("  learned: %s", _log.brief(lesson, 100))
 
     # ---- filling ---------------------------------------------------------
     def fill(self, job: Job, fields: list[Field], mappings: list[Mapping],
