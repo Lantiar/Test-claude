@@ -521,7 +521,7 @@ class Worker:
             key = (f.label or "").strip().lower()
             if key:
                 repeated_labels[key] = repeated_labels.get(key, 0) + 1
-        prefilled: set[str] = set()
+        prefilled: dict[str, str] = {}
         for f in fields:
             if repeated_labels.get((f.label or "").strip().lower(), 0) < 2:
                 continue
@@ -531,7 +531,7 @@ class Worker:
             except Exception:
                 current = ""
             if current:
-                prefilled.add(f.id)
+                prefilled[f.id] = current
                 outcome.filled_ids.append(f.id)
 
         for m in mappings:
@@ -541,8 +541,18 @@ class Worker:
             if f is None:
                 continue
             if f.id in prefilled:
+                # What is on the form is now the answer to this field. Leaving
+                # the mapping holding the value we chose not to write makes
+                # verify compare against a value we deliberately did not send
+                # and report a mismatch -- want=https://nideesh.ai
+                # got=https://www.nideesh.ai, on a field that is correct and
+                # that we were right not to touch. That false failure is enough
+                # to mark the whole run unverified.
+                m.value = prefilled[f.id]
+                m.source = "account"
                 outcome.errors.append(
-                    f"{f.label or f.id}: already answered on the account, left as is")
+                    f"{f.label or f.id}: already answered on the account "
+                    f"as '{_log.brief(prefilled[f.id], 40)}', left as is")
                 continue
             try:
                 written = self._write(f, m.value)
