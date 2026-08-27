@@ -1908,6 +1908,29 @@ class Worker:
         return path
 
     # ---- submission ------------------------------------------------------
+    def at_review(self) -> bool:
+        """Is there nothing left between this page and submitting?
+
+        A wizard answers this by looking for its review step, and overrides
+        below. A single-page ATS has no review step to look for: the form and
+        the review are the same page, which is why run() leaves reached_end at
+        its default of True and only ever clears it. That default is invisible
+        to anything holding a Worker rather than a FillOutcome -- so the
+        bake-off, which measures the end off the page rather than believing a
+        contender's account of itself, called at_review() on a GreenhouseWorker
+        and got AttributeError. It recorded the error and scored the term
+        False, for every contender, on every single-page ATS. dom had filled 29
+        of 32 fields on a form with nothing after it and was scored as not
+        having reached the end.
+
+        The honest single-page test is whether the form is here and offers a
+        way to send it. A page with no submit control on it is not one step
+        from being submitted, whatever else is true of it.
+        """
+        scopes = list(self.frames()) or [self.page]
+        return any(query_first(scope, (self.submit_selector,)) is not None
+                   for scope in scopes)
+
     def submit(self) -> tuple[bool, str]:
         """Click submit, in the frame the form is in, and confirm it landed."""
         scopes = []

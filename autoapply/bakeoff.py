@@ -92,6 +92,15 @@ def read_back(page, job: Job) -> dict[str, str]:
     return held
 
 
+def _free_port() -> int:
+    """A port nobody is on, for this run's browser to listen for agents on."""
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def run_one(filler_name: str, job: Job, profile: dict,
             shots: str = "data/screenshots") -> FillReport:
     filler = get(filler_name)
@@ -102,6 +111,19 @@ def run_one(filler_name: str, job: Job, profile: dict,
         return report
 
     started = time.time()
+    # Open a debugging port for whichever contender needs one. browser_page
+    # keeps this off by default and is right to -- a debugging port is not
+    # something to open on an ordinary application run -- but the bake-off is
+    # the one caller for which attaching is the entire point: browser-use and
+    # Skyvern drive a browser, and the browser they must drive is the one the
+    # harness already signed in and clicked through with. Without it both
+    # returned "no CDP endpoint" and scored -0.7 in every family, which reads
+    # as two agents that cannot fill a form and was really a setting nobody
+    # set. A fresh port per contender, because the previous one's browser may
+    # still be releasing its own.
+    port = _free_port()
+    os.environ["AUTOAPPLY_CDP_PORT"] = str(port)
+    os.environ.pop("AUTOAPPLY_CDP_URL", None)
     with browser_page() as page:
         ready, detail = prepare(page, job, profile)
         if not ready:
