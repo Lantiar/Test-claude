@@ -18,6 +18,16 @@ REGISTRY: list[tuple[str, ATS]] = [
     (r"\.fa\.oraclecloud\.com$|\.ocs\.oraclecloud\.com$", "oracle"),
     (r"(^|\.)oraclecloud\.com$",                    "oracle"),
     (r"(^|\.)taleo\.net$",                          "oracle"),
+    # The rest of what a Summer-2027 internship list is actually made of.
+    # SmartRecruiters, Workable and Rippling are ~120 live postings between
+    # them; ByteDance runs the same careers stack as lifeattiktok.com, which
+    # the generic worker already drives end to end. Naming them costs a line
+    # each and gives every one of them a playbook and a log it can be found by,
+    # instead of all of them arriving as "unknown".
+    (r"(^|\.)smartrecruiters\.com$",                "smartrecruiters"),
+    (r"(^|\.)workable\.com$",                       "workable"),
+    (r"(^|\.)rippling\.com$",                       "rippling"),
+    (r"(^|\.)(lifeattiktok|bytedance)\.com$",       "tiktok"),
 ]
 
 # ATSs with a dedicated DOM worker: cheap, deterministic, no model needed.
@@ -26,7 +36,8 @@ DOM_WORKERS: set[ATS] = {"greenhouse", "lever", "workday"}
 # Everything else is driven by the browser-use agent with a per-ATS playbook.
 # That path needs an LLM; without one configured it queues with a clear reason
 # rather than guessing at selectors.
-AGENT_ATS: set[ATS] = {"icims", "ashby", "oracle", "unknown"}
+AGENT_ATS: set[ATS] = {"icims", "ashby", "oracle", "smartrecruiters",
+                       "workable", "rippling", "tiktok", "unknown"}
 
 SUPPORTED: set[ATS] = DOM_WORKERS | AGENT_ATS
 
