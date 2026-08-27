@@ -204,13 +204,18 @@ class WorkdayWorker(WizardWorker):
                 # consent tick and has no choices to offer; a group of them is
                 # a question, and its labels are the answers.
                 options = self._radio_labels(box)
-            elif kind == "combobox" and (required or match_rule(label) is None):
+            elif kind == "combobox":
                 # Read these even when a rule answers them, because the rule's
                 # answer is often not on the menu: the profile says the source
                 # was a "Company website" and this tenant offers only Job Board,
                 # Talent Acquisition Team and University/College. Without the
                 # list nothing can tell that the answer is unusable, so the
                 # write silently fails and the step never validates.
+                #
+                # The condition used to be "required or no rule matched", which
+                # excluded precisely the field this comment describes: Field of
+                # Study is optional AND rule-matched, so its options were never
+                # read, and every tier reasoned about it with options=[].
                 options = self._multiselect_options(box)
             elif kind == "select" and match_rule(label) is None:
                 # Opening a dropdown is the only way to see its choices, and
@@ -388,6 +393,67 @@ class WorkdayWorker(WizardWorker):
     }
     """
 
+
+    def _search_queries(self, value: str) -> list[str]:
+        """What to type, most specific first, before giving up on a picker."""
+        out = [value.strip()]
+        parts = [p.strip() for p in re.split(r"\s+and\s+|\s*[/,;&]\s*", value)
+                 if len(p.strip()) > 2]
+        out += [p for p in parts if p not in out]
+        # The opening words of the answer: a menu entry is usually a prefix of
+        # how a person writes it, not the whole of it.
+        words = value.split()
+        for n in (3, 2, 1):
+            if len(words) > n:
+                head = " ".join(words[:n])
+                if head not in out and len(head) > 2:
+                    out.append(head)
+        return out[:6]
+
+    def _search_and_pick(self, f: Field, value: str, chip_of=None) -> Optional[str]:
+        """Type into a searchable picker and take a matching result."""
+        from ..mapper import resolve_option
+
+        box_sel = f"{FORM_FIELD}[data-automation-id='formField-{f.id}']"
+        search = self.page.query_selector(f"{box_sel} input")
+        if search is None:
+            return None
+
+        def chip() -> str:
+            el = self.page.query_selector(
+                f"{box_sel} [data-automation-id='selectedItem']")
+            return (el.inner_text() or "").strip() if el is not None else ""
+
+        for query in self._search_queries(value):
+            try:
+                search.fill("")
+                search.type(query, delay=25)
+            except Exception:
+                return None
+            self.page.wait_for_timeout(900)
+
+            options = [(el, text) for el, text in
+                       self._visible_options("promptOption", set())]
+            if not options:
+                continue
+            texts = [t for _, t in options]
+            chosen = resolve_option(query, texts) or resolve_option(value, texts)
+            # A search narrowed to one real result is that result: the list is
+            # already the answer to the question we asked it.
+            if chosen is None and len(options) == 1:
+                chosen = texts[0]
+            if chosen is None:
+                continue
+            for el, text in options:
+                if text == chosen:
+                    _click(el)
+                    self.page.wait_for_timeout(400)
+                    committed = chip() or text
+                    _log.get(f"worker.{self.ats}").debug(
+                        "%s: searched %r -> %r", f.label, query, committed)
+                    return committed
+        return None
+
     def _react_pick(self, f: Field, value: str) -> Optional[str]:
         """Ask Workday to select `value` itself. None if it did not take."""
         box = self.page.query_selector(
@@ -505,6 +571,20 @@ class WorkdayWorker(WizardWorker):
 
         # Let Workday do it first; fall back to walking the menu by hand.
         if committed := self._react_pick(f, value):
+            return committed
+
+        # A searchable picker has to be searched. Field of Study renders an
+        # <input placeholder="Search"> inside its multiSelectContainer and its
+        # menu does not contain "Computer Science" until something types it --
+        # so driving it as a click-through menu found nothing, wrote nothing,
+        # and reported "could not write" while the audit blamed the value and
+        # the repair proposed a different value that failed identically.
+        #
+        # The queries are tried longest-first: the whole answer, then the parts
+        # of a compound one, then its opening words. A double major reads
+        # "Computer Science and Data Science" and no menu holds that string,
+        # but every one of them holds "Computer Science".
+        if committed := self._search_and_pick(f, value, chip_of=None):
             return committed
 
         def chip() -> str:
