@@ -243,6 +243,8 @@ class Worker:
         for whichever arrives, and stop as soon as it does.
         """
         deadline = time.time() + timeout_ms / 1000
+        settled = 0
+        last = -1
         while time.time() < deadline:
             try:
                 if self.discover():
@@ -251,6 +253,19 @@ class Worker:
                     return
             except Exception:
                 pass
+            # A page that has stopped changing has nothing more to give, and
+            # waiting out the full window on it is pure cost: the two
+            # empty-discovery tests took thirty seconds each, for a page that
+            # was never going to render anything. Growth in the DOM is what
+            # tells a still-rendering SPA apart from a finished empty page.
+            try:
+                size = self.page.evaluate("() => document.getElementsByTagName('*').length")
+            except Exception:
+                size = last
+            settled = settled + 1 if size == last else 0
+            last = size
+            if settled >= 2:
+                return
             self.page.wait_for_timeout(600)
 
     def _already_on_the_application(self) -> bool:
@@ -1164,6 +1179,7 @@ class Worker:
                 "this page is not a job application: "
                 + ", ".join((f.label or f.id or "?")[:40] for f in fields[:4]))
             outcome.reached_end = False
+            self._record_page_state(outcome)
             return outcome
 
         if not _same_posting(job.url, self.page.url) and len(fields) < 3:
@@ -1175,6 +1191,7 @@ class Worker:
                 f"redirected to {self.page.url} -- the posting is probably "
                 "closed; nothing was filled")
             outcome.reached_end = False
+            self._record_page_state(outcome)
             return outcome
 
         mappings = mapper.map_fields(fields, profile, job.ats,
@@ -1195,6 +1212,32 @@ class Worker:
             # said so since it was written; the single-page lane never did.
             outcome.session_bound = True
         return outcome
+
+    def _record_page_state(self, outcome) -> None:
+        """What this page is, on the paths that give up before filling.
+
+        Both early returns built a bare outcome and left saw_captcha and
+        needs_auth False, so a run that stopped in front of a CAPTCHA reported
+        no CAPTCHA. The gate then had nothing to block on beyond "nothing was
+        filled", and _needs_agent_fallback -- which refuses to retry a page
+        held by a CAPTCHA, precisely because the agent is held by it too --
+        saw no reason to refuse. So AMD's hCaptcha door was handed to the
+        agent lane on every run, to spend a full budget of steps discovering
+        it could not get through either.
+        """
+        try:
+            outcome.verify_detail["_landed_url"] = self.page.url
+            outcome.verify_detail["_page_title"] = self.page.title() or ""
+        except Exception:
+            pass
+        try:
+            outcome.saw_captcha = self.saw_captcha()
+        except Exception:
+            pass
+        try:
+            outcome.needs_auth = self.needs_auth()
+        except Exception:
+            pass
 
     def _review_and_repair(self, job, fields, mappings, outcome, profile,
                            store, provider) -> None:
@@ -1780,8 +1823,11 @@ def css_escape(value: str) -> str:
     return re.sub(r"([^a-zA-Z0-9_-])", r"\\\1", value)
 
 
-_TRAP = re.compile(r"honeypot|honey_pot|bot[-_]?trap|leave[-_]?(this|it)[-_]?blank",
-                   re.I)
+# BNY spells it "honey-pot", with a hyphen, and its trap is *visible* -- so
+# neither the original pattern nor the visibility check would have kept the
+# run out of it. Match the separator rather than one spelling of it.
+_TRAP = re.compile(
+    r"honey[-_ ]?pot|bot[-_ ]?trap|leave[-_ ]?(this|it)[-_ ]?(blank|empty)", re.I)
 
 # An upload that offers to fill the form in for you, rather than one the
 # application is asking for.

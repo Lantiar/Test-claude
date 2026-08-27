@@ -541,9 +541,18 @@ def test_oracles_email_door_is_walked_through_without_tripping_its_honeypot():
 
         assert worker.pass_entry_step(Job(url=pg.url, ats="generic"))
         assert not pg.query_selector("#hp"), "still on the door"
-        # What the door saw when it was submitted. Anything in here is what
-        # gets a real person's application flagged as a bot's.
+        # What the door saw when it was submitted. Anything in the honeypot is
+        # what gets a real person's application flagged as a bot's; BNY spells
+        # it "honey-pot", with a hyphen, and renders it *visible*, so neither
+        # the original pattern nor the visibility check would have kept the run
+        # out of it.
         assert pg.evaluate("() => window.__honeypot") == "", "the trap was filled"
+        # And the required agreement is a hidden native checkbox behind a
+        # styled label -- id "legal-disclaimer-checkbox", no readable label of
+        # its own. Skipped as invisible, the door never opened and the run
+        # reported that the page was not an application: true, and not why.
+        assert pg.evaluate("() => window.__agreed") is True, \
+            "the door will not open until its own agreement is accepted"
 
         labels = {(f.label or "").lower() for f in worker.discover()}
         assert any("first name" in x for x in labels), labels
@@ -617,3 +626,37 @@ def test_the_value_explore_returns_was_looked_at_before_being_accepted(page):
     assert chooser.saw[0] == "Select One", chooser.saw
     assert len(chooser.saw) == len(path) + 1, (
         f"one reading per click plus the confirming one: {chooser.saw}")
+
+
+def test_a_page_we_refuse_to_fill_still_reports_what_it_is():
+    """AMD's hCaptcha door was handed to the agent lane on every run.
+
+    Both give-up paths built a bare outcome and left saw_captcha and
+    needs_auth False, so a run that stopped in front of a CAPTCHA reported no
+    CAPTCHA. The gate had nothing to block on beyond "nothing was filled", and
+    _needs_agent_fallback -- which refuses to retry a page held by a CAPTCHA,
+    precisely because the agent is held by it too -- saw no reason to refuse.
+    So the fallback spent a full budget of steps discovering it could not get
+    through either.
+    """
+    from autoapply.models import Job
+    from autoapply.pipeline import _needs_agent_fallback
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "captcha_real.html").as_uri())
+        worker = GenericWorker(pg)
+        assert worker.saw_captcha(), "the fixture no longer shows a captcha"
+
+        outcome = worker.run(Job(url=pg.url, ats="generic"), PROFILE, None,
+                             None, "")
+        assert outcome.saw_captcha, "the run stopped at a captcha and did not say so"
+        assert not _needs_agent_fallback(outcome), (
+            "the agent is held by a captcha too; retrying only spends a budget")
+        browser.close()

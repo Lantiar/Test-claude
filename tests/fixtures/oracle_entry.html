@@ -7,12 +7,14 @@
   <p>Get started right away by simply using your email. Your profile will be
      created and kept up to date automatically as you enter details for each of
      your job applications.</p>
-  <form onsubmit="window.__honeypot=document.getElementById('hp').value; document.body.innerHTML=document.getElementById('real').innerHTML; return false;">
+  <form onsubmit="window.__honeypot=document.getElementById('hp').value;window.__agreed=document.getElementById('legal-disclaimer-checkbox').checked; document.body.innerHTML=document.getElementById('real').innerHTML; return false;">
     <label for="em">Email Address</label>
     <input id="em" name="primary-email" type="email">
     <!-- Visible on purpose: this must be refused by name, not by luck. -->
-    <label for="hp">honeypot</label><input id="hp" name="honeypot" type="email">
-    <label><input id="tc" type="checkbox"> I agree with the terms and conditions</label>
+    <label for="hp">&nbsp;</label><input id="hp" name="honey-pot">
+    <label><input id="legal-disclaimer-checkbox" type="checkbox" required
+                 style="position:absolute;opacity:0;width:0;height:0">
+           I agree with the terms and conditions</label>
     <button type="button">CANCEL</button>
     <button type="submit">NEXT</button>
   </form>

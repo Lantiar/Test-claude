@@ -25,7 +25,7 @@ import re
 from urllib.parse import urlparse
 
 from .clicking import click as _click
-from .workers.base import LABEL_JS
+from .workers.base import LABEL_JS, _TRAP
 
 ACCOUNTS_PATH = os.getenv("ACCOUNTS_PATH", "config/accounts.json")
 
@@ -76,9 +76,13 @@ SIGNIN_SWITCH_SELECTORS = (
 # notice, the age attestation. Deliberately narrow -- anything about updates,
 # offers, partners, newsletters or sharing a profile is somebody's marketing
 # and is not ours to accept on the candidate's behalf.
+# "disclaimer" earns its place from BNY, whose required agreement is a hidden
+# native checkbox with no readable label and the id "legal-disclaimer-checkbox".
+# Skipping it left the door shut and the run reporting that the page was not an
+# application -- true, and not the reason.
 _REQUIRED_CONSENT = re.compile(
     r"\b(terms|conditions|privacy|policy|agree|acknowledg|consent to the|"
-    r"read and understand|certify|i am at least|18 years)\b", re.I)
+    r"disclaimer|read and understand|certify|i am at least|18 years)\b", re.I)
 
 FORBIDDEN_CLICK_TEXT = ("create account", "create an account", "sign up",
                         "signup", "register", "join now", "new user")
@@ -380,6 +384,40 @@ def sign_in(worker, creds: dict, wait_for_code=None, log=None) -> tuple[bool, st
 
 
 
+def _tick_through_label(frame, box) -> bool:
+    """Tick a styled checkbox the way a person does: by its label.
+
+    A styled control is a hidden native input with a label painted over it, so
+    check() -- which clicks -- fails with "Element is outside of the viewport"
+    however much force it is given. The site's own handler is listening on the
+    label, so click that. Setting the property is the fallback, and it is only
+    worth anything because these controls read the property back.
+    """
+    try:
+        if frame.evaluate(
+                """e => {
+                     const l = e.closest('label') ||
+                       (e.id && document.querySelector(
+                          'label[for="' + CSS.escape(e.id) + '"]'));
+                     if (!l) return false;
+                     l.click();
+                     return e.checked;
+                   }""", box):
+            return True
+    except Exception:
+        pass
+    try:
+        return bool(frame.evaluate(
+            """e => {
+                 e.checked = true;
+                 e.dispatchEvent(new Event('input',  {bubbles: true}));
+                 e.dispatchEvent(new Event('change', {bubbles: true}));
+                 return e.checked;
+               }""", box))
+    except Exception:
+        return False
+
+
 def _accept_required_consent(worker, say) -> None:
     """Tick the agreement a sign-in or registration form will not proceed without.
 
@@ -414,11 +452,40 @@ def _accept_required_consent(worker, say) -> None:
 
         for box in boxes:
             try:
-                if not box.is_visible() or box.is_checked():
+                if box.is_checked():
                     continue
                 label = (fr.evaluate(LABEL_JS, box) or "").strip().lower()
                 required = (box.get_attribute("required") is not None
                             or box.get_attribute("aria-required") == "true")
+                if not box.is_visible():
+                    # Hidden is usually a reason to leave a box alone -- that is
+                    # how honeypots are built. But a styled checkbox is a hidden
+                    # native input with a label painted over it, and BNY's
+                    # agreement is exactly that: input-row__hidden-control,
+                    # required, id "legal-disclaimer-checkbox". Skipping it
+                    # meant the door never opened, and the run reported the
+                    # page was not an application -- true, and not the reason.
+                    #
+                    # So a hidden box may be ticked only when it is required
+                    # and says what it is: an agreement, by its label or its
+                    # own id. A trap is neither.
+                    identity = f"{label} {box.get_attribute('id') or ''} " \
+                               f"{box.get_attribute('name') or ''}"
+                    if not (required and _REQUIRED_CONSENT.search(identity)):
+                        continue
+                    if _TRAP.search(identity):
+                        say(f"leaving a honeypot alone: {identity.strip()[:60]}")
+                        continue
+                    # check() clicks, and a zero-size positioned input is not
+                    # clickable even with force -- "Element is outside of the
+                    # viewport". What a person clicks is the label painted over
+                    # it, and the site's own handler is listening there, so
+                    # click that; fall back to setting the property and saying
+                    # so, which is what a styled control ultimately reads.
+                    if not _tick_through_label(fr, box):
+                        continue
+                    say(f"agreed to: {label[:60] or identity.strip()[:60]}")
+                    continue
                 if required or _REQUIRED_CONSENT.search(label) or (
                         unlabelled_consent and not label):
                     box.check()
