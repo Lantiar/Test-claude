@@ -154,6 +154,23 @@ def run_one(filler_name: str, job: Job, profile: dict,
     port = _free_port()
     os.environ["AUTOAPPLY_CDP_PORT"] = str(port)
     os.environ.pop("AUTOAPPLY_CDP_URL", None)
+
+    # An agent's step budget, set for the bake-off rather than inherited. These
+    # are the same variables the pipeline's agent fallback uses, and there they
+    # are a cost brake on a lane that exists to get one stuck page moving --
+    # .env pins AGENT_MAX_STEPS at 40. Here the job is a whole application, and
+    # a budget that small measures the budget: browser-use worked steadily down
+    # a Greenhouse form, filling name, education and eligibility, and stopped at
+    # step 39 of 40 saying it would answer the rest "if time allows". Its own
+    # default was raised to 150 the last time this happened; .env quietly put
+    # it back. So set it explicitly, where the reason for the number is the
+    # thing being measured.
+    budget = os.getenv("BAKEOFF_AGENT_STEPS", "150")
+    os.environ["AGENT_MAX_STEPS"] = budget
+    os.environ["SKYVERN_MAX_STEPS"] = os.getenv("BAKEOFF_SKYVERN_STEPS", "60")
+    # One action per step for the vision loop, so its budget has to exceed the
+    # number of questions rather than the number of sections.
+    os.environ["VISION_MAX_STEPS"] = os.getenv("BAKEOFF_VISION_STEPS", "80")
     with browser_page() as page:
         ready, detail = prepare(page, job, profile)
         if not ready:
