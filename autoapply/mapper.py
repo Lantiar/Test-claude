@@ -284,6 +284,22 @@ def _is_free_text(f: Field) -> bool:
                              "cover letter", "in your own words"))
 
 
+# A label that names no question: absent, a generated id, or the box's own
+# placeholder text showing through.
+_NOT_A_QUESTION = re.compile(
+    r"^$|^field[-_ ]?\d+$|^\(?select\)?$|^please\s+(enter|select|choose|input)$"
+    r"|^enter$|^input$|^choose$|^-+$|^\.+$", re.I)
+
+
+def _readable_question(f: Field) -> bool:
+    """Does this field say what it is asking?"""
+    label = (f.label or "").strip()
+    if _NOT_A_QUESTION.match(label):
+        return False
+    # Two characters of punctuation is not a question either.
+    return len(re.sub(r"[^a-z0-9]", "", label.lower())) >= 3
+
+
 def map_fields(fields: list[Field], profile: dict, ats: str,
                store=None, provider=None) -> list[Mapping]:
     """Rules -> cache -> LLM. Anything still unanswered is `unknown`."""
@@ -308,6 +324,21 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
             repeated.add(f.id)
 
     for f in fields:
+        # A question we cannot read is a question we cannot answer. TikTok's
+        # form carries fields whose label is empty, or "field-90", or the
+        # placeholder "Please enter" -- and the model, asked to answer them,
+        # obliged: a self-introduction went into one labelled "Please enter"
+        # and a portfolio URL into two unlabelled boxes. Every one of those is
+        # a guess wearing an answer's clothes, and the presubmit reviewer
+        # objected to exactly them.
+        #
+        # This is the same rule the rest of the design runs on -- a null beats
+        # a guess -- applied to the question rather than to the value. The gate
+        # reports the field as unanswered, which is true and reviewable.
+        if not _readable_question(f):
+            mappings.append(Mapping(field_id=f.id, action="unknown",
+                                    source="unreadable-label", label=f.label))
+            continue
         if f.id in repeated:
             unresolved.append(f)
             continue

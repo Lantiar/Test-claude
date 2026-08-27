@@ -725,3 +725,39 @@ def test_a_resume_dropzone_does_not_make_a_search_page_an_application():
         "First Name", "Last Name", "Email", "Resume", files=("Resume",)))
     assert looks_like_an_application(page("First name"))
     assert not looks_like_an_application(page("Email"))
+
+
+def test_a_question_we_cannot_read_is_left_unanswered():
+    """TikTok's form carries fields labelled "", "field-90", and the box's own
+    placeholder "Please enter". Asked to answer them, the model obliged: a
+    self-introduction went into one labelled "Please enter" and a portfolio URL
+    into two unlabelled boxes. The presubmit reviewer objected to exactly
+    those, and it was right -- each is a guess wearing an answer's clothes.
+
+    Same rule the rest of the design runs on, a null beats a guess, applied to
+    the question instead of the value.
+    """
+    from autoapply.mapper import _readable_question
+
+    for unreadable in ("", "field-0", "field-90", "Please enter", "(select)",
+                       "select", "--", "Please select", "Enter"):
+        assert not _readable_question(
+            Field(id="x", selector="#x", label=unreadable)), unreadable
+
+    for real in ("First Name", "Self-introduction", "YYYY", "GPA",
+                 "Why do you want this role?", "School name"):
+        assert _readable_question(
+            Field(id="x", selector="#x", label=real)), real
+
+
+def test_an_unreadable_field_is_reported_not_silently_skipped(tmp_path):
+    """It has to reach the gate as unanswered, so a required one still blocks
+    and a person can see what was left alone."""
+    store = _store(tmp_path)
+    fields = [Field(id="a", selector="#a", label="First Name"),
+              Field(id="b", selector="#b", label="field-90", required=True)]
+    out = {m.field_id: m for m in map_fields(fields, PROFILE, "unknown",
+                                             store=store, provider=None)}
+    assert out["a"].action == "fill"
+    assert out["b"].action == "unknown"
+    assert out["b"].source == "unreadable-label"
