@@ -1923,13 +1923,36 @@ class Worker:
         of 32 fields on a form with nothing after it and was scored as not
         having reached the end.
 
-        The honest single-page test is whether the form is here and offers a
-        way to send it. A page with no submit control on it is not one step
-        from being submitted, whatever else is true of it.
+        The honest single-page test is whether the form could be sent from
+        here: a way to send it, and nothing required still empty. A submit
+        control on its own is not the test and reading it as one puts a verdict
+        in the table that its own evidence contradicts -- a Greenhouse form
+        shows Submit from the moment it loads, so every contender came back
+        "review reached: yes", including two that had filled nothing at all.
+        That is the shape of claim this codebase keeps having to unpick: not a
+        wrong answer to a question, but a question answered about the wrong
+        thing. What the term is for on a wizard is distinguishing a run that
+        walked seven steps from one that stalled on the first, and the
+        single-page equivalent of stalling is leaving the application in a
+        state that cannot be sent.
         """
         scopes = list(self.frames()) or [self.page]
-        return any(query_first(scope, (self.submit_selector,)) is not None
-                   for scope in scopes)
+        if not any(query_first(scope, (self.submit_selector,)) is not None
+                   for scope in scopes):
+            return False
+        from ..verify import _read_field
+
+        for f in self.discover():
+            if not f.required:
+                continue
+            try:
+                el = self.frame_for(f).query_selector(f.selector)
+                held = (_read_field(self.page, f, el)[0] or "").strip() if el else ""
+            except Exception:
+                return False        # unreadable is not evidence of finished
+            if not held:
+                return False
+        return True
 
     def submit(self) -> tuple[bool, str]:
         """Click submit, in the frame the form is in, and confirm it landed."""
