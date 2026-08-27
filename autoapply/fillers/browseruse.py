@@ -24,10 +24,16 @@ Rules:
   candidate: no employer, date, degree, salary or authorization that is not
   below. If a question is not answerable from the profile and offers a
   decline-to-answer option, choose that.
+- Work through the whole form from the top, scrolling down as you go. Most
+  applications are several screens long, and the section in front of you when
+  you start is not the only one.
 - Advance through the form's steps (Save and Continue / Next) as you finish
   each one.
-- STOP when you reach the review or summary step. Do NOT click Submit, Apply,
-  or anything that sends the application. This is a rehearsal.
+- STOP only when every question you can answer is answered. A visible Submit
+  or Apply button does not mean you are finished: a single-page application
+  shows Submit from the moment it loads, below an empty form.
+- Do NOT click Submit, Apply, or anything that sends the application. This is
+  a rehearsal.
 
 Candidate profile:
 {profile}

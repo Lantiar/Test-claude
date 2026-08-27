@@ -58,7 +58,7 @@ class SkyvernFiller:
 
     def fill(self, page, job: Job, profile: dict, on_step=None) -> FillReport:
         from skyvern.library.skyvern import Skyvern
-        from skyvern.schemas.llm import LLMConfig
+        from skyvern.schemas.llm import LiteLLMParams, LLMConfig
 
         report = FillReport(filler=self.name, job=job)
         cdp = os.getenv("AUTOAPPLY_CDP_URL", "")
@@ -68,7 +68,18 @@ class SkyvernFiller:
                 "can drive the page the harness signed in on")
             return report
 
+        # Prefixed openai/, and it has to be. Skyvern builds the HTTP client for
+        # a custom LLM config by looking at this string: a name starting
+        # "openai/" gets an AsyncOpenAI, and anything else gets a bare
+        # _NoRedirectAsyncHTTPHandler, which litellm then uses as though it were
+        # an OpenAI client and dies on `openai_aclient.api_key`. That surfaces
+        # as InternalServerError five times over, then "Max retries per step
+        # exceeded", then a task status of failed -- three layers of wording
+        # that all suggest the model or the site is at fault, for a missing
+        # seven-character prefix on our side.
         model = os.getenv("SKYVERN_MODEL", os.getenv("VISION_MODEL", "gpt-4o"))
+        if "/" not in model:
+            model = f"openai/{model}"
 
         async def go():
             sky = await _maybe_await(Skyvern.local(
@@ -76,7 +87,10 @@ class SkyvernFiller:
                 llm_config=LLMConfig(model_name=model,
                                      required_env_vars=["OPENAI_API_KEY"],
                                      supports_vision=True,
-                                     add_assistant_prefix=False),
+                                     add_assistant_prefix=False,
+                                     litellm_params=LiteLLMParams(
+                                         api_key=os.getenv("OPENAI_API_KEY"),
+                                         api_base=os.getenv("OPENAI_BASE_URL"))),
                 # Attach, do not launch. Left to itself Skyvern starts its own
                 # browser and dies in under a second on
                 # "Executable doesn't exist at .../chromium-1234/", because its
@@ -85,10 +99,20 @@ class SkyvernFiller:
                 # cdp-connect also happens to be the whole point: the browser it
                 # attaches to is the one already signed in and standing on the
                 # form.
+                #
+                # CHROME_EXECUTABLE_PATH is deliberately NOT set, and that is
+                # the whole difference between attaching and not. Skyvern reads
+                # it as "there is a local browser here, launch it": the
+                # cdp-connect path checks whether port 9222 -- hardcoded, not
+                # the port we gave it -- is free, finds it is, and then refuses
+                # with "Chrome is already running. Please close all Chrome
+                # instances before starting with remote debugging". The Chrome
+                # it means is ours, the one it was asked to attach to. Left
+                # unset, that whole branch is skipped and it connects straight
+                # to BROWSER_REMOTE_DEBUGGING_URL, which is what we want.
                 settings={
                     "BROWSER_TYPE": "cdp-connect",
                     "BROWSER_REMOTE_DEBUGGING_URL": cdp,
-                    "CHROME_EXECUTABLE_PATH": _chromium(),
                     "MAX_STEPS_PER_RUN": int(os.getenv("SKYVERN_MAX_STEPS", "40")),
                 },
             ))
@@ -134,14 +158,6 @@ class SkyvernFiller:
         if "complete" not in status.lower():
             report.errors.append(f"skyvern ended as {status or 'unknown'}")
         return report
-
-
-def _chromium() -> str:
-    """The browser this machine actually has, for any path Skyvern still
-    launches through."""
-    from ..browser import find_chromium
-
-    return find_chromium()
 
 
 async def _maybe_await(value):

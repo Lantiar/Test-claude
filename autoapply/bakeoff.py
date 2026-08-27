@@ -65,6 +65,20 @@ def prepare(page, job: Job, profile: dict) -> tuple[bool, str]:
         return False, ("not an application: "
                        + ", ".join((f.label or f.id or "?")[:30]
                                    for f in fields[:4]))
+    # Hand it over at the top of the form. Discovery walks the whole page and
+    # leaves it wherever it finished, which for an agent that reads a viewport
+    # is not a neutral starting position -- it is most of the answer. browser-use
+    # opened on the bottom of a 32-field Greenhouse form, saw Veteran Status and
+    # Disability Status, filled both correctly, and stopped: from where it was
+    # standing the application looked finished, and it scored 2 of 32 for a
+    # judgement that was reasonable about the page it was shown. The contenders
+    # that read markup cannot tell the difference, so this costs them nothing
+    # and is the difference between a fair comparison and an unfair one.
+    try:
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(300)
+    except Exception:
+        pass
     return True, f"{len(fields)} field(s) on the application"
 
 

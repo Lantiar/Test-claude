@@ -31,14 +31,23 @@ SYSTEM = (
     '  {"action":"click","x":<px>,"y":<px>,"why":"..."}\n'
     '  {"action":"type","text":"...","why":"..."}     (into whatever is focused)\n'
     '  {"action":"key","key":"Tab|Enter|Escape","why":"..."}\n'
-    '  {"action":"done","why":"reached the review step"}\n'
+    '  {"action":"scroll","dy":<px, negative for up>,"why":"..."}\n'
+    '  {"action":"done","why":"every question I can answer is answered"}\n'
     "Rules:\n"
     "- Coordinates are pixels from the top-left of the image you were given.\n"
+    "- You see one screenful at a time. Most applications are several screens "
+    "long, so scroll down to reach the questions below the fold, and keep "
+    "scrolling until you have seen the end of the form.\n"
     "- Never invent a fact about the candidate. Where the profile does not "
     "answer a question and a decline-to-answer option exists, choose it.\n"
     "- Advance a step with Save and Continue / Next when the step is complete.\n"
-    "- STOP with done when you reach a review or summary step. Never click "
-    "Submit or Apply: this is a rehearsal, not a real application."
+    "- Stop with done only when the questions you can answer are answered and "
+    "you have seen the bottom of the form. A Submit or Apply button being "
+    "visible does NOT mean you are finished: a single-page application shows "
+    "Submit from the moment it loads, underneath an entirely empty form, and "
+    "stopping there fills in nothing at all.\n"
+    "- Never click Submit or Apply: this is a rehearsal, not a real "
+    "application."
 )
 
 
@@ -48,7 +57,13 @@ class ComputerUseFiller:
     def available(self):
         if os.getenv("LLM_PROVIDER", "rules") == "rules":
             return False, "needs a model (LLM_PROVIDER=rules)"
-        model = os.getenv("OPENAI_MODEL", "")
+        # The model that will actually look at the screenshots, which is not
+        # necessarily the one everything else uses: _chat_vision reads
+        # VISION_MODEL and only falls back to OPENAI_MODEL. Checking the wrong
+        # one printed "gpt-5.4-mini is a small model" over a run whose vision
+        # calls all went to gpt-5.4 -- a warning about a model that was not in
+        # the loop, on the contender whose every result it would explain away.
+        model = os.getenv("VISION_MODEL") or os.getenv("OPENAI_MODEL", "")
         if model and "mini" in model:
             # Worth saying plainly rather than scoring it badly: a small model
             # given only pixels misplaces clicks, and that is a fact about the
@@ -113,6 +128,15 @@ class ComputerUseFiller:
                     page.keyboard.type(str(act.get("text", "")), delay=15)
                 elif kind == "key":
                     page.keyboard.press(str(act.get("key", "Tab")))
+                elif kind == "scroll":
+                    # There was no way to do this, and the loop is given one
+                    # viewport at a time. A 32-field Greenhouse form is four
+                    # screens tall, so everything below the first screenful was
+                    # not merely unanswered but unreachable -- the contender
+                    # could only ever have filled in the part of the
+                    # application that happened to be on screen when it
+                    # started.
+                    page.mouse.wheel(0, float(act.get("dy", 600)))
                 else:
                     report.errors.append(f"unknown action {kind!r}")
                     break
