@@ -1330,3 +1330,28 @@ def test_a_date_the_widget_reformatted_is_the_same_date():
     # And the reformatting this already handled keeps working.
     assert _matches("224-333-1045", "2243331045", "text")
     assert not _matches("224-333-1045", "224-333-9999", "text")
+
+
+def test_the_reviewer_is_not_asked_about_options_it_cannot_see():
+    """It blocked Mastercard on "State answer 'New Jersey' is not supported by
+    the offered options".
+
+    The payload carries questions and answers, never option lists. So that
+    finding is about a list the reviewer was never shown -- and "New Jersey"
+    is the right answer to a state field on a form that took it. A form that
+    accepted an answer is better evidence than a guess about a dropdown.
+    """
+    from autoapply import sanity
+
+    assert "not shown the options" in sanity.SYSTEM.lower()
+    # And the payload really does not carry them, so the instruction is true.
+    from autoapply.models import FillOutcome, Job, Mapping
+
+    job = Job(url="https://x.wd1.myworkdayjobs.com/y", ats="workday")
+    outcome = FillOutcome(job=job)
+    outcome.fields = [Field(id="s", selector="#s", label="State", kind="select",
+                            options=["New Jersey", "New York"])]
+    outcome.mappings = [Mapping(field_id="s", action="fill", label="State",
+                                value="New Jersey", source="rules")]
+    digest = sanity._form_digest(outcome)
+    assert digest == [{"question": "State", "answer": "New Jersey"}], digest
