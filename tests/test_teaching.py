@@ -935,3 +935,93 @@ def test_every_provider_implements_what_every_tier_calls():
     for provider in providers:
         missing = required - set(dir(provider))
         assert not missing, f"{provider.__name__} is missing {sorted(missing)}"
+
+
+def test_the_reviewer_is_not_asked_to_judge_what_the_run_did_not_do():
+    """Two of Mastercard's three blockers described the payload, not the run.
+
+    "Repeated 'URL*' question with the same answer": Workday keeps the
+    candidate profile between applications, so both URL entries arrived holding
+    https://www.nideesh.ai and the filler correctly left them alone -- writing
+    into a populated entry is what produced "You can't add duplicate website
+    URLs". The run had not touched either field and was right not to.
+
+    "Page title is empty": Workday sets the title asynchronously, so reading it
+    a moment early returns "". Sent as an empty string, absent metadata became
+    a finding about the application.
+    """
+    from autoapply.models import FillOutcome, Job, Mapping
+    from autoapply import sanity
+
+    job = Job(url="https://mastercard.wd1.myworkdayjobs.com/x", ats="workday")
+    outcome = FillOutcome(job=job)
+    for i in (1, 2):
+        outcome.fields.append(Field(id=f"u{i}", selector=f"#u{i}", label="URL*"))
+        outcome.mappings.append(
+            Mapping(field_id=f"u{i}", action="fill", label="URL*",
+                    value="https://www.nideesh.ai", source="account"))
+    outcome.fields.append(Field(id="fn", selector="#fn", label="First Name"))
+    outcome.mappings.append(Mapping(field_id="fn", action="fill",
+                                    label="First Name", value="Nideesh",
+                                    source="rules"))
+
+    digest = sanity._form_digest(outcome)
+    account = [p for p in digest if p.get("already_on_the_account")]
+    assert [p["question"] for p in account] == ["URL*", "URL*"]
+    ours = [p for p in digest if not p.get("already_on_the_account")]
+    assert [p["question"] for p in ours] == ["First Name"], ours
+
+    sent = {}
+
+    class Provider:
+        name = "openai"
+
+        def _chat(self, system, user):
+            sent["system"], sent["user"] = system, user
+            return '{"plausible": true, "problems": []}'
+
+    sanity.review_run(outcome, "https://mastercard.wd1.myworkdayjobs.com/x",
+                      "", Provider())
+    assert "page_title" not in sent["user"], (
+        "an empty title is absent metadata, not a finding about the run")
+    assert "already_on_the_account" in sent["system"], (
+        "the reviewer has to be told which answers the run did not enter")
+
+
+def test_a_finding_about_a_question_that_is_not_on_the_form_is_dropped():
+    """The reviewer can only add blockers, so an invented one has no counterweight.
+
+    Mastercard's run reached review with 40 of 47 fields filled and verified,
+    and was blocked by three findings, all false. One was "Answer for 'Have you
+    ever worked for Mastercard?' contradicts previous answer". The form asks
+    that twice, in two wordings, and the run answered "No" to both.
+
+    A finding about an answer now has to say which question it is about, and
+    the question has to exist. That does not let the reviewer approve anything
+    -- it still cannot clear a block -- it holds it to the evidence it was
+    given. A finding about the page carries no question and stands: those are
+    the ones this tier exists for.
+    """
+    from autoapply.sanity import _cited
+
+    pairs = [{"question": "First Name", "answer": "Nideesh"},
+             {"question": "Have you ever worked for Mastercard?", "answer": "No"}]
+
+    kept = _cited([
+        {"question": "Have you ever worked for Mastercard?",
+         "problem": "contradicts a previous answer"},
+        {"question": "Salary expectation", "problem": "left blank"},
+        {"question": None, "problem": "ended on a job search page"},
+        {"problem": "the page is not an application"},
+    ], pairs)
+
+    assert any("contradicts" in k for k in kept), kept
+    assert any("search page" in k for k in kept), kept
+    assert any("not an application" in k for k in kept), kept
+    assert not any("Salary expectation" in k for k in kept), (
+        "a finding about a question this form never asked must not block")
+
+    # Plain strings still work: the reviewer is asked for objects, not held to
+    # them, and a blocker is too important to lose to a formatting slip.
+    assert _cited(["ended on a job search page"], pairs) == [
+        "ended on a job search page"]

@@ -38,14 +38,22 @@ from .models import FillOutcome
 
 SYSTEM = (
     "You are checking whether an automated job-application run did something "
-    "sensible. You are given the job URL, the page it ended on, that page's "
-    "title, the verdicts it reached, and \"form\": every question it found, in "
-    "page order, each beside the answer it gave.\n"
+    "sensible. You are given the job URL, the page it ended on, the verdicts "
+    "it reached, and \"form\": every question it found, in page order, each "
+    "beside the answer it gave.\n"
     "An \"answer\" of null means the field was left blank, which is ordinary "
     "and is never itself a problem. A question repeating -- three \"Company "
     "name\", eleven \"Description\" -- is a repeating section with several "
     "entries in it, not a mistake; judge each entry against the ones next to "
     "it.\n"
+    "An entry marked \"already_on_the_account\": true was NOT entered by this "
+    "run. The ATS keeps the candidate's profile between applications, and "
+    "writing into an entry that already holds an answer is what makes these "
+    "forms reject a step, so the run deliberately leaves those alone. They are "
+    "shown for context. Judge the run on what it entered, and do not report a "
+    "value it did not put there.\n"
+    "Report only what you can see. Metadata that is absent from this payload "
+    "is absent from the payload, not missing from the application.\n"
     "Report anything IMPLAUSIBLE. In particular:\n"
     "- The page is not a job application at all. A job search box, a location "
     "filter, a newsletter or lead-capture box, a support or careers chat "
@@ -59,8 +67,14 @@ SYSTEM = (
     "Say nothing about answers that are merely terse, and nothing about a run "
     "that is simply incomplete: stopping early is normal and is not itself "
     "implausible.\n"
-    'Reply with JSON only: {"plausible": true|false, "problems": '
-    '["short phrase", ...]}'
+    'Reply with JSON only: {"plausible": true|false, "problems": [{"question": '
+    '"<the question this is about, copied exactly from "form", or null if the '
+    'finding is about the page rather than about one answer>", "problem": '
+    '"<short phrase>"}, ...]}\n'
+    "A finding about an answer must name its question, and the question must "
+    "be one that appears in \"form\", copied exactly. A finding whose question "
+    "is not on the form is discarded, so do not report one you cannot point "
+    "to."
 )
 
 
@@ -89,15 +103,29 @@ def _form_digest(outcome: FillOutcome) -> list[dict]:
 
     Pairing them makes both impossible: an answer cannot be orphaned from its
     question, and a repeated label cannot collapse.
+
+    Where an answer came from belongs beside it too. Workday keeps the
+    candidate profile between applications, so a repeatable section arrives
+    populated and the filler correctly leaves it alone -- writing into a
+    populated entry is what produced "You can't add duplicate website URLs".
+    Mastercard's account holds https://www.nideesh.ai under both of its "URL*"
+    entries, and the reviewer reported "repeated 'URL*' question with the same
+    answer" as a fault in the run. The run had not touched either field, and
+    was right not to.
     """
-    answers = {}
+    answers, sources = {}, {}
     for m in outcome.mappings:
         if m.action in ("fill", "generate") and m.value:
             answers[m.field_id] = str(m.value)[:80]
+            sources[m.field_id] = m.source or ""
 
-    pairs = [{"question": (f.label or f.id or "?")[:80],
-              "answer": answers.get(f.id, None)}
-             for f in outcome.fields]
+    pairs = []
+    for f in outcome.fields:
+        pair = {"question": (f.label or f.id or "?")[:80],
+                "answer": answers.get(f.id, None)}
+        if sources.get(f.id) == "account":
+            pair["already_on_the_account"] = True
+        pairs.append(pair)
     if len(pairs) <= MAX_PAIRS:
         return pairs
     # Keep the answered ones: an unanswered field says little, and the
@@ -119,7 +147,6 @@ def review_run(outcome: FillOutcome, landed_url: str = "",
     payload = {
         "job_url": outcome.job.url,
         "ended_on": landed_url or outcome.job.url,
-        "page_title": page_title,
         "form": _form_digest(outcome),
         "verdicts": {
             "saw_captcha": outcome.saw_captcha,
@@ -129,6 +156,13 @@ def review_run(outcome: FillOutcome, landed_url: str = "",
             "fields_found": len(outcome.fields),
         },
     }
+    # Only when we have one. Sent empty, it became a finding in its own right:
+    # Mastercard's run was blocked on "Page title is empty", which says nothing
+    # whatever about whether the application was filled in correctly. Workday
+    # sets the title asynchronously and reading it a moment early returns "",
+    # so the payload was describing our own timing.
+    if page_title:
+        payload["page_title"] = page_title
 
     try:
         raw = provider._chat(SYSTEM, json.dumps(payload, indent=2))
@@ -145,8 +179,44 @@ def review_run(outcome: FillOutcome, landed_url: str = "",
     except json.JSONDecodeError:
         return True, []
 
-    problems = [str(p) for p in (data.get("problems") or []) if p][:5]
+    problems = _cited(data.get("problems"), payload["form"])
     plausible = bool(data.get("plausible", True)) and not problems
     if not plausible:
         _log.get("sanity").warning("run looks wrong: %s", "; ".join(problems))
     return plausible, problems
+
+
+def _cited(problems, pairs: list[dict]) -> list[str]:
+    """Keep the findings that point at a question actually on this form.
+
+    This tier can only ever add blockers -- by design, since a reviewer able to
+    clear one could talk itself past the deterministic checks. The cost of that
+    design is that an invented finding has no counterweight, and Mastercard's
+    run was blocked by three of them at once, on an application that reached
+    review with 40 of 47 fields filled and verified. One of the three was
+    "Answer for 'Have you ever worked for Mastercard?' contradicts previous
+    answer". The form asks that twice, in two wordings, and the run answered
+    "No" to both.
+
+    So a finding about an answer has to say which question it is about, and
+    the question has to exist. That does not let the reviewer approve anything
+    -- it still cannot clear a block -- it just holds it to the evidence it was
+    given. A finding about the page rather than about an answer carries no
+    question and is kept as it stands; those are the ones this tier exists for.
+    """
+    known = {(p.get("question") or "").strip().lower() for p in pairs}
+    kept: list[str] = []
+    for problem in (problems or []):
+        if isinstance(problem, dict):
+            text = str(problem.get("problem") or problem.get("text") or "").strip()
+            question = str(problem.get("question") or "").strip()
+            if question and question.lower() not in known:
+                _log.get("sanity").info(
+                    "dropped a finding about %r, which is not on this form: %s",
+                    _log.brief(question, 60), _log.brief(text, 80))
+                continue
+            problem = f"{question}: {text}" if question else text
+        problem = str(problem).strip()
+        if problem:
+            kept.append(problem)
+    return kept[:5]
