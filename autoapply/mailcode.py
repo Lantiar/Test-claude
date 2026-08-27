@@ -194,10 +194,19 @@ def _gmail_headers(payload: dict) -> dict:
             for h in (payload.get("headers") or [])}
 
 
-def _wait_gmail(needles: list[str], timeout: int, poll: int) -> str | None:
+def _wait_gmail(needles: list[str], timeout: int, poll: int,
+                since: float | None = None) -> str | None:
     token = _access_token()
     # Everything already in the mailbox is behind this line and stays invisible.
-    started_ms = int(time.time() * 1000)
+    #
+    # Where the line falls matters. Drawn when the wait begins, it lands after
+    # the click that asked for the code -- and up to fifteen seconds after,
+    # since the page is given time to settle first. BNY's mail arrives inside
+    # that gap: four "BNY Careers - Confirm Your Identity" messages sat in the
+    # mailbox while the waiter timed out at 180 seconds having ignored every
+    # one of them as pre-existing. The caller knows when it pressed the button,
+    # so it passes that moment in.
+    started_ms = int((since if since is not None else time.time()) * 1000)
     deadline = time.time() + timeout
     seen: set[str] = set()
 
@@ -232,7 +241,7 @@ def _wait_gmail(needles: list[str], timeout: int, poll: int) -> str | None:
 
 
 def wait_for_code(contains: list[str], timeout: int = 180,
-                  poll: int = 10) -> str | None:
+                  poll: int = 10, since: float | None = None) -> str | None:
     """Wait for a NEW message matching `contains`, return its code.
 
     `contains` is matched case-insensitively against the sender and subject.
@@ -246,7 +255,7 @@ def wait_for_code(contains: list[str], timeout: int = 180,
         raise ValueError("wait_for_code needs a non-empty filter")
 
     if _gmail_configured():
-        return _wait_gmail(needles, timeout, poll)
+        return _wait_gmail(needles, timeout, poll, since)
 
     conn, mailbox = _connect()
     try:

@@ -1261,3 +1261,44 @@ def test_the_run_reviewer_can_retract_a_lesson_too(tmp_path):
     assert dropped == [label], dropped
     assert store.literal_for(signature("workday", label)) is None, \
         "the lesson survived the objection"
+
+
+def test_the_mailbox_line_is_drawn_when_the_code_was_asked_for():
+    """Four codes arrived and the waiter ignored all four.
+
+    _wait_gmail hides everything already in the mailbox, which is right -- an
+    unfiltered wait would hand back a code out of unrelated mail, and an old
+    code is worse than none. But the line was drawn when the wait began, and
+    the wait begins after the click that asks for the code, once the page has
+    been given up to fifteen seconds to settle. BNY's mail lands inside that
+    gap: four "BNY Careers - Confirm Your Identity" messages sat in the
+    mailbox while the waiter timed out at 180 seconds having skipped every one
+    of them as pre-existing.
+    """
+    import inspect
+    import time
+    from autoapply import mailcode
+    from autoapply.workers.base import Worker
+
+    assert "since" in inspect.signature(mailcode.wait_for_code).parameters
+    assert "since" in inspect.signature(mailcode._wait_gmail).parameters
+
+    asked = {}
+
+    def fake_wait_gmail(needles, timeout, poll, since=None):
+        asked["since"] = since
+        return "123456"
+
+    original = mailcode._wait_gmail
+    configured = mailcode._gmail_configured
+    try:
+        mailcode._wait_gmail = fake_wait_gmail
+        mailcode._gmail_configured = lambda: True
+        pressed = time.time() - 30
+        waiter = Worker(object())._mail_waiter(pressed)
+        assert waiter(["bny"]) == "123456"
+        assert asked["since"] == pressed, (
+            "the waiter must look back to the click, not to its own start")
+    finally:
+        mailcode._wait_gmail = original
+        mailcode._gmail_configured = configured

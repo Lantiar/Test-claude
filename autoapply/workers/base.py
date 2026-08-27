@@ -753,21 +753,27 @@ class Worker:
             return False
         return not self.looks_like_an_entry_step()
 
-    def _mail_waiter(self):
+    def _mail_waiter(self, since: float | None = None):
         """A function that waits for the emailed one-time code, or None.
 
         Shared, because the door needs it as much as the sign-in does: behind
         BNY's is a six-digit PIN, and pass_entry_step had no way to ask for one.
+
+        `since` is the moment the button that asks for the code was pressed.
+        Without it the mailbox's high-water line is drawn when the wait starts,
+        which is up to fifteen seconds later -- and BNY's mail lands inside
+        that gap, so four "Confirm Your Identity" messages sat unread while the
+        waiter timed out having ignored every one as pre-existing.
         """
         try:
             from ..mailcode import MailUnavailable, wait_for_code
         except Exception:
             return None
 
-        def waiter(needles, _w=wait_for_code):
+        def waiter(needles, _w=wait_for_code, _since=since):
             try:
                 return _w(needles, timeout=int(
-                    os.getenv("MAIL_CODE_TIMEOUT", "180")))
+                    os.getenv("MAIL_CODE_TIMEOUT", "180")), since=_since)
             except MailUnavailable:
                 return None
         return waiter
@@ -818,6 +824,7 @@ class Worker:
         _accept_required_consent(self, lambda msg: log.info("  %s", msg))
 
         before = self.page.url
+        pressed_at = time.time()
         button, _ = _first_in(list(self.frames()), SUBMIT_SELECTORS)
         if button is None:
             log.info("entry step has no submit control")
@@ -836,7 +843,7 @@ class Worker:
         # there with "no answer for required: pin-code-1 ... pin-code-5".
         from ..login import _clear_code
 
-        ok, detail = _clear_code(self, creds or {}, self._mail_waiter(),
+        ok, detail = _clear_code(self, creds or {}, self._mail_waiter(pressed_at),
                                  lambda msg: log.info("  %s", msg))
         if not ok:
             log.info("entry step: %s", detail)
@@ -886,7 +893,10 @@ class Worker:
         if not creds:
             return False, "no credentials configured for this host"
 
-        waiter = self._mail_waiter()
+        # From now, not from whenever the wait happens to begin: the code is
+        # asked for partway through sign_in(), and mail that arrives before the
+        # waiter starts is mail the waiter would otherwise refuse to look at.
+        waiter = self._mail_waiter(time.time())
 
         log = _log.get("login")
         log.info("attempting sign-in as %s at %s",

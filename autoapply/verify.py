@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 
+from . import log as _log
 from .models import FillOutcome
 
 READ_JS = r"""
@@ -170,6 +171,10 @@ def verify_fields(page, fields, mappings, filled_ids: list[str]) -> tuple[bool, 
                               "actual": actual, "ok": good}
         if not good:
             ok = False
+            _log.get("verify").warning(
+                "%s: wrote %r, form holds %r",
+                _log.brief(f.label or f.id, 50), _log.brief(str(m.value), 60),
+                _log.brief(str(actual), 60))
             if f.id in filled_ids:
                 filled_ids.remove(f.id)
     return ok, detail
@@ -198,6 +203,15 @@ def verify(page, outcome: FillOutcome) -> FillOutcome:
                               "actual": actual, "ok": good}
         if not good:
             ok = False
+            # Say which field and what it holds. "verification failed" on its
+            # own is the whole report a run gives for this, and it names
+            # neither -- so every investigation of it starts by re-running the
+            # application to find out what the sentence meant. The detail was
+            # being recorded and thrown away.
+            _log.get("verify").warning(
+                "%s: wrote %r, form holds %r",
+                _log.brief(f.label or f.id, 50), _log.brief(str(m.value), 60),
+                _log.brief(str(actual), 60))
             # It isn't really filled if it didn't stick — let the gate see that.
             if f.id in outcome.filled_ids:
                 outcome.filled_ids.remove(f.id)
