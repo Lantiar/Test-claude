@@ -169,7 +169,7 @@ class Worker:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
         self.dismiss_consent()
-        target = self.start_application(click=False)
+        target = self.start_application(click=False, job_url=job.url)
         if target.startswith("http") and _offsite(job.url, target):
             # Go there, do not click there. AMD's Apply control points at
             # campus-amd.icims.com, which serves the applicant form to a clean
@@ -197,7 +197,7 @@ class Worker:
             self.settle_step(timeout_ms=15000, reloads=0)
             self.dismiss_consent()
             return
-        target = self.start_application()
+        target = self.start_application(job_url=job.url)
         if target:
             # Wait for the application to render, do not guess at it. AMD's
             # click-through lands on an iCIMS page whose form arrives in an
@@ -274,7 +274,7 @@ class Worker:
     # all. It then reported five fields discovered and one filled, on a page
     # with no application on it.
     START_JS = r"""
-    () => {
+    (wanted) => {
       const clean = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
       // Already looking at an application? Then there is nothing to click
       // through to, and an "Apply" further down the page is a different job.
@@ -308,6 +308,19 @@ class Worker:
 
       const nodes = [...document.querySelectorAll(
           'a, button, [role=button], input[type=button], input[type=submit]')];
+      const namesThisJob = (href) =>
+        (wanted || []).some(id => id && href.toLowerCase().includes(id));
+      // This posting's own apply link first, whatever it is called.
+      for (const n of nodes) {
+        const href = n.getAttribute('href') || '';
+        if (!href || !namesThisJob(href)) continue;
+        const label = clean(n.getAttribute('aria-label') || n.innerText || n.value);
+        if (!/apply|application/i.test(label + ' ' + href)) continue;
+        const r = n.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        n.setAttribute('data-autoapply-start', '1');
+        return href;
+      }
       for (const pass of ['ats', 'label']) {
         for (const n of nodes) {
           const label = clean(n.getAttribute('aria-label') || n.innerText || n.value);
@@ -327,15 +340,23 @@ class Worker:
     }
     """
 
-    def start_application(self, click: bool = True) -> str:
+    def start_application(self, click: bool = True, job_url: str = "") -> str:
         """Find the way through from a job posting to the application.
 
         With click=False the control is located and its href returned without
         being activated, so the caller can navigate to it instead.
         """
+        # The ids naming this posting, so an Apply link that mentions it wins
+        # over one that does not. TikTok's job page carries both: "Apply" ->
+        # careers.tiktok.com/position/application, which is the generic form
+        # and comes first in the DOM, and "Apply to this job" ->
+        # careers.tiktok.com/resume/<job id>/apply, which is this job. Taking
+        # the first match landed on a page with two unlabelled dropdowns and
+        # no application on it.
+        wanted = _posting_ids(job_url)
         for frame in self.frames():
             try:
-                label = frame.evaluate(self.START_JS)
+                label = frame.evaluate(self.START_JS, list(wanted))
             except Exception:
                 continue
             if not label:
@@ -1742,3 +1763,11 @@ def _offsite(from_url: str, to_url: str) -> bool:
 
     a, b = host(from_url), host(to_url)
     return bool(a and b and a != b)
+
+
+def _posting_ids(url: str) -> set[str]:
+    """The identifying parts of a job URL: the number or slug naming it."""
+    from urllib.parse import urlparse
+
+    return {seg.lower() for seg in re.split(r"[/?&=]", urlparse(url or "").path or "")
+            if len(seg) >= 6 and re.search(r"\d", seg)}
