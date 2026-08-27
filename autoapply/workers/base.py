@@ -107,16 +107,39 @@ GROUP_LABEL_JS = r"""
   // the question. Without this a group is named after its first option, and
   // "Which offices are you interested in?" discovers as "New York, NY".
   const scope = group || el.parentElement;
-  const opts = Array.from(
-    scope.querySelectorAll('input[type="radio"], input[type="checkbox"]')
-  ).map(labelOf).filter(Boolean);
+  // The options are whatever shares this control's name -- that is what makes
+  // a radio group a group in HTML, with or without a fieldset -- falling back
+  // to the ones inside the scope. Lever wraps neither its radios in <label>
+  // nor its groups in <fieldset>, so labelOf() found nothing, the subtraction
+  // below removed nothing, and every one of its questions discovered as "Yes":
+  // three characters, longer than the two the loop asks for, returned as the
+  // question. Four required questions per posting, unanswerable, on every
+  // Lever board.
+  const name = el.getAttribute('name');
+  const peers = name
+    ? Array.from(document.getElementsByName(name))
+    : Array.from(scope.querySelectorAll('input[type="radio"], input[type="checkbox"]'));
+  const opts = [];
+  for (const peer of peers) {
+    const own = labelOf(peer);
+    if (own) { opts.push(own); continue; }
+    // No label element: the option's text is whatever sits in its own row.
+    const row = peer.parentElement;
+    const t = row ? clean(row.innerText) : '';
+    if (t && t.length < 60) opts.push(t);
+  }
+  const isAnOption = t =>
+    opts.some(o => o && (o === t || (t.length < 40 && o.includes(t))));
 
   let n = scope, hops = 0;
-  while (n && hops++ < 4) {
+  while (n && hops++ < 5) {
     let text = clean(n.innerText);
     opts.forEach(o => { text = text.split(o).join(' '); });
     text = clean(text);
-    if (text.length > 2) return text;
+    // A question is not one of its own answers. Without this the loop stops on
+    // the first container whose text survives subtraction, which on a form
+    // whose options it could not read is the option itself.
+    if (text.length > 2 && !isAnOption(text)) return text;
     n = n.parentElement;
   }
   return '';

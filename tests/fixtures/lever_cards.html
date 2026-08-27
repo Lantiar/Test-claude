@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><title>Apply</title></head>
+<body><form>
+  <li class="application-question">
+    <label><div class="application-label">Full name<span class="required">✱</span></div>
+      <div class="application-field"><input type="text" name="name" required></div></label>
+  </li>
+  <li class="application-question">
+    <div class="application-label">Do you now, or will you in the future, require
+      employer-sponsored immigration support?<span class="required">✱</span></div>
+    <div class="application-field">
+      <ul>
+        <li><input type="radio" name="cards[abc][field3]" value="Yes" required> Yes</li>
+        <li><input type="radio" name="cards[abc][field3]" value="No"> No</li>
+      </ul>
+    </div>
+  </li>
+  <li class="application-question">
+    <div class="application-label">Are you legally authorized to work in the United
+      States?<span class="required">✱</span></div>
+    <div class="application-field">
+      <ul>
+        <li><input type="radio" name="cards[abc][field7]" value="Yes" required> Yes</li>
+        <li><input type="radio" name="cards[abc][field7]" value="No"> No</li>
+      </ul>
+    </div>
+  </li>
+  <button type="submit">Submit</button>
+</form></body></html>

@@ -799,3 +799,36 @@ def test_an_invisible_recaptcha_is_not_a_challenge():
         assert GenericWorker(pg).saw_captcha(), \
             "the grid a person has to solve must still stop the run"
         browser.close()
+
+
+def test_a_lever_question_is_not_named_after_its_own_answer():
+    """Every custom question on a Lever board discovered as "Yes".
+
+    Lever wraps neither its radios in <label> nor its groups in <fieldset>, so
+    the option-label reader found nothing, the subtraction that recovers a
+    question from its container removed nothing, and the loop returned the
+    first text that survived -- "Yes", three characters, longer than the two
+    it asks for. Four required questions per posting, unanswerable, on every
+    Lever board in the list.
+
+    Radios sharing a name are a group in HTML with or without a fieldset, and
+    a question is never one of its own answers.
+    """
+    from autoapply.workers.lever import LeverWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "lever_cards.html").as_uri())
+
+        labels = [(f.label or "") for f in LeverWorker(pg).discover()
+                  if f.kind == "radio"]
+        assert len(labels) == 2, labels
+        assert all("Yes" != l.strip() for l in labels), labels
+        assert any("immigration support" in l for l in labels), labels
+        assert any("legally authorized" in l for l in labels), labels
+        browser.close()
