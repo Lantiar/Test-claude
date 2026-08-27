@@ -127,14 +127,31 @@ GROUP_LABEL_JS = r"""
 # directly is invisible to them, so go through the native setter and fire events.
 SET_VALUE_JS = r"""
 ([el, value]) => {
-  const proto = el.tagName === 'TEXTAREA'
-    ? window.HTMLTextAreaElement.prototype
-    : window.HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-  setter.call(el, value);
+  // The prototype has to match the element. Calling HTMLInputElement's value
+  // setter on anything else throws "Illegal invocation", which is what
+  // TikTok's School name and YYYY fields did -- they are not inputs, and
+  // discovery had called them text.
+  const tag = el.tagName;
+  const proto = tag === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype
+              : tag === 'SELECT'   ? window.HTMLSelectElement.prototype
+              : tag === 'INPUT'    ? window.HTMLInputElement.prototype
+              : null;
+  if (proto) {
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+    setter.call(el, value);
+  } else if (el.isContentEditable) {
+    // A rich-text box: its content is its value.
+    el.focus();
+    el.textContent = value;
+  } else if ('value' in el) {
+    el.value = value;            // a custom element with its own accessor
+  } else {
+    return false;
+  }
   el.dispatchEvent(new Event('input',  { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
   el.dispatchEvent(new Event('blur',   { bubbles: true }));
+  return true;
 }
 """
 
@@ -1088,6 +1105,17 @@ class Worker:
             el.set_input_files(path)
             return value
         if f.kind == "select":
+            # Only a real <select> answers select_option. Discovery calls a
+            # custom dropdown "select" too, and the error it raises --
+            # "Element is not a <select> element" -- says nothing about what to
+            # do instead. Drive that like the combobox it is.
+            tag = ""
+            try:
+                tag = (el.evaluate("e => e.tagName") or "").upper()
+            except Exception:
+                pass
+            if tag != "SELECT":
+                return self._write_combobox(el, value, ctx)
             try:
                 el.select_option(label=value)
             except Exception:
