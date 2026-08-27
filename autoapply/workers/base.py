@@ -167,9 +167,94 @@ class Worker:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
         self.dismiss_consent()
-        if self.start_application():
-            self.page.wait_for_timeout(2500)
+        target = self.start_application(click=False)
+        if target.startswith("http") and _offsite(job.url, target):
+            # Go there, do not click there. AMD's Apply control points at
+            # campus-amd.icims.com, which serves the applicant form to a clean
+            # visitor -- but clicking it carries the careers site's cookies and
+            # tracking parameters along, and iCIMS then routes the session into
+            # amdsso.okta.com, an employee SSO app with no application on it.
+            # Trying to recover afterwards raced a redirect that fires later
+            # than any check for it. Not clicking is simpler and always
+            # equivalent: the href is the destination.
+            _log.get(f"worker.{self.ats}").info(
+                "following the application link directly: %s",
+                _log.brief(target, 60))
+            try:
+                self.page.context.clear_cookies()
+                self.page.goto(target.split("?")[0], wait_until="domcontentloaded")
+            except Exception:
+                pass
+            self.settle_step(timeout_ms=15000, reloads=0)
             self.dismiss_consent()
+            return
+        target = self.start_application()
+        if target:
+            # Wait for the application to render, do not guess at it. AMD's
+            # click-through lands on an iCIMS page whose form arrives in an
+            # iframe after about four seconds: at a fixed 2.5s wait discovery
+            # found zero fields and the run reported "no form fields
+            # discovered" about a page that was still loading.
+            self.settle_step(timeout_ms=15000, reloads=0)
+            self.dismiss_consent()
+            self._escape_sso(target)
+
+    # A corporate identity provider. Landing on one means the Apply control led
+    # into an employee login rather than the candidate flow.
+    SSO_HOSTS = ("okta.com", "onelogin.com", "pingidentity.com", "ping-eng.com",
+                 "microsoftonline.com", "auth0.com", "duosecurity.com")
+
+    def _escape_sso(self, target: str) -> None:
+        """Back out of a corporate SSO detour onto the applicant form.
+
+        AMD's careers page carries an Apply link that routes through
+        amdsso.okta.com into an employee SSO app, while the plain iCIMS URL --
+        campus-amd.icims.com/jobs/<id>/login -- still serves the candidate
+        flow, an email box and a privacy acceptance. Following the button
+        therefore lands somewhere no applicant can sign in to, and the run
+        reports zero fields on a form that exists and is reachable.
+
+        The href the Apply control pointed at is the applicant URL; it is
+        arriving there via the click, with its tracking parameters, that
+        triggers the redirect. So go there directly instead.
+        """
+        try:
+            landed = (self.page.url or "").lower()
+        except Exception:
+            return
+        if not target.startswith("http"):
+            return
+        # Two ways to know the click went somewhere useless: it landed on an
+        # identity provider, or it produced no form at all. The second is the
+        # general test and the one that actually caught AMD -- following its
+        # Apply control reaches login.icims.com/authorize for *internal*-amd,
+        # which is not an IdP hostname and is still not an application. Fresh,
+        # the same URL serves the candidate flow, so it is the click's
+        # accumulated state that redirects.
+        if not any(host in landed for host in self.SSO_HOSTS):
+            try:
+                if self.discover():
+                    return
+            except Exception:
+                return
+        direct = target.split("?")[0]
+        log = _log.get(f"worker.{self.ats}")
+        log.info("Apply led to corporate SSO (%s); going straight to %s",
+                 _log.brief(landed, 40), _log.brief(direct, 60))
+        try:
+            # Clear first. The redirect is driven by state the careers site
+            # set, so arriving at the same URL in the same session lands in the
+            # same place -- AMD sent us to amdsso.okta.com either way. From a
+            # clean session that exact URL serves the applicant form. Nothing
+            # worth keeping has been established yet: this runs before sign-in.
+            self.page.context.clear_cookies()
+            self.page.goto(direct, wait_until="domcontentloaded")
+            self.settle_step(timeout_ms=15000, reloads=0)
+            self.dismiss_consent()
+            log.info("reached %s with %d field(s)", _log.brief(self.page.url, 50),
+                     len(self.discover()))
+        except Exception as exc:
+            log.info("could not reach %s: %s", _log.brief(direct, 50), exc)
 
     # A job posting is not an application, and only the Workday worker knew to
     # click through from one to the other. On BNY's Oracle site the run stayed
@@ -195,25 +280,50 @@ class Worker:
       for (const el of document.querySelectorAll('label, legend')) {
         if (signs.test(clean(el.innerText))) return '';
       }
-      // Whole-label match: "Apply filters" on a search page is not this, and
-      // neither is "Apply" inside a sentence.
+      // Whole-label match first: "Apply filters" on a search page is not this,
+      // and neither is "Apply" inside a sentence.
       const want = /^(apply|apply now|apply for this job|apply to this job|apply manually|apply online|apply for job|start application|start your application|i'?m interested)$/;
-      for (const n of document.querySelectorAll(
-              'a, button, [role=button], input[type=button], input[type=submit]')) {
-        const label = clean(n.getAttribute('aria-label') || n.innerText || n.value);
-        if (!want.test(label)) continue;
-        const r = n.getBoundingClientRect();
-        if (!r.width || !r.height) continue;
-        n.setAttribute('data-autoapply-start', '1');
-        return label;
+      // ...but a real one is often labelled with the job. AMD's is
+      // aria-label="Apply : 2027 Masters Software Engineer Intern/Co-op in
+      // Multiple Locations", which a whole-label test skips -- so the link
+      // straight to the application was passed over for being descriptive,
+      // and the run sat on the posting finding no fields at all. Apply
+      // followed by a separator is still Apply; "Apply filters" is not.
+      const prefixed = /^(apply|start application)\s*[:\u2013\u2014-]|^apply\s+(to|for)\s+(this|the)\b/;
+      const isApply = (label) => label && (want.test(label) ||
+                                (prefixed.test(label) && !/filter/.test(label)));
+      // An ATS host in the href is stronger than any wording: a link off this
+      // page and into icims/workday/greenhouse/lever/ashby/oracle is the
+      // application by definition, whatever it calls itself.
+      const ATS = /(icims|myworkdayjobs|workday|greenhouse|lever\.co|ashbyhq|oraclecloud|taleo|smartrecruiters|jobvite)\./i;
+
+      const nodes = [...document.querySelectorAll(
+          'a, button, [role=button], input[type=button], input[type=submit]')];
+      for (const pass of ['ats', 'label']) {
+        for (const n of nodes) {
+          const label = clean(n.getAttribute('aria-label') || n.innerText || n.value);
+          const href = n.getAttribute('href') || '';
+          const hit = pass === 'ats'
+            ? (ATS.test(href) && /apply|application/i.test(label + ' ' + href))
+            : isApply(label);
+          if (!hit) continue;
+          const r = n.getBoundingClientRect();
+          if (!r.width || !r.height) continue;
+          n.setAttribute('data-autoapply-start', '1');
+          // The href, when there is one: _escape_sso needs somewhere to go.
+          return href || label;
+        }
       }
       return '';
     }
     """
 
-    def start_application(self) -> str:
-        """Click through from a job posting to the application. Returns what
-        was clicked, or "" if we were already on the form."""
+    def start_application(self, click: bool = True) -> str:
+        """Find the way through from a job posting to the application.
+
+        With click=False the control is located and its href returned without
+        being activated, so the caller can navigate to it instead.
+        """
         for frame in self.frames():
             try:
                 label = frame.evaluate(self.START_JS)
@@ -223,7 +333,11 @@ class Worker:
                 continue
             try:
                 button = frame.query_selector("[data-autoapply-start]")
-                if button is not None and _click(button):
+                if button is None:
+                    continue
+                if not click:
+                    return label
+                if _click(button):
                     _log.get(f"worker.{self.ats}").info(
                         "clicked through to the application (%r)", label)
                     return label
@@ -1589,3 +1703,15 @@ def _same_posting(wanted: str, landed: str) -> bool:
         # names no posting at all. That is the homepage case.
         return False
     return want_host == got_host
+
+
+def _offsite(from_url: str, to_url: str) -> bool:
+    """Does this link leave the current site? An ATS handoff always does."""
+    from urllib.parse import urlparse
+
+    def host(u):
+        h = (urlparse(u or "").hostname or "").lower().removeprefix("www.")
+        return ".".join(h.split(".")[-2:])
+
+    a, b = host(from_url), host(to_url)
+    return bool(a and b and a != b)
