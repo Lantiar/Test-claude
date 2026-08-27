@@ -152,6 +152,8 @@ class Worker:
     # now shows ("Handshake"), and teaching needs the route that got there
     # ("Job Board > Handshake"), since the leaf is not on the top-level menu.
     pending_paths: dict[str, str] | None = None
+    # Set once a sign-in succeeds: the session is now worth protecting.
+    _signed_in: bool = False
     form_selector = "form"
     submit_selector = "button[type=submit]"
     # Text that means the application landed. Checked after submit; without a
@@ -181,7 +183,14 @@ class Worker:
                 "following the application link directly: %s",
                 _log.brief(target, 60))
             try:
-                self.page.context.clear_cookies()
+                # Only before we hold a session. Clearing was added so AMD's
+                # careers cookies could not route the ATS hop into employee
+                # SSO; called again after a successful sign-in it throws that
+                # sign-in away, which is exactly what happened on TikTok --
+                # signed in, landed on /position/application, re-opened, and
+                # was back at /login with the session gone.
+                if not self._signed_in:
+                    self.page.context.clear_cookies()
                 self.page.goto(target.split("?")[0], wait_until="domcontentloaded")
             except Exception:
                 pass
@@ -812,9 +821,15 @@ class Worker:
         if self.needs_auth():
             ok, detail = self.try_sign_in(job)
             if ok:
-                # The form only exists past the wall; re-open so discovery sees
-                # the application rather than the sign-in page it replaced.
-                self.open(job)
+                self._signed_in = True
+                # Signing in usually lands on the form itself -- TikTok's
+                # redirect_path carries you straight to /position/application.
+                # Re-opening from the job URL throws that away and can walk
+                # back into the wall, so only do it when the sign-in left us
+                # somewhere without a form on it.
+                self.settle_step(timeout_ms=10000, reloads=0)
+                if not self.discover():
+                    self.open(job)
         fields = self.discover()
 
         # Do not type into a page we were redirected to. A closed Ashby posting
