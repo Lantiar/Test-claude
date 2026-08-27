@@ -761,3 +761,36 @@ def test_an_unreadable_field_is_reported_not_silently_skipped(tmp_path):
     assert out["a"].action == "fill"
     assert out["b"].action == "unknown"
     assert out["b"].source == "unreadable-label"
+
+
+def test_a_spare_link_only_answers_a_question_about_a_link():
+    """_spread_repeated_values hands a spare link to any repeated field that is
+    unanswered or duplicated. That was harmless while the only repeated fields
+    in sight were Workday's two URL boxes.
+
+    TikTok's form repeats whole records -- Title, Company name, Description,
+    Project URL, once per project -- so those labels repeat too, and the
+    spread put a GitHub URL into "Title" and a personal site into "Company
+    name". The presubmit reviewer caught both.
+    """
+    from autoapply.mapper import _spread_repeated_values
+    from autoapply.models import Mapping
+
+    profile = {"links": {"portfolio": "https://nideesh.ai",
+                         "github": "https://github.com/nb923"}}
+    mappings = [
+        Mapping(field_id="t1", action="unknown", label="Title"),
+        Mapping(field_id="c1", action="unknown", label="Company name"),
+        Mapping(field_id="d1", action="unknown", label="Description"),
+        Mapping(field_id="u1", action="unknown", label="Project URL"),
+        Mapping(field_id="u2", action="unknown", label="URL"),
+    ]
+    _spread_repeated_values(mappings, {m.field_id for m in mappings}, profile)
+    got = {m.field_id: (m.action, m.value) for m in mappings}
+
+    assert got["t1"][0] == "unknown", f"Title got {got['t1'][1]!r}"
+    assert got["c1"][0] == "unknown", f"Company name got {got['c1'][1]!r}"
+    assert got["d1"][0] == "unknown", f"Description got {got['d1'][1]!r}"
+    # The link-shaped ones still get distinct links, which is what it is for.
+    assert got["u1"][0] == "fill" and got["u2"][0] == "fill"
+    assert got["u1"][1] != got["u2"][1]

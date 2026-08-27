@@ -500,6 +500,11 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
 _LINK_PATHS = ("links.portfolio", "links.linkedin", "links.github",
                "links.other_website")
 
+# A field that is asking for a link. Only these may receive a spare one.
+_WANTS_A_LINK = re.compile(
+    r"\burl\b|\blink\b|website|portfolio|github|linked\s*in|profile\s*(page|link)",
+    re.I)
+
 
 def _spread_repeated_values(mappings: list[Mapping], repeated: set[str],
                             profile: dict) -> None:
@@ -522,7 +527,17 @@ def _spread_repeated_values(mappings: list[Mapping], repeated: set[str],
             used.add(m.value)
             continue
         # Either a duplicate of a value already on the form, or a repeated
-        # field nothing answered. Both want the next link not yet used.
+        # field nothing answered. Both want the next link not yet used --
+        # provided the field is asking for a link at all.
+        #
+        # This handed links to every repeated field, which was harmless while
+        # the only repeated fields in sight were Workday's two URL boxes. On a
+        # form with repeating project and experience entries it put a GitHub
+        # URL into "Title" and a personal site into "Company name", because
+        # those labels repeat too. A spare link answers a question about a
+        # link; it answers nothing else.
+        if not _WANTS_A_LINK.search(m.label or ""):
+            continue
         spare = next((v for v in available if v not in used), "")
         if spare:
             m.action, m.value, m.source = "fill", spare, "spread"
