@@ -9,6 +9,7 @@ receive it.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 
@@ -1355,3 +1356,45 @@ def test_the_reviewer_is_not_asked_about_options_it_cannot_see():
                                 value="New Jersey", source="rules")]
     digest = sanity._form_digest(outcome)
     assert digest == [{"question": "State", "answer": "New Jersey"}], digest
+
+
+def test_the_audit_does_not_talk_the_profile_out_of_its_own_facts():
+    """Somerce's application went out with the wrong surname.
+
+    The profile spells it "Bharath Kumar", the rule filled exactly that, and
+    the audit rewrote it to "Kumar" -- with the note "the last name should be
+    just 'Bharath'", which is neither what it wrote nor what the profile says.
+    A wrong surname on a real person's application is not a tradeoff worth any
+    audit's opinion.
+    """
+    from autoapply.models import Mapping
+    from autoapply.repair import audit_step, _is_verbatim_profile
+
+    profile = {"identity": {"first_name": "Nideesh",
+                            "last_name": "Bharath Kumar"}}
+    assert _is_verbatim_profile("Bharath Kumar", profile)
+    assert _is_verbatim_profile("Nideesh", profile)
+    # A sentence that merely mentions a profile word is not the profile
+    # speaking, and the audit may still correct it.
+    assert not _is_verbatim_profile("I am Nideesh and I like Rust", profile)
+
+    class Provider:
+        name = "openai"
+
+        def _chat(self, system, user):
+            return json.dumps({"wrong": [{"label": "Last name", "value": "Kumar",
+                                          "why": "should be just 'Bharath'"}]})
+
+    class Worker:
+        def _write(self, *a):
+            raise AssertionError("the profile's own answer was overwritten")
+
+    field = Field(id="ln", selector="#ln", label="Last name")
+    mapping = Mapping(field_id="ln", action="fill", value="Bharath Kumar",
+                      label="Last name", source="rules")
+
+    fixed, notes = audit_step(Worker(), [field], [mapping], profile,
+                              provider=Provider(), store=None, ats="workable")
+    assert fixed == 0, notes
+    assert mapping.value == "Bharath Kumar"
+    assert any("kept the profile's own" in n for n in notes), notes

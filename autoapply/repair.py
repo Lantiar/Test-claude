@@ -23,8 +23,10 @@ and reports it still failing rather than quietly claiming success.
 from __future__ import annotations
 
 import json
-import weakref
 import re
+import weakref
+
+from . import log as _log
 
 from . import budget
 from .llm import today_note
@@ -203,6 +205,18 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
         field = by_id.get(mapping.field_id)
         value = usable(item.get("value"))
         why = item.get("why") or "audited as wrong"
+        # The profile is the candidate's own account of their own facts, and
+        # an answer copied verbatim out of it is not something to be talked
+        # out of. Somerce's Last name held "Bharath Kumar", exactly as the
+        # profile spells it, and the audit rewrote it to "Kumar" -- with the
+        # note "the last name should be just 'Bharath'", which is neither what
+        # it wrote nor what the profile says. A wrong surname on a real
+        # person's application is not a tradeoff worth any audit's opinion.
+        if _is_verbatim_profile(mapping.value, profile):
+            notes.append(f"{mapping.label}: audit wanted "
+                         f"'{_log.brief(str(value), 30)}' ({why}); kept the "
+                         f"profile's own '{_log.brief(mapping.value, 30)}'")
+            continue
         if not value:
             notes.append(f"{mapping.label}: flagged ({why}), no replacement offered")
             continue
@@ -260,6 +274,27 @@ def usable(value) -> str:
         if len(steps) > 1 and len(set(steps)) == 1:
             return ""
     return text
+
+
+def _is_verbatim_profile(value: str, profile: dict) -> bool:
+    """Is this exactly something the profile says, character for character?
+
+    Only exact scalars count. A generated sentence that happens to contain a
+    profile word is not the profile speaking, and an audit is free to correct
+    that; "Bharath Kumar" under Last name is.
+    """
+    text = (value or "").strip()
+    if len(text) < 2:
+        return False
+
+    def walk(node) -> bool:
+        if isinstance(node, dict):
+            return any(walk(v) for v in node.values())
+        if isinstance(node, list):
+            return any(walk(v) for v in node)
+        return isinstance(node, str) and node.strip() == text
+
+    return walk(profile)
 
 
 def _explore(worker, field, profile, provider, store, ats, notes):
