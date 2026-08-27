@@ -645,3 +645,51 @@ def test_explore_stops_when_the_model_picks_the_same_thing_twice():
     source = inspect.getsource(explore.solve_field)
     assert "clicked" in source
     assert 'choice["label"] in clicked' in source
+
+
+def test_a_lesson_the_reviewer_objects_to_is_retracted(tmp_path):
+    """A wrong lesson was permanent. It outranks every other source, is held
+    out of re-auditing, and there was no way to remove one -- so the store had
+    accumulated "Last Name = Kumar" against a profile reading "Bharath Kumar",
+    and three answers learned off a careers *search* page. The presubmit
+    reviewer could see the damage and had no way to undo it.
+    """
+    from autoapply.gate import forget_flagged
+    from autoapply.models import FillOutcome, Job, Mapping
+
+    store = _store(tmp_path)
+    store.record_correction(signature("workday", "Last Name*"), "Last Name*", "Kumar")
+    store.record_correction(signature("workday", "State"), "State", "New Jersey")
+
+    job = Job(url="https://x", ats="workday")
+    outcome = FillOutcome(job=job, mappings=[
+        Mapping(field_id="ln", action="fill", value="Kumar",
+                label="Last Name*", source="learned"),
+        Mapping(field_id="st", action="fill", value="New Jersey",
+                label="State", source="learned"),
+        Mapping(field_id="c", action="fill", value="Monroe Township",
+                label="City", source="rules"),
+    ])
+
+    dropped = forget_flagged(outcome, [
+        "Last Name answer 'Kumar' contradicts profile last name 'Bharath Kumar'"],
+        store)
+    assert dropped == ["Last Name*"]
+    assert store.literal_for(signature("workday", "Last Name*")) is None
+    # Everything it did not object to survives.
+    assert store.literal_for(signature("workday", "State")) == "New Jersey"
+
+
+def test_only_taught_answers_are_retracted(tmp_path):
+    """A rule or a model answer is re-derived next run anyway; a lesson is the
+    only thing that persists unchallenged, so it is the only thing to drop."""
+    from autoapply.gate import forget_flagged
+    from autoapply.models import FillOutcome, Job, Mapping
+
+    store = _store(tmp_path)
+    store.record_correction(signature("workday", "City"), "City", "Monroe Township")
+    outcome = FillOutcome(job=Job(url="https://x", ats="workday"), mappings=[
+        Mapping(field_id="c", action="fill", value="Monroe Township",
+                label="City", source="rules")])
+    assert forget_flagged(outcome, ["City answer is wrong"], store) == []
+    assert store.literal_for(signature("workday", "City")) == "Monroe Township"

@@ -148,6 +148,22 @@ class Store:
         self.db.execute("UPDATE cache SET unconfirmed=0, confidence=1.0 WHERE sig=?", (sig,))
         self.db.commit()
 
+    def forget(self, sig: str) -> int:
+        """Drop a taught answer. Returns how many rows went.
+
+        There was no way to do this, and a taught answer outranks every other
+        source and is held out of re-auditing -- so one wrong lesson was
+        permanent and invisible. The store had accumulated "Last Name = Kumar"
+        against a profile reading "Bharath Kumar", and three entries learned
+        off a careers *search* page: "City, state, country = Search by
+        Location", "Job title, skill, keyword = Tech - Software Engineering
+        filter 106". Every future run would have replayed all of them with
+        confidence 1.0.
+        """
+        cur = self.db.execute("DELETE FROM feedback WHERE sig = ?", (sig,))
+        self.db.commit()
+        return cur.rowcount
+
     def literal_for(self, sig: str) -> Optional[str]:
         """The last answer a human typed for this field signature.
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import time
 
+from . import log as _log
 from .models import FillOutcome, GateResult, Job
 
 KILL_SWITCH = "data/STOP"
@@ -147,7 +148,49 @@ def blockers(outcome: FillOutcome, store=None, profile: dict | None = None,
         safe, blocking, note = presubmit_review(outcome, profile, provider)
         if not safe:
             reasons.extend(blocking or ["presubmit review declined"])
+            # A flagged answer that came from a taught one is a bad lesson, and
+            # a bad lesson is worse than no lesson: it outranks every other
+            # source, is held out of re-auditing, and is replayed with
+            # confidence 1.0 on every future run. Retract it, so the next run
+            # re-derives the answer instead of repeating the mistake. The
+            # reviewer could see the damage and had no way to undo it -- which
+            # is how "Last Name = Kumar" survived against a profile saying
+            # "Bharath Kumar".
+            forget_flagged(outcome, blocking, store)
         outcome.verify_detail["_presubmit"] = {
             "safe": safe, "blocking": blocking, "note": note}
 
     return reasons
+
+
+def forget_flagged(outcome, blocking: list[str], store) -> list[str]:
+    """Drop taught answers the reviewer just objected to. Returns their labels."""
+    if store is None or not blocking:
+        return []
+    from .mapper import signature
+
+    text = " ".join(blocking).lower()
+    dropped: list[str] = []
+    for m in outcome.mappings:
+        label = (m.label or "").strip()
+        # Only what was taught. A rule or a model answer is re-derived next run
+        # anyway; a lesson is the only thing that persists unchallenged.
+        if m.source != "learned" or not label:
+            continue
+        if label.lower().rstrip("*").strip() not in text:
+            continue
+        try:
+            if store.forget(signature(outcome.job.ats, label)):
+                dropped.append(label)
+        except Exception as exc:
+            # Not swallowed. This block caught an AttributeError from a method
+            # name that did not exist and reported nothing at all, so the
+            # retraction silently never happened -- the same shape of failure
+            # this whole tier was added to catch.
+            _log.get("gate").warning(
+                "could not retract the lesson for %s: %s: %s",
+                label, type(exc).__name__, exc)
+    if dropped:
+        _log.get("gate").info("retracted %d taught answer(s) the reviewer "
+                              "objected to: %s", len(dropped), ", ".join(dropped))
+    return dropped

@@ -299,6 +299,43 @@ class WorkdayWorker(WizardWorker):
     PATH_SEP = " > "
     MAX_MENU_DEPTH = 3
 
+    def _popup_options(self, f: Field) -> list:
+        """The options belonging to THIS field's picker, scoped exactly.
+
+        Workday renders a picker's menu as a sibling of <body>, not as a child
+        of the field -- div[data-automation-widget='wd-popup'] carrying
+        data-associated-widget set to the multiSelectContainer's id. So a
+        search scoped to the field container finds nothing at all, and a
+        page-wide search finds every other menu Workday happens to have mounted
+        (the Country Phone Code picker sits beside this one with its own
+        selection rendered as a promptOption, which is how an option list once
+        began "United States of America (+1) > Job Board").
+
+        The association id is the precise answer, and it is how
+        berellevy/job_app_filler locates the same menu.
+        """
+        box = self.page.query_selector(
+            f"{FORM_FIELD}[data-automation-id='formField-{f.id}']")
+        if box is None:
+            return []
+        container = box.query_selector("[data-automation-id='multiSelectContainer']")
+        widget_id = container.get_attribute("id") if container is not None else ""
+        if not widget_id:
+            return []
+        out = []
+        for opt in self.page.query_selector_all(
+                f"[data-associated-widget='{widget_id}'] "
+                "[data-automation-id='promptOption']"):
+            try:
+                if not opt.is_visible():
+                    continue
+            except Exception:
+                continue
+            text = (opt.inner_text() or "").strip()
+            if text and not PLACEHOLDER_OPTION.match(text):
+                out.append((opt, text))
+        return out
+
     def _visible_options(self, sel: str, exclude: set[str] | None = None) -> list:
         """Visible options, minus any that were already on screen.
 
@@ -432,8 +469,9 @@ class WorkdayWorker(WizardWorker):
                 return None
             self.page.wait_for_timeout(900)
 
-            options = [(el, text) for el, text in
-                       self._visible_options("promptOption", set())]
+            options = self._popup_options(f) or [
+                (el, text) for el, text
+                in self._visible_options("promptOption", set())]
             if not options:
                 continue
             texts = [t for _, t in options]
@@ -495,6 +533,34 @@ class WorkdayWorker(WizardWorker):
         if remove is not None:
             _click(remove)
             self.page.wait_for_timeout(400)
+
+        # Workday's own search ran and left its results open. When it could not
+        # settle on one itself, the menu is still the right menu -- so take the
+        # closest thing in it rather than walking away. job_app_filler does the
+        # same, clicking the first promptOption when the keystroke search
+        # returns several. Without this the search happened, found "Computer
+        # Science", and nobody could see the results to click one.
+        from ..mapper import resolve_option
+
+        options = self._popup_options(f)
+        if options:
+            texts = [t for _, t in options]
+            chosen = resolve_option(value, texts)
+            if chosen is None and len(options) == 1:
+                chosen = texts[0]
+            if chosen is not None:
+                for el, text in options:
+                    if text == chosen:
+                        _click(el)
+                        self.page.wait_for_timeout(400)
+                        chip = box.query_selector(
+                            "[data-automation-id='selectedItem'], "
+                            "ul[data-automation-id='selectedItemList'] li")
+                        got = (chip.inner_text() or "").strip() if chip else text
+                        _log.get(f"worker.{self.ats}").debug(
+                            "%s: search left %d option(s), took %r",
+                            f.label, len(options), got)
+                        return got
         return None
 
     # Setting a date spinner's value directly does not register: Workday reads
