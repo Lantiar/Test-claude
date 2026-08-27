@@ -127,8 +127,12 @@ class SkyvernFiller:
         status = str(getattr(result, "status", "") or "")
         log.info("skyvern finished: %s", status)
         report.steps_advanced = len(getattr(result, "steps", []) or [])
-        if "complete" in status.lower():
-            report.reached_review = True
+        # Whether it finished is recorded, not asserted: reached_review is set
+        # by the harness off the page. A filler asserting that about itself is
+        # what let three contenders claim the deciding term while the fourth
+        # could not score it at all.
+        if "complete" not in status.lower():
+            report.errors.append(f"skyvern ended as {status or 'unknown'}")
         return report
 
 

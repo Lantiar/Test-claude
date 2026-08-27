@@ -102,7 +102,9 @@ class ComputerUseFiller:
             log.debug("step %d: %s (%s)", step + 1, kind,
                       _log.brief(act.get("why"), 60))
             if kind == "done":
-                report.reached_review = True
+                # reached_review is set by the harness, off the page. A filler
+                # asserting it about itself is what let three contenders claim
+                # the deciding term and left the fourth unable to score it.
                 break
             try:
                 if kind == "click":

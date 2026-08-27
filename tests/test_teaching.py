@@ -1398,3 +1398,47 @@ def test_the_audit_does_not_talk_the_profile_out_of_its_own_facts():
     assert fixed == 0, notes
     assert mapping.value == "Bharath Kumar"
     assert any("kept the profile's own" in n for n in notes), notes
+
+
+def test_the_boards_own_schema_corrects_what_discovery_guessed():
+    """Discovery infers what a control is for by reading a rendered page, and
+    that inference is where nearly every discovery bug here has lived: a
+    question named after its own first option, a required flag that was never
+    in the DOM, an option list that only exists once a menu is open.
+
+    Greenhouse publishes the answer -- label, type, required, options, and the
+    name attribute the input carries, which is what lets a published question
+    be matched to a discovered control with no guessing at all.
+    """
+    from autoapply.schema import apply_to
+
+    published = {
+        "question_31358969003": {
+            "label": "Will you now or in the future require sponsorship?",
+            "required": True, "kind": "select", "options": ["Yes", "No"]},
+        "first_name": {"label": "First Name", "required": True,
+                       "kind": "text", "options": []},
+    }
+
+    guessed = [
+        # What the page gave up: the first option as the question, no options,
+        # and nothing saying it must be answered.
+        Field(id="q1", selector="#q1", name="question_31358969003",
+              label="Yes", kind="radio"),
+        Field(id="fn", selector="#fn", name="first_name", label="First Name"),
+        # Not in the schema: left exactly as discovery found it.
+        Field(id="x", selector="#x", name="custom", label="Something else"),
+    ]
+
+    assert apply_to(guessed, published) == 2
+
+    q = guessed[0]
+    assert q.label == "Will you now or in the future require sponsorship?"
+    assert q.required and q.options == ["Yes", "No"]
+    # Discovery keeps the half it owns: how to find and drive the control.
+    assert q.selector == "#q1" and q.kind == "radio"
+
+    assert guessed[1].required, "the schema says this one is required"
+    assert guessed[2].label == "Something else"
+
+    assert apply_to(guessed, {}) == 0, "no schema changes nothing"

@@ -37,6 +37,12 @@ class Field:
     id: str                      # stable handle we use as a dict key
     selector: str                # how to find it again in the DOM
     label: str = ""
+    # The control's own name attribute. Kept because it is what an ATS that
+    # publishes its form schema keys that schema on: Greenhouse's questions
+    # arrive as name="question_31358964003", which is the same string the
+    # input carries in the page, so a published question can be matched to a
+    # discovered control with no guessing.
+    name: str = ""
     kind: str = "text"           # text|email|tel|textarea|select|file|checkbox|radio
     required: bool = False
     options: list[str] = field(default_factory=list)   # for select/radio

@@ -119,6 +119,25 @@ def run_one(filler_name: str, job: Job, profile: dict,
 
         report.filler = filler_name
         report.seconds = time.time() - started
+
+        # Whether the application reached its end is measured here, off the
+        # page, not taken from the contender. Each filler was setting it
+        # itself: computeruse and skyvern assert True when their agent says it
+        # is done, dom passes through its own reached_end -- and browseruse
+        # never set it at all, so the one term worth a hundred points was
+        # nought for it in every run it has ever been in. It could not win a
+        # bake-off no matter what it did on the page. The class this fills in
+        # already promises the harness does the reading; this is the field
+        # that was exempt from it.
+        try:
+            from .workers import get_worker
+
+            probe = get_worker(job.ats, page)
+            report.reached_review = bool(probe and probe.at_review())
+        except Exception as exc:
+            report.errors.append(f"could not tell whether it reached the end: {exc}")
+            report.reached_review = False
+
         try:
             held = read_back(page, job)
         except Exception as exc:

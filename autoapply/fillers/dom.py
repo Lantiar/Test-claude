@@ -40,7 +40,9 @@ class DomFiller:
         if hasattr(worker, "walk"):
             outcome = worker.walk(job, profile, store, provider, "")
             report.fields_found = len(outcome.fields)
-            report.reached_review = outcome.reached_end
+            # reached_review is set by the harness, off the page. A filler
+            # asserting it about itself is what let three contenders claim
+            # the deciding term and left the fourth unable to score it.
             report.steps_advanced = outcome.steps_done
             report.answers = {m.label or m.field_id: str(m.value)
                               for m in outcome.mappings

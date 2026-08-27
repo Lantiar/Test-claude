@@ -1229,8 +1229,8 @@ class Worker:
                     selector = f"{self.form_selector} {tag}:nth-of-type({idx + 1})"
 
             fields.append(Field(id=fid, selector=selector, label=label or name,
-                                kind=kind, required=required, options=options,
-                                frame_url=frame_url))
+                                name=name, kind=kind, required=required,
+                                options=options, frame_url=frame_url))
 
         # A lone checkbox is a consent box, not a choice between options: keep
         # its own label so "I agree to the terms" is still answerable.
@@ -1263,6 +1263,20 @@ class Worker:
                 if not self.discover():
                     self.open(job)
         fields = self.take_landing_fields() or self.discover()
+
+        # What the ATS says its own form is, where it will say. Greenhouse
+        # publishes every board's questions -- label, type, required, options,
+        # and the name attribute the input carries -- so the half of discovery
+        # that is inference can be replaced by the half that is fact. Nearly
+        # every discovery bug this project has had is of that kind: a question
+        # named after its own first option, a required flag that was never in
+        # the DOM, an option list that only exists once a menu is open.
+        from .. import schema as _schema
+
+        corrected = _schema.apply_to(fields, _schema.for_job(job.url))
+        if corrected:
+            _log.get(f"worker.{self.ats}").info(
+                "the board's own schema corrected %d field(s)", corrected)
 
         # An ATS that puts its own front door before the form. Walk through it
         # rather than reporting the door as an empty application: AMD's run
