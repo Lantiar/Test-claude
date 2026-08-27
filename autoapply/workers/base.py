@@ -733,10 +733,17 @@ class Worker:
       const CHALLENGE = /\/bframe\b/i;
       for (const n of document.querySelectorAll(sel)) {
         if (n.classList.contains('grecaptcha-badge')) continue;
+        // The badge is the invisible variant, and this already meant to skip
+        // it -- but it tested the badge div itself, and what the selector
+        // finds is the *iframe inside* it, a separate node carrying none of
+        // its classes. Axon's is 256x60 and perfectly visible, so no size or
+        // visibility test was ever going to separate it from a challenge.
+        // Being in the badge is what says it will not ask anyone anything.
+        if (n.closest('.grecaptcha-badge')) continue;
         const src = n.getAttribute('src') || '';
         if (ANCHOR.test(src) && !CHALLENGE.test(src)) {
-          // ...unless it is showing a tick box a person has to click, which
-          // is an anchor that has been given a real size on screen.
+          // An anchor outside the badge is the tick-box variant: a real
+          // widget somebody has to click, once it has a real size.
           const r = n.getBoundingClientRect();
           if (r.width < 100 || r.height < 40) continue;
         }

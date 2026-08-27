@@ -6,7 +6,11 @@
   <label for="rs">Resume</label><input id="rs" type="file">
   <!-- What a Greenhouse board runs by default: enterprise reCAPTCHA scoring
        the session in the background. It asks nobody anything. -->
-  <iframe title="reCAPTCHA" width="1" height="1"
-    src="https://www.recaptcha.net/recaptcha/enterprise/anchor?ar=1&k=x&size=invisible"></iframe>
+  <div class="grecaptcha-badge" style="width:256px;height:60px">
+    <div class="grecaptcha-logo">
+      <iframe title="reCAPTCHA" style="width:256px;height:60px"
+        src="https://www.recaptcha.net/recaptcha/enterprise/anchor?ar=1&k=x"></iframe>
+    </div>
+  </div>
   <button type="submit">Submit</button>
 </form></body></html>
