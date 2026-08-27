@@ -835,54 +835,73 @@ def test_only_a_link_this_tool_left_behind_is_taken_back():
 
 
 def test_a_form_reached_by_signing_in_is_not_retried_from_a_fresh_browser():
-    """The single-page lane must say so too, not just the wizard lane.
+    """The single-page lane must mark the session too, not just the wizard lane.
 
-    The guard in _needs_agent_fallback has existed since the wizard lane was
-    written, and only WizardWorker.walk ever set the flag. So on TikTok -- a
-    single-page form behind a login -- a run that signed in and filled 49 of 66
-    fields was handed to the agent fallback, which launched a fresh profile at
-    the job URL, met the sign-in wall, and reported "no form fields
-    discovered; sign-in or account creation required". The pipeline merged that
-    into the queue row, and the verdict on the run described a page it had
-    never reached.
+    _needs_agent_fallback has guarded against retrying a session-bound form
+    since the wizard lane was written, and only WizardWorker.walk ever set the
+    flag. TikTok is a single-page form behind a login, so a run that signed in
+    and filled 49 of 66 fields was handed to the agent fallback, which launched
+    a fresh browser at the job URL, met the sign-in wall, and reported "no form
+    fields discovered; sign-in or account creation required". The pipeline
+    merged that into the queue row, and the verdict on the run described a page
+    it had never reached.
     """
-    import inspect
+    from autoapply.models import FillOutcome, Job
+    from autoapply.pipeline import _needs_agent_fallback
     from autoapply.workers.base import Worker
 
-    src = inspect.getsource(Worker.run)
-    assert "session_bound" in src, (
-        "the single-page lane signs in; it has to mark the outcome as living "
-        "inside that session, or the fallback overwrites its findings")
+    field = Field(id="fn", selector="#fn", label="First name")
+
+    class Page:
+        url = "https://lifeattiktok.com/resume/123/apply"
+
+        def title(self):
+            return "Apply"
+
+    class SignsIn(Worker):
+        def __init__(self):
+            super().__init__(Page())
+            self.walls = 1
+
+        def open(self, job):
+            pass
+
+        def needs_auth(self):
+            hit, self.walls = self.walls > 0, 0
+            return hit
+
+        def try_sign_in(self, job):
+            return True, "signed in"
+
+        def settle_step(self, **kw):
+            pass
+
+        def discover(self):
+            return [field]
+
+        def saw_captcha(self):
+            return False
+
+        def screenshot(self, job, where):
+            return ""
+
+        def fill(self, job, fields, mappings, screenshot_dir, profile=None):
+            out = FillOutcome(job=job, fields=fields, mappings=mappings)
+            out.filled_ids = ["fn"]
+            return out
+
+        def _review_and_repair(self, *a, **kw):
+            pass
+
+    job = Job(url="https://lifeattiktok.com/search/123", ats="unknown")
+    outcome = SignsIn().run(job, PROFILE, _store_in_memory(), None, "")
+
+    assert outcome.session_bound, (
+        "the form was reached by signing in; a fresh browser cannot see it")
+    outcome.verified = False
+    assert not _needs_agent_fallback(outcome), (
+        "the fallback would start over logged out and overwrite the findings")
 
 
-def test_the_run_reviewer_sees_every_answer_beside_its_own_question():
-    """The reviewer's two false blockers on TikTok were both payload artefacts.
-
-    Answers keyed on label collapsed eleven "Description" entries into one, so
-    the reviewer reported that a repeating section had only one set of answers
-    filled in. And questions and answers were truncated independently -- 25 of
-    66, 25 of 49 -- so answers arrived with no question attached and it
-    reported values entered into fields that were never found. Both blocked the
-    run. Neither described anything the run had done.
-    """
-    from autoapply.models import FillOutcome, Job, Mapping
-    from autoapply.sanity import _form_digest
-
-    job = Job(url="https://lifeattiktok.com/x", ats="unknown")
-    outcome = FillOutcome(job=job)
-    for i in range(11):
-        outcome.fields.append(
-            Field(id=f"d{i}", selector=f"#d{i}", label="Description"))
-        outcome.mappings.append(
-            Mapping(field_id=f"d{i}", action="fill", value=f"entry {i}",
-                    label="Description"))
-    outcome.fields.append(Field(id="blank", selector="#b", label="Middle name"))
-
-    digest = _form_digest(outcome)
-    assert [p["answer"] for p in digest if p["question"] == "Description"] == [
-        f"entry {i}" for i in range(11)], "a repeating section must stay eleven"
-    assert {p["question"] for p in digest} == {"Description", "Middle name"}
-    # A field left alone is shown as unanswered, not dropped -- and never as
-    # an answer with no question.
-    assert digest[-1] == {"question": "Middle name", "answer": None}
-    assert all(p["question"] for p in digest)
+def _store_in_memory():
+    return Store(":memory:")

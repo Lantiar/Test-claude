@@ -186,6 +186,8 @@ class Worker:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
         self.dismiss_consent()
+        if self._already_on_the_application():
+            return
         target = self.start_application(click=False, job_url=job.url)
         if target.startswith("http") and _offsite(job.url, target):
             # Go there, do not click there. AMD's Apply control points at
@@ -224,6 +226,61 @@ class Worker:
             self.settle_step(timeout_ms=15000, reloads=0)
             self.dismiss_consent()
             self._escape_sso(target)
+
+    def _already_on_the_application(self) -> bool:
+        """Is the page we were handed the form itself?
+
+        Then there is nothing to click through to, and looking for something to
+        click is a way to leave. Notion's link is an Ashby /application URL
+        that renders the form directly; open() went hunting for an Apply
+        control anyway, found the posting's own apply link sitting on the
+        application it leads to, followed it, and ended on www.ashbyhq.com --
+        where the gate saw a marketing page and refused to fill anything.
+
+        The run read that as a closed posting, because a closed Ashby posting
+        does redirect to exactly that page. It was not closed: the posting is
+        live and serves the form at the URL we started from. We navigated off
+        it ourselves and then diagnosed the wreckage as the site's doing.
+
+        START_JS has a test of its own for this and it misses this case: it
+        scans document.querySelectorAll('label, legend'), while Ashby is a
+        React app whose captions are divs and whose accessible names live on
+        the inputs. That test sees an empty page. Discovery does not, so ask
+        discovery.
+        """
+        from ..gate import looks_like_an_application
+
+        try:
+            fields = self.discover()
+        except Exception:
+            return False
+        probe = FillOutcome(job=Job(url=self.page.url, ats=self.ats),
+                            fields=fields)
+        if not looks_like_an_application(probe):
+            return False
+        _log.get(f"worker.{self.ats}").info(
+            "already on the application (%d field(s)); not looking for a way in",
+            len(fields))
+        # Hand them on rather than making run() find them again. Discovery
+        # opens every combobox to read its options, so on TikTok's 66-field
+        # form it is minutes, not milliseconds -- and this check would
+        # otherwise have added a second pass to every application reached
+        # directly by URL.
+        self._landing = (self.page.url, fields)
+        return True
+
+    _landing: tuple[str, list] | None = None
+
+    def take_landing_fields(self) -> list:
+        """Discovery from open(), if the page has not moved since. One shot."""
+        landing, self._landing = self._landing, None
+        if not landing:
+            return []
+        url, fields = landing
+        try:
+            return fields if self.page.url == url else []
+        except Exception:
+            return []
 
     # A corporate identity provider. Landing on one means the Apply control led
     # into an employee login rather than the candidate flow.
@@ -737,11 +794,55 @@ class Worker:
                 fields.append(f)
         return fields
 
+    def _form_root(self, frame):
+        """The narrowest container form_selector names, not the earliest one.
+
+        form_selector is written as a preference list -- "form, main, body" on
+        generic, "#application-form, #app_body, form#application_form, form" on
+        Greenhouse -- narrowest first, so discovery scopes to the application
+        and not to the site around it. Handed to querySelector, that list is
+        not a preference at all: it returns whichever match comes first in the
+        *document*, and <body> precedes <main> in every document there is. So
+        the fallback of last resort won on every page, and discovery has been
+        reading whole pages.
+
+        TikTok's is 66 fields wide partly because of it. Among them was the
+        footer's <select class="language-selection-form">, English or 日本語 --
+        an unlabelled control the mapper had no answer for, that the run
+        counted as a field it could not fill, and that the reviewer read as
+        evidence the page might not be an application at all.
+
+        Written order alone would be too eager the other way. A careers site
+        often carries a <form> that is a search box, and "form" leads three of
+        the four lists here: taking it would scope discovery to two controls
+        and lose the application entirely -- a worse failure than reading the
+        footer, and on Workday it would break the one link that works today.
+        So a candidate has to hold enough controls to be a form worth having;
+        below that it is furniture too, and the search continues.
+        """
+        best, best_n = None, 0
+        for sel in _selector_list(self.form_selector):
+            try:
+                el = frame.query_selector(sel)
+                n = len(el.query_selector_all("input, textarea, select")) if el else 0
+            except Exception:
+                continue
+            if n >= self.MIN_FORM_CONTROLS:
+                return el
+            if n > best_n:
+                best, best_n = el, n
+        return best if best is not None else frame
+
+    # What separates an application from a search box. Deliberately low: the
+    # question is only whether a candidate is furniture, and the narrowest
+    # candidate that is not wins.
+    MIN_FORM_CONTROLS = 3
+
     def _discover_in(self, frame) -> list[Field]:
         fields: list[Field] = []
         groups: dict[str, Field] = {}
         frame_url = "" if frame is self.page.main_frame else (frame.url or "")
-        root = frame.query_selector(self.form_selector) or frame
+        root = self._form_root(frame)
         for idx, el in enumerate(root.query_selector_all("input, textarea, select")):
             try:
                 if not el.is_visible():
@@ -832,7 +933,36 @@ class Worker:
             elif name:
                 selector = f'{tag}[name="{name}"]'
             else:
-                selector = f"{self.form_selector} {tag}:nth-of-type({idx + 1})"
+                # Stamp it, because there is nothing else to go on and the
+                # thing that used to go here did not work.
+                #
+                # It built f"{self.form_selector} {tag}:nth-of-type({idx+1})",
+                # and form_selector is a selector *list* -- "form, main, body"
+                # on generic, "form, div[data-automation-id=applyFlowPage],
+                # body" on Workday. Concatenated, that parses as several
+                # selectors, of which only the last carries the tag, so
+                # querySelector returned whatever came first in the document:
+                # on TikTok, the <main> element. Writing the field then set a
+                # `value` property on <main>, and verification read the same
+                # property straight back and passed. A field nobody could see
+                # was reported filled and correct.
+                #
+                # The index was wrong too, independently: "body input:nth-of-
+                # type(5)" does not mean the fifth input on the page, it means
+                # any input that is the fifth of its type among its own
+                # parent's children. Neither half of the expression referred to
+                # the element it was built for.
+                #
+                # An attribute does, and start_application already marks its
+                # target the same way. A re-render can drop it -- so can any
+                # selector go stale -- and unlike the old expression, when this
+                # one misses it finds nothing rather than something else.
+                try:
+                    el.evaluate("(e, v) => e.setAttribute('data-autoapply-fid', v)",
+                                fid)
+                    selector = f'[data-autoapply-fid="{fid}"]'
+                except Exception:
+                    selector = f"{self.form_selector} {tag}:nth-of-type({idx + 1})"
 
             fields.append(Field(id=fid, selector=selector, label=label or name,
                                 kind=kind, required=required, options=options,
@@ -868,7 +998,7 @@ class Worker:
                 self.settle_step(timeout_ms=10000, reloads=0)
                 if not self.discover():
                     self.open(job)
-        fields = self.discover()
+        fields = self.take_landing_fields() or self.discover()
 
         # Do not type into a page we were redirected to. A closed Ashby posting
         # redirects to Ashby's marketing homepage, where discovery found the
@@ -1239,16 +1369,33 @@ class Worker:
         from ..mapper import resolve_option
 
         if not f.options:
-            if str(value).strip().lower() in ("yes", "true", "1", "on"):
-                if not _click(el):
-                    return None
-                try:
-                    if not el.is_checked():
-                        el.check(timeout=4000)
-                except Exception:
-                    pass
+            want = str(value).strip().lower() in ("yes", "true", "1", "on")
+            # Look before touching it. TikTok serves "I have read and agreed to
+            # the Privacy Policy" already ticked, and clicking a ticked box
+            # unticks it: the run then reported "could not write 'Yes'" and
+            # "'true' would not stick", explore spent six steps on it, and
+            # verification failed -- over a field that had been correct from
+            # the moment the page loaded, which the run itself broke and could
+            # not repair, because every repair attempt was another click.
+            #
+            # A control already saying what we mean is written. On a consent
+            # box that is also the only safe reading: the alternative is a run
+            # whose way of agreeing to a privacy policy is to toggle it and
+            # hope.
+            try:
+                now = el.is_checked()
+            except Exception:
+                now = None
+            if now is want:
                 return value
-            return None
+            if not _click(el):
+                return None
+            try:
+                if el.is_checked() is not want:
+                    el.check(timeout=4000) if want else el.uncheck(timeout=4000)
+            except Exception:
+                pass
+            return value
 
         # "'No' would not stick" names the symptom and not one of the four
         # different causes behind it, which is a diagnosis that costs a whole
@@ -1274,6 +1421,15 @@ class Worker:
             return None
         for m, text in labelled:
             if text == chosen:
+                # Already the answer? Then it is written. Clicking a ticked
+                # checkbox unticks it, which is how TikTok's privacy-policy
+                # consent went from correct to broken and then unrepairable,
+                # every repair attempt being another click.
+                try:
+                    if m.is_checked():
+                        return text
+                except Exception:
+                    pass
                 # check() runs its own actionability wait and never reaches the
                 # overlay-aware click, so a radio painted over by a custom
                 # control times out after 30s exactly like the buttons did.
@@ -1486,6 +1642,37 @@ class Worker:
 
 def css_escape(value: str) -> str:
     return re.sub(r"([^a-zA-Z0-9_-])", r"\\\1", value)
+
+
+def _selector_list(selector: str) -> list[str]:
+    """Split a CSS selector list on its top-level commas, in written order.
+
+    Only the top-level ones: "input[name='a,b'], form" is two selectors, not
+    three, and :is(a, b) is one.
+    """
+    out, depth, current = [], 0, ""
+    quote = ""
+    for ch in selector:
+        if quote:
+            current += ch
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "\"'":
+            quote = ch
+        elif ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            if part := current.strip():
+                out.append(part)
+            current = ""
+            continue
+        current += ch
+    if part := current.strip():
+        out.append(part)
+    return out
 
 
 def get_worker(ats: str, page) -> Optional[Worker]:

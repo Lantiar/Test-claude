@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><title>Software Engineer Intern (Summer 2027) @ Notion</title></head>
+<body>
+  <h1>Software Engineer Intern (Summer 2027)</h1>
+  <!-- Ashby is a React app: the field captions are divs, not <label> elements,
+       and the accessible name lives on the input. Discovery reads them; a scan
+       of document.querySelectorAll('label, legend') sees nothing at all. -->
+  <form>
+    <div class="caption">First Name</div>
+    <input id="fn" name="fn" aria-label="First Name">
+    <div class="caption">Last Name</div>
+    <input id="ln" name="ln" aria-label="Last Name">
+    <div class="caption">Email</div>
+    <input id="em" name="em" type="email" aria-label="Email">
+    <div class="caption">Resume</div>
+    <input id="rs" name="rs" type="file" aria-label="Resume">
+    <div class="caption">Are you authorized to work in the US?</div>
+    <input id="wa" name="wa" aria-label="Are you authorized to work in the US?">
+    <button type="submit">Submit Application</button>
+  </form>
+  <footer>
+    <!-- The posting's own apply link, sitting on the application it leads to.
+         It names this posting, so the "this posting's own apply link first"
+         pass takes it over everything else. -->
+    <a href="vendor_home.html?job=3fba1c39-c5cb-47d7-9ad2-1cec4d7e9d0c&amp;src=application">Apply for this Job</a>
+  </footer>
+</body></html>

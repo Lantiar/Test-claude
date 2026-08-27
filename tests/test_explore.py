@@ -273,3 +273,188 @@ def test_it_does_not_click_apply_when_already_on_the_form():
         pg.goto((FIXTURES / "apply.html").as_uri())
         assert GenericWorker(pg).start_application() == ""
         browser.close()
+
+
+def test_a_url_that_is_already_the_application_is_not_left():
+    """Notion's link is an Ashby /application URL that renders the form itself.
+
+    open() went looking for a way in anyway, found the posting's own apply
+    link sitting on the application it leads to, followed it, and ended on
+    www.ashbyhq.com -- where the gate refused to fill a marketing page,
+    correctly and one navigation too late. The run then read that as a closed
+    posting, because a closed Ashby posting redirects to exactly that page. It
+    was not closed: the posting is live and serves the form at the URL the run
+    started from. We navigated off it ourselves and diagnosed the wreckage as
+    the site's doing.
+
+    START_JS has its own "am I already on an application" test, and it misses
+    this: it scans document.querySelectorAll('label, legend'), while Ashby is
+    a React app whose captions are divs and whose accessible names live on the
+    inputs. That test sees an empty page. Discovery does not, so the guard
+    that matters asks discovery.
+    """
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "ashby_application.html").as_uri())
+        worker = GenericWorker(pg)
+
+        # Without the guard this is what open() would have followed.
+        assert worker.start_application(
+            click=False,
+            job_url="https://jobs.ashbyhq.com/notion/"
+                    "3fba1c39-c5cb-47d7-9ad2-1cec4d7e9d0c/application"
+        ).startswith("vendor_home.html"), (
+            "the fixture no longer reproduces the navigation that broke Notion")
+
+        assert worker._already_on_the_application()
+        assert pg.url.endswith("ashby_application.html"), f"left for {pg.url}"
+        browser.close()
+
+
+def test_a_tick_box_that_already_says_yes_is_not_clicked_off():
+    """TikTok's privacy-policy consent arrives ticked.
+
+    _write_choice clicked it anyway, which unticked it. The run then reported
+    "could not write 'Yes'" and "'true' would not stick", explore spent six
+    steps failing to work the control out, and the whole application failed
+    verification -- over a field that was correct when the page loaded, that
+    the run itself broke, and that no repair could fix, because every repair
+    attempt was another click.
+
+    A control already saying what we mean is written. On a consent box that is
+    also the only safe reading: the alternative is a run whose way of agreeing
+    to a privacy policy is to toggle it and hope.
+    """
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "prechecked_consent.html").as_uri())
+        worker = GenericWorker(pg)
+
+        consent = next(f for f in worker.discover()
+                       if "privacy policy" in (f.label or "").lower())
+        assert consent.kind == "checkbox", consent.kind
+        assert worker._write(consent, "Yes") == "Yes", "a ticked box is written"
+        assert pg.eval_on_selector("#pp", "e => e.checked"), "it was clicked off"
+        browser.close()
+
+
+def test_a_field_with_no_id_and_no_name_is_still_findable():
+    """The fallback selector did not refer to the element it was built for.
+
+    It was f"{form_selector} {tag}:nth-of-type({idx+1})", and form_selector is
+    a selector *list* -- "form, main, body". Concatenated, that parses as
+    several selectors, only the last of which carries the tag, so querySelector
+    returned whatever came first in the document. On TikTok that was <main>:
+    writing the field set a `value` property on <main>, and verification read
+    the same property straight back and passed. A field nobody could see was
+    reported filled and correct.
+
+    The index was wrong independently. "body input:nth-of-type(5)" does not
+    mean the fifth input on the page; it means any input that is the fifth of
+    its type among its own parent's children.
+    """
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "no_id_no_name.html").as_uri())
+        worker = GenericWorker(pg)
+
+        intro = next(f for f in worker.discover()
+                     if "self-introduction" in (f.label or "").lower())
+        assert pg.eval_on_selector(intro.selector, "e => e.tagName") == "TEXTAREA", (
+            f"{intro.selector!r} does not resolve to the field it names")
+
+        assert worker._write(intro, "Hello") == "Hello"
+        assert pg.eval_on_selector("textarea", "e => e.value") == "Hello"
+        # ...and not onto whatever the old expression happened to hit first.
+        assert not pg.eval_on_selector("main", "e => e.value"), \
+            "the value landed on the container, not the control"
+        browser.close()
+
+
+def test_discovery_scopes_to_the_form_and_not_the_site_around_it():
+    """form_selector is a preference list; querySelector does not read it as one.
+
+    "form, main, body" is written narrowest-first so discovery scopes to the
+    application. Handed to querySelector, the list is not a preference at all:
+    it returns whichever match comes first in the *document*, and <body>
+    precedes <main> in every document there is. The fallback of last resort
+    therefore won on every page, and discovery has been reading whole pages.
+
+    TikTok's 66 fields are partly that. Among them was the footer's
+    <select class="language-selection-form">, English or 日本語 -- an
+    unlabelled control the mapper had no answer for, that the run counted as a
+    field it could not fill, and that the reviewer read as evidence the page
+    might not be an application at all.
+    """
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "no_id_no_name.html").as_uri())
+        worker = GenericWorker(pg)
+
+        assert pg.eval_on_selector(
+            "body", "e => !!e.querySelector('.language-selection-form')"), \
+            "the fixture no longer carries the site furniture this is about"
+        assert worker._form_root(pg.main_frame).evaluate("e => e.tagName") == "MAIN"
+
+        fields = worker.discover()
+        assert not [f for f in fields if f.kind == "select"], \
+            f"the site's language picker was discovered: {[f.label for f in fields]}"
+        assert {(f.label or "").lower() for f in fields} == {
+            "first name", "last name", "self-introduction"}
+        browser.close()
+
+
+def test_a_search_box_is_not_mistaken_for_the_application_form():
+    """Written order alone would be too eager the other way.
+
+    A careers site usually carries a <form> that is a search box, and "form"
+    leads three of the four form_selector lists. Taking the first match in
+    written order would scope discovery to the search box and lose the
+    application entirely -- a worse failure than reading the footer, and on
+    Workday it would break the one link that works today.
+    """
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "search_form_then_application.html").as_uri())
+        worker = GenericWorker(pg)
+
+        assert worker._form_root(pg.main_frame).evaluate("e => e.tagName") == "MAIN"
+        labels = {(f.label or "").lower() for f in worker.discover()}
+        assert "first name" in labels and "cover letter" in labels, labels
+        assert "search jobs" not in labels, labels
+        browser.close()
