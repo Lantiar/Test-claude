@@ -1302,3 +1302,31 @@ def test_the_mailbox_line_is_drawn_when_the_code_was_asked_for():
     finally:
         mailcode._wait_gmail = original
         mailcode._gmail_configured = configured
+
+
+def test_a_date_the_widget_reformatted_is_the_same_date():
+    """Notion's whole run failed verification over a correct graduation date.
+
+    A date picker does more than re-punctuate: it reorders, and it fills in
+    what you left out. "2028-05" came back as "05/01/2028" -- the same month
+    of the same year, with a day the widget chose. Squashing gives 202805
+    against 05012028, which share no useful substring, so the comparison that
+    rescues a reformatted phone number could not rescue this.
+
+    The numbers a date is made of are what to compare: everything supplied has
+    to still be there, and the widget may add its own.
+    """
+    from autoapply.verify import _matches
+
+    assert _matches("2028-05", "05/01/2028", "text"), "the case that failed"
+    assert _matches("2028-05-01", "05/01/2028", "text"), "reordered"
+    assert _matches("05/2028", "2028-05", "text"), "reordered, either way round"
+
+    # A different date is still a different date.
+    assert not _matches("2028-05", "05/01/2027", "text"), "wrong year"
+    assert not _matches("2028-05", "06/01/2028", "text"), "wrong month"
+    assert not _matches("2028-05", "", "text"), "empty is never a match"
+
+    # And the reformatting this already handled keeps working.
+    assert _matches("224-333-1045", "2243331045", "text")
+    assert not _matches("224-333-1045", "224-333-9999", "text")

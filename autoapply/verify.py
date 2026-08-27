@@ -126,6 +126,20 @@ def _squash(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
+# A value made only of numbers and date separators: 2028-05, 05/01/2028,
+# 2028.05.01. Anything with letters in it is prose and is compared as prose.
+_DATE_SHAPED = re.compile(r"^\d[\d\s./-]*\d$")
+
+
+def _date_parts(s: str) -> set[str] | None:
+    """The numbers in a date-shaped value, or None if it is not one."""
+    s = s.strip()
+    if not _DATE_SHAPED.match(s):
+        return None
+    parts = {p.lstrip("0") or "0" for p in re.findall(r"\d+", s)}
+    return parts if len(parts) >= 2 else None
+
+
 def _matches(expected: str, actual: str, kind: str) -> bool:
     e, a = expected.strip().lower(), actual.strip().lower()
     if not a:
@@ -138,11 +152,20 @@ def _matches(expected: str, actual: str, kind: str) -> bool:
         return a == "on"
     if e == a or e in a or a in e:              # selects normalize whitespace/case
         return True
+    # A date picker does more than re-punctuate: it reorders, and it fills in
+    # what you left out. Notion's turned "2028-05" into "05/01/2028" -- the
+    # same month of the same year, with a day the widget chose -- and squashing
+    # gives 202805 against 05012028, which share no useful substring. So the
+    # whole run failed verification over a graduation date that was correct.
+    # Compare the numbers a date is made of instead: every number we supplied
+    # has to still be there, and the widget may add its own.
+    de, da = _date_parts(e), _date_parts(a)
+    if de is not None and da is not None:
+        return de <= da or da <= de
     # Widgets rewrite what they are given -- an intl phone input turns
-    # "224-333-1045" into "2243331045", a date picker re-punctuates, a currency
-    # field adds separators. Byte-equality would call every one of those a
-    # verification failure, so fall back to comparing the characters that carry
-    # the meaning.
+    # "224-333-1045" into "2243331045", a currency field adds separators.
+    # Byte-equality would call every one of those a verification failure, so
+    # fall back to comparing the characters that carry the meaning.
     se, sa = _squash(e), _squash(a)
     return bool(se) and bool(sa) and (se == sa or se in sa or sa in se)
 
