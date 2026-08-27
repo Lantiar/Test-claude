@@ -384,6 +384,19 @@ class Worker:
                     return
             except Exception:
                 return
+            # Nothing discovered is not by itself a detour. SmartRecruiters'
+            # Apply moves to its own oneclick-ui on the same host, which needs
+            # a moment to render: this read the empty page as an SSO hop, threw
+            # away the cookies and navigated to the URL it was already on, and
+            # the run then refused to fill "a page that is not the posting".
+            # Going somewhere is what makes a detour; being early is not.
+            if not _offsite(landed, target) and \
+                    landed.split("?")[0].rstrip("/") == target.split("?")[0].rstrip("/"):
+                _log.get(f"worker.{self.ats}").info(
+                    "already at the apply URL; waiting for it rather than "
+                    "starting over")
+                self.settle_landing()
+                return
         direct = target.split("?")[0]
         log = _log.get(f"worker.{self.ats}")
         log.info("Apply led to corporate SSO (%s); going straight to %s",
