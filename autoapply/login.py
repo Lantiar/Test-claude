@@ -25,6 +25,7 @@ import re
 from urllib.parse import urlparse
 
 from .clicking import click as _click
+from .workers.base import LABEL_JS
 
 ACCOUNTS_PATH = os.getenv("ACCOUNTS_PATH", "config/accounts.json")
 
@@ -110,6 +111,8 @@ CREATE_SUBMIT_SELECTORS = (
     # page offers an email box, a password box and a button reading just
     # "Create", so the run filled the form and then reported "no
     # create-account button" on a page consisting of little else.
+    # TikTok: <button class="atsx-btn signUp-submit"><span>Create</span></button>
+    "button.signUp-submit", "button:has(span:text-is('Create'))",
     "button:text-is('Create')", "button:text-is('Sign Up')",
     "button:text-is('Sign up')", "button:text-is('Register')",
     "button:text-is('Join')", "button:text-is('Continue')",
@@ -378,6 +381,22 @@ def _accept_required_consent(worker, say) -> None:
             boxes = fr.query_selector_all("input[type=checkbox]")
         except Exception:
             continue
+        # A lone unchecked checkbox on a form whose own text is an agreement is
+        # that agreement. TikTok's carries no label, no aria-label and no
+        # required attribute -- LABEL_JS returns "" and so does its parent --
+        # while the words "I have read and agree to the User Agreement and
+        # Applicant Privacy Policy" sit elsewhere in the form. Judging it by
+        # its own label was therefore never going to work, and submitting
+        # without it silently leaves you on the sign-in page.
+        unlabelled_consent = False
+        try:
+            visible = [b for b in boxes if b.is_visible() and not b.is_checked()]
+            if len(visible) == 1:
+                form_text = (fr.inner_text("body") or "").lower()[:4000]
+                unlabelled_consent = bool(_REQUIRED_CONSENT.search(form_text))
+        except Exception:
+            visible = []
+
         for box in boxes:
             try:
                 if not box.is_visible() or box.is_checked():
@@ -385,11 +404,16 @@ def _accept_required_consent(worker, say) -> None:
                 label = (fr.evaluate(LABEL_JS, box) or "").strip().lower()
                 required = (box.get_attribute("required") is not None
                             or box.get_attribute("aria-required") == "true")
-                if required or _REQUIRED_CONSENT.search(label):
+                if required or _REQUIRED_CONSENT.search(label) or (
+                        unlabelled_consent and not label):
                     box.check()
-                    say(f"agreed to: {label[:60] or '(unlabelled)'}")
-            except Exception:
-                continue
+                    say(f"agreed to: {label[:60] or '(the form-level agreement)'}")
+            except Exception as exc:
+                # Was `continue`. LABEL_JS was never imported here, so both
+                # consent ticks raised NameError into this handler and did
+                # nothing at all -- silently, for every run since they were
+                # written. A checkbox that cannot be read is worth a line.
+                say(f"could not read a checkbox: {type(exc).__name__}: {exc}")
 
 def create_account(worker, creds: dict, wait_for_code=None,
                    log=None) -> tuple[bool, str]:
@@ -455,8 +479,8 @@ def create_account(worker, creds: dict, wait_for_code=None,
                     say(f"ticked the required consent: {label[:60] or '(unlabelled)'}")
                 elif label:
                     say(f"left unticked: {label[:60]}")
-            except Exception:
-                continue
+            except Exception as exc:
+                say(f"could not read a checkbox: {type(exc).__name__}: {exc}")
 
     btn, _ = _first_in(worker.frames(), CREATE_SUBMIT_SELECTORS,
                        allow_account_creation=True)
