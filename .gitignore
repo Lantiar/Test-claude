@@ -15,3 +15,9 @@ config/files/
 # Skyvern writes run artifacts, browser profiles and a current-task pointer
 # into ./temp when it runs embedded. Runtime state, not source.
 temp/
+
+# jobfeed: the database is derived state, and an Instagram session file is a
+# live credential -- it is the login, not a pointer to it.
+jobfeed/data/
+*.sqlite3
+session-*
