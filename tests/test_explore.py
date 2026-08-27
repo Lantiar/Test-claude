@@ -696,3 +696,40 @@ def test_a_code_split_across_one_box_per_digit_is_filled_across_them():
         assert pg.evaluate("() => window.__pin") == "483920", \
             f"submitted {pg.evaluate('() => window.__pin')!r}"
         browser.close()
+
+
+def test_a_site_holding_us_off_says_so():
+    """BNY's door counts attempts, and six rounds of submitting it earned
+    "Too Many Attempts. Try Again Later. You reached the maximum number of
+    attempts. Try again in 30 minutes."
+
+    The run reported that page as "does not look like a job application" --
+    true of what was on screen, and silent about why. So the next run repeats
+    the attempt and the count goes up again. A site asking us to come back
+    later is a distinct, recoverable state and worth naming: reloading does
+    not clear it, and another try is what deepens the hole.
+    """
+    from autoapply.models import FillOutcome, Job
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "rate_limited.html").as_uri())
+        worker = GenericWorker(pg)
+
+        held = worker.rate_limited()
+        assert "too many attempts" in held.lower(), held
+
+        outcome = FillOutcome(job=Job(url=pg.url, ats="generic"))
+        worker._record_page_state(outcome)
+        assert any("holding us off" in e for e in outcome.errors), outcome.errors
+
+        # An ordinary application is not mistaken for one.
+        pg.goto((FIXTURES / "apply.html").as_uri())
+        assert GenericWorker(pg).rate_limited() == ""
+        browser.close()

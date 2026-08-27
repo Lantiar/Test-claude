@@ -557,6 +557,36 @@ class Worker:
     TRANSIENT_ERROR_MARKERS = ("something went wrong", "please refresh",
                                "try again later", "unexpected error")
 
+    # A site telling us to come back later. Distinct from a transient error --
+    # reloading does not clear it, and on a door that counts attempts, another
+    # try is what deepens the hole.
+    RATE_LIMIT_MARKERS = ("too many attempts", "try again later",
+                          "try again in", "maximum number of attempts",
+                          "too many requests", "rate limit",
+                          "temporarily locked", "please wait a few minutes")
+
+    def rate_limited(self) -> str:
+        """What the site said about coming back later, or "".
+
+        BNY's door counts attempts, and six rounds of submitting it earned
+        "Too Many Attempts. Try Again Later. You reached the maximum number of
+        attempts. Try again in 30 minutes." The run reported that page as "does
+        not look like a job application", which is true of what was on screen
+        and says nothing about why -- so the next run repeats the attempt, and
+        the count goes up again.
+        """
+        for frame in self.frames():
+            try:
+                text = (frame.inner_text("body") or "")
+            except Exception:
+                continue
+            low = text.lower()
+            for marker in self.RATE_LIMIT_MARKERS:
+                if marker in low:
+                    at = low.find(marker)
+                    return " ".join(text[at:at + 120].split())
+        return ""
+
     def showing_transient_error(self) -> bool:
         for frame in self.frames():
             try:
@@ -863,6 +893,11 @@ class Worker:
         from ..gate import looks_like_an_application as _is_app
 
         fields = self.discover()
+        if held := self.rate_limited():
+            log.warning("entry step: the site is holding us off -- %s",
+                        _log.brief(held, 90))
+            self._held_off = held
+            return False
         through = bool(fields) and (
             _is_app(FillOutcome(job=job, fields=fields))
             or not self.looks_like_an_entry_step())
@@ -1246,6 +1281,8 @@ class Worker:
             outcome.session_bound = True
         return outcome
 
+    _held_off: str = ""
+
     def _record_page_state(self, outcome) -> None:
         """What this page is, on the paths that give up before filling.
 
@@ -1271,6 +1308,9 @@ class Worker:
             outcome.needs_auth = self.needs_auth()
         except Exception:
             pass
+        held = self._held_off or self.rate_limited()
+        if held:
+            outcome.errors.append(f"the site is holding us off: {held}")
 
     def _review_and_repair(self, job, fields, mappings, outcome, profile,
                            store, provider) -> None:
