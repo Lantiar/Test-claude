@@ -23,6 +23,7 @@ and reports it still failing rather than quietly claiming success.
 from __future__ import annotations
 
 import json
+import weakref
 import re
 
 from . import budget
@@ -171,7 +172,7 @@ def audit_step(worker, fields: list[Field], mappings: list[Mapping],
     # identical content is identical; only the tokens are new, and they are the
     # ones the repair tier then cannot get.
     fingerprint = json.dumps(payload, sort_keys=True)
-    seen = _AUDITED.setdefault(id(worker), set())
+    seen = _AUDITED.setdefault(worker, set())
     if fingerprint in seen:
         return 0, notes
     seen.add(fingerprint)
@@ -309,7 +310,7 @@ def _teach(store, ats: str, label: str, value: str) -> None:
     """
     if store is None or not label or not usable(value):
         return
-    _PENDING.setdefault(id(store), {})[label] = (ats, value)
+    _PENDING.setdefault(store, {})[label] = (ats, value)
 
 
 def teach_paths(store, worker, fields, ats: str) -> None:
@@ -330,17 +331,29 @@ def teach_paths(store, worker, fields, ats: str) -> None:
 
 
 # label -> (ats, value), per store, awaiting the form's verdict on the step.
-_PENDING: dict[int, dict[str, tuple[str, str]]] = {}
+#
+# Keyed on the store itself, weakly, rather than on id(store). An address is
+# not an identity: it is reused the moment the object at it is collected, so a
+# run that ended without either verdict -- an exception, a single-page lane
+# that calls neither -- left lessons staged under a number that the next job's
+# Store could be handed, and commit_lessons() would then write another ATS's
+# answers into this one under labels it never saw. Weak keys also mean the
+# entries go when the objects do, instead of accumulating for the life of the
+# process.
+_PENDING: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 # Step content already audited this run, per worker. Keyed on the questions and
 # the answers together, so a repair that changes a value is audited again and
-# only a genuinely unchanged step is skipped.
-_AUDITED: dict[int, set[str]] = {}
+# only a genuinely unchanged step is skipped. Weak for the same reason, and
+# more sharply: nothing ever removed a worker's entry, so this grew for the
+# life of the process and a reused address would make a new worker skip
+# auditing a step it had never seen.
+_AUDITED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
 def commit_lessons(store, ats: str = "") -> list[str]:
     """The step was accepted, so what was staged for it is now known good."""
-    staged = _PENDING.pop(id(store), {}) if store is not None else {}
+    staged = _PENDING.pop(store, {}) if store is not None else {}
     if not staged:
         return []
     from .mapper import signature
@@ -358,7 +371,7 @@ def commit_lessons(store, ats: str = "") -> list[str]:
 
 def drop_lessons(store) -> int:
     """The step was rejected; nothing staged for it can be trusted."""
-    return len(_PENDING.pop(id(store), {})) if store is not None else 0
+    return len(_PENDING.pop(store, {})) if store is not None else 0
 
 
 def read_errors(worker) -> list[dict]:

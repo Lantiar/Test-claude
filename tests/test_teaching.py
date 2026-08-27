@@ -302,7 +302,10 @@ def test_an_unchanged_step_is_not_audited_twice(tmp_path):
         pass
 
     worker = Worker()
-    _AUDITED.pop(id(worker), None)
+    # Weakly keyed on the worker itself. An address is not an identity: it is
+    # reused as soon as the object at it is collected, so a run that ended
+    # without a verdict left state under a number the next job could be given.
+    _AUDITED.pop(worker, None)
     fields = [Field(id="a", selector="#a", label="Phone Extension")]
     mapping = Mapping(field_id="a", action="fill", value="224-333-1045",
                       label="Phone Extension", source="rules")
@@ -905,3 +908,30 @@ def test_a_form_reached_by_signing_in_is_not_retried_from_a_fresh_browser():
 
 def _store_in_memory():
     return Store(":memory:")
+
+
+def test_every_provider_implements_what_every_tier_calls():
+    """A provider missing _chat switches off the whole review architecture.
+
+    The three mapping methods were the entire interface AnthropicProvider
+    implemented, and every tier built since -- audit, repair, explore,
+    presubmit, run plausibility -- calls provider._chat(). On Anthropic each
+    one raised AttributeError into an `except Exception` that reports the tier
+    as unavailable, so choosing that provider left a run in which nothing was
+    ever found wrong and no log said why.
+    """
+    import inspect
+    from autoapply import llm
+
+    required = {"map_fields", "answer_fields", "generate", "_chat"}
+    providers = [obj for name, obj in vars(llm).items()
+                 if inspect.isclass(obj) and name.endswith("Provider")
+                 and name not in ("LLMProvider", "RulesProvider")]
+    # RulesProvider is excluded by design rather than by omission: it is the
+    # no-model path, and every tier checks name == "rules" and returns before
+    # calling anything. OpenAICompatProvider names itself in __init__, so the
+    # exclusion has to be by class, not by reading `name` off the class.
+    assert len(providers) >= 2, f"only found {[p.__name__ for p in providers]}"
+    for provider in providers:
+        missing = required - set(dir(provider))
+        assert not missing, f"{provider.__name__} is missing {sorted(missing)}"

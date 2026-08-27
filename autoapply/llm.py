@@ -233,6 +233,29 @@ class AnthropicProvider:
         )
         return "".join(b.text for b in resp.content if b.type == "text").strip()
 
+    def _chat(self, system: str, user: str) -> str:
+        """One system+user turn, text back. Every reviewing tier calls this.
+
+        It did not exist. The three mapping methods above are the whole
+        interface this class implemented, and the tiers built since -- the
+        audit, the repair, the explore loop, the presubmit review, the
+        run-plausibility review -- all reach for provider._chat(). On
+        Anthropic, every one of them raised AttributeError into an
+        `except Exception` that reports the tier as unavailable, so choosing
+        this provider silently switched off the entire review architecture and
+        left a run that looked like one where nothing was ever wrong. That is
+        the exact failure this codebase keeps being bitten by, and the reason
+        every tier here logs when it cannot be reached.
+        """
+        resp = self.client.messages.create(
+            model=self.model,
+            max_tokens=16000,
+            system=system,
+            thinking={"type": "adaptive"},
+            messages=[{"role": "user", "content": user}],
+        )
+        return "".join(b.text for b in resp.content if b.type == "text").strip()
+
 
 class OpenAICompatProvider:
     """OpenAI and Ollama both speak this shape; only the base URL differs."""
