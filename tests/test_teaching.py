@@ -693,3 +693,35 @@ def test_only_taught_answers_are_retracted(tmp_path):
                 label="City", source="rules")])
     assert forget_flagged(outcome, ["City answer is wrong"], store) == []
     assert store.literal_for(signature("workday", "City")) == "Monroe Township"
+
+
+def test_a_resume_dropzone_does_not_make_a_search_page_an_application():
+    """BNY's careers page carries "Upload or drag and drop your PDF resume file
+    here to get AI recommended jobs" -- a job-recommendation widget. The word
+    "resume" and the file input both matched, so the search page passed as an
+    application and the filler typed the job title into the site's own search
+    box before the gate could object.
+
+    A file input is what the search page and the real form have in common. An
+    application asks who you are.
+    """
+    from autoapply.gate import looks_like_an_application
+    from autoapply.models import FillOutcome, Job
+
+    def page(*labels, files=()):
+        o = FillOutcome(job=Job(url="https://x", ats="oracle"))
+        o.fields = [Field(id=str(i), selector=f"#{i}", label=l,
+                          kind="file" if l in files else "text")
+                    for i, l in enumerate(labels)]
+        return o
+
+    dropzone = ("Upload or drag and drop your PDF resume file here to get AI "
+                "recommended jobs based on your skills and experience.")
+    assert not looks_like_an_application(page(
+        "Job title, skill, keyword", "City, state, country", dropzone,
+        "Accept the terms and conditions", files=(dropzone,)))
+
+    assert looks_like_an_application(page(
+        "First Name", "Last Name", "Email", "Resume", files=("Resume",)))
+    assert looks_like_an_application(page("First name"))
+    assert not looks_like_an_application(page("Email"))

@@ -26,10 +26,16 @@ KILL_SWITCH = "data/STOP"
 
 # What every job application asks for, whatever the ATS. A page holding none of
 # these is not one, however many inputs it has.
-_APPLICATION_SIGNS = ("resum", "cv", "cover letter", "first name", "last name",
-                      "full name", "linkedin", "phone", "work authoriz",
-                      "sponsor", "portfolio", "github", "why do you",
-                      "resume", "attach")
+# Deliberately excludes "resume" on its own. A careers site's job-recommendation
+# dropzone reads "Upload or drag and drop your PDF resume file here to get AI
+# recommended jobs", so the word alone made BNY's *search* page look like an
+# application -- and the filler typed the job title into the site's search box
+# before the gate could object. Asking for the candidate's name, or for
+# something only an application asks, is the signal that survives that.
+_APPLICATION_SIGNS = ("first name", "last name", "full name", "legal name",
+                      "cover letter", "work authoriz", "sponsor",
+                      "why do you", "why are you", "notice period",
+                      "desired salary", "expected salary", "start date")
 
 
 def looks_like_an_application(outcome: FillOutcome) -> bool:
@@ -58,8 +64,10 @@ def looks_like_an_application(outcome: FillOutcome) -> bool:
     # what they do not.
     if any(sign in haystack for sign in _APPLICATION_SIGNS):
         return True
-    if any(f.kind == "file" for f in fields):
-        return True
+    # A file input earns nothing on its own. The page this test exists to
+    # reject has one -- BNY's job-recommendation dropzone -- so "there is an
+    # upload here" is precisely what the search page and the real form have in
+    # common. An application asks who you are.
     # No recognisable question, so fall back to bulk: a lead-capture box is one
     # or two inputs, and a form long enough to be an application is unlikely to
     # ask nothing a person would recognise.
