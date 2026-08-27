@@ -142,6 +142,15 @@ def blockers(outcome: FillOutcome, store=None, profile: dict | None = None,
             outcome.verify_detail.get("_page_title", ""), provider)
         if not plausible:
             reasons.extend(problems or ["the run does not look plausible"])
+            # A taught answer this reviewer objects to is retracted, exactly as
+            # one the presubmit reviewer objects to already was. Only that
+            # second reviewer could do it, so a finding from this one blocked
+            # the run and changed nothing: Mastercard's "How Did You Hear About
+            # Us?" held "University Job Board", learned, against a profile that
+            # says "Company website", and would have held it on every future
+            # run. A lesson that outranks the rules beneath it and replays with
+            # confidence 1.0 has to be retractable by whichever tier notices.
+            forget_flagged(outcome, problems, store)
         outcome.verify_detail["_sanity"] = {
             "plausible": plausible, "problems": problems}
 

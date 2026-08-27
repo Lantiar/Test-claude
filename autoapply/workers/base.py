@@ -753,6 +753,25 @@ class Worker:
             return False
         return not self.looks_like_an_entry_step()
 
+    def _mail_waiter(self):
+        """A function that waits for the emailed one-time code, or None.
+
+        Shared, because the door needs it as much as the sign-in does: behind
+        BNY's is a six-digit PIN, and pass_entry_step had no way to ask for one.
+        """
+        try:
+            from ..mailcode import MailUnavailable, wait_for_code
+        except Exception:
+            return None
+
+        def waiter(needles, _w=wait_for_code):
+            try:
+                return _w(needles, timeout=int(
+                    os.getenv("MAIL_CODE_TIMEOUT", "180")))
+            except MailUnavailable:
+                return None
+        return waiter
+
     def pass_entry_step(self, job) -> bool:
         """Walk through the application's own first page. True if it moved.
 
@@ -810,6 +829,21 @@ class Worker:
             return False
         self.settle_step(timeout_ms=15000, reloads=0)
 
+        # Behind BNY's door is a six-digit PIN it has just emailed -- six boxes,
+        # pin-code-1 through pin-code-6. The sign-in path has waited for a
+        # mailed code since it was written; this one had no way to ask for it,
+        # so the run reached the form's own verification step and stopped
+        # there with "no answer for required: pin-code-1 ... pin-code-5".
+        from ..login import _clear_code
+
+        ok, detail = _clear_code(self, creds or {}, self._mail_waiter(),
+                                 lambda msg: log.info("  %s", msg))
+        if not ok:
+            log.info("entry step: %s", detail)
+            return False
+        if detail != "no code requested":
+            self.settle_step(timeout_ms=15000, reloads=0)
+
         # Through means the door is behind us, not that the URL twitched.
         #
         # This asked whether the URL had changed or discovery returned
@@ -852,18 +886,7 @@ class Worker:
         if not creds:
             return False, "no credentials configured for this host"
 
-        waiter = None
-        try:
-            from ..mailcode import MailUnavailable, wait_for_code
-
-            def waiter(needles, _w=wait_for_code):           # noqa: E731
-                try:
-                    return _w(needles, timeout=int(
-                        os.getenv("MAIL_CODE_TIMEOUT", "180")))
-                except MailUnavailable:
-                    return None
-        except Exception:
-            waiter = None
+        waiter = self._mail_waiter()
 
         log = _log.get("login")
         log.info("attempting sign-in as %s at %s",

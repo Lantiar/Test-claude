@@ -660,3 +660,39 @@ def test_a_page_we_refuse_to_fill_still_reports_what_it_is():
         assert not _needs_agent_fallback(outcome), (
             "the agent is held by a captcha too; retrying only spends a budget")
         browser.close()
+
+
+def test_a_code_split_across_one_box_per_digit_is_filled_across_them():
+    """Behind BNY's door is a six-digit PIN in six boxes.
+
+    The code path was written for a single field, so it would have typed all
+    six digits into pin-code-1 and left five boxes empty and one digit in the
+    first. The run reached the door's own verification step and stopped there
+    with "no answer for required: pin-code-1 ... pin-code-5".
+    """
+    from autoapply.login import _clear_code
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "pin_code.html").as_uri())
+
+        class Worker:
+            page = pg
+
+            def frames(self):
+                return [pg]
+
+        said = []
+        ok, detail = _clear_code(Worker(), {"code_filter": ["verify"]},
+                                 lambda _n: "483920", said.append)
+        assert ok, detail
+        # What the form was submitted with -- _clear_code presses Verify, and
+        # a real page navigates away from the boxes it just read.
+        assert pg.evaluate("() => window.__pin") == "483920", \
+            f"submitted {pg.evaluate('() => window.__pin')!r}"
+        browser.close()

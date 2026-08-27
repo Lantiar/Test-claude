@@ -1227,3 +1227,37 @@ def test_the_agent_does_not_start_over_on_a_form_that_is_nearly_filled():
     assert _needs_agent_fallback(outcome(22, 2)), "barely anything filled is"
     # And a verified run never needed the fallback in the first place.
     assert not _needs_agent_fallback(outcome(22, 22, verified=True))
+
+
+def test_the_run_reviewer_can_retract_a_lesson_too(tmp_path):
+    """Only the presubmit reviewer could, so a finding from the other one
+    blocked the run and changed nothing.
+
+    Mastercard's "How Did You Hear About Us?" held "University Job Board",
+    learned, against a profile that says "Company website" -- and would have
+    held it on every future run. A lesson outranks the rules beneath it and
+    replays with confidence 1.0, so whichever tier notices it is wrong has to
+    be able to take it back.
+    """
+    from autoapply.models import FillOutcome, Job, Mapping
+    from autoapply.gate import forget_flagged
+    from autoapply.mapper import signature
+
+    store = _store(tmp_path)
+    label = "How Did You Hear About Us?*"
+    store.record_correction(signature("workday", label), label,
+                            "University Job Board")
+    assert store.literal_for(signature("workday", label)) == "University Job Board"
+
+    job = Job(url="https://x.wd1.myworkdayjobs.com/y", ats="workday")
+    outcome = FillOutcome(job=job)
+    outcome.mappings = [Mapping(field_id="h", action="fill", label=label,
+                                value="University Job Board", source="learned")]
+
+    dropped = forget_flagged(outcome, [
+        "Answer for 'How Did You Hear About Us?' is a contradiction to the "
+        "profile's source of 'Company website'."], store)
+
+    assert dropped == [label], dropped
+    assert store.literal_for(signature("workday", label)) is None, \
+        "the lesson survived the objection"

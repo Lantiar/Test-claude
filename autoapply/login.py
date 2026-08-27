@@ -257,6 +257,29 @@ def _set(frame, el, value: str) -> None:
                }""", [el, value])
 
 
+def _code_boxes(frame, first) -> list:
+    """The one-box-per-digit inputs a split code field is made of, in order.
+
+    Keyed on the shape they share: same size, same parent, all short. Anything
+    that does not look like a set of single-character boxes returns just the
+    one box that was found, and the caller types the whole code into it.
+    """
+    try:
+        return frame.query_selector_all(frame.evaluate(
+            """e => {
+                 const p = e.parentElement;
+                 if (!p) return '';
+                 const kin = [...p.querySelectorAll('input')].filter(
+                   x => x.type !== 'hidden' && (x.maxLength === 1 ||
+                        (x.id && /(^|[-_])(pin|code)[-_]?\\d+$/i.test(x.id))));
+                 if (kin.length < 2 || !kin.includes(e)) return '';
+                 p.setAttribute('data-autoapply-code', '1');
+                 return '[data-autoapply-code] input:not([type=hidden])';
+               }""", first)) if frame else [first]
+    except Exception:
+        return [first]
+
+
 def _clear_code(worker, creds: dict, wait_for_code, say) -> tuple[bool, str]:
     """Fill the emailed one-time code, if the page is asking for one."""
     page = worker.page
@@ -273,8 +296,17 @@ def _clear_code(worker, creds: dict, wait_for_code, say) -> tuple[bool, str]:
     code = wait_for_code(needles)
     if not code:
         return False, "no verification code arrived in time"
-    _set(code_frame, code_el, code)
-    say("filled the code")
+    # One box per digit, on the sites that do it that way. BNY's Oracle door
+    # asks for a six-digit PIN as pin-code-1 .. pin-code-6, and typing the
+    # whole code into the first one leaves five empty boxes and one digit.
+    boxes = _code_boxes(code_frame, code_el)
+    if len(boxes) > 1 and len(boxes) == len(code):
+        for box, digit in zip(boxes, code):
+            _set(code_frame, box, digit)
+        say(f"filled the code across {len(boxes)} boxes")
+    else:
+        _set(code_frame, code_el, code)
+        say("filled the code")
     btn, _ = _find(worker.frames(), SUBMIT_SELECTORS)
     if btn is not None:
         _click(btn)

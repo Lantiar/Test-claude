@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><title>Verify</title></head>
+<body>
+  <h2>We sent a verification code to your email</h2>
+  <form onsubmit="window.__pin=[1,2,3,4,5,6].map(i=>document.getElementById('pin-code-'+i).value).join(''); return false;">
+    <div class="pin">
+      <input id="pin-code-1" maxlength="1" inputmode="numeric">
+      <input id="pin-code-2" maxlength="1" inputmode="numeric">
+      <input id="pin-code-3" maxlength="1" inputmode="numeric">
+      <input id="pin-code-4" maxlength="1" inputmode="numeric">
+      <input id="pin-code-5" maxlength="1" inputmode="numeric">
+      <input id="pin-code-6" maxlength="1" inputmode="numeric">
+    </div>
+    <button type="submit">Verify</button>
+  </form>
+</body></html>
