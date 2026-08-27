@@ -13,6 +13,7 @@ import re
 
 from typing import Optional
 
+from .. import log as _log
 from ..clicking import click as _click
 from ..mapper import match_rule
 from ..models import Field
@@ -219,9 +220,51 @@ class WorkdayWorker(WizardWorker):
                 # is exactly the case the options are needed for.
                 options = self._listbox_options(box)
 
+            # A selector that matches nothing is a discovery bug, and it is
+            # free to catch here: the container is already in hand. Field of
+            # Study was discovered as "formField-fieldOfStudy input" on a
+            # control that has no input in it, so every tier below faithfully
+            # drove an element that did not exist -- the write failed, the
+            # audit blamed the value, the repair proposed a different value
+            # that also "would not stick", and explore reported the selector
+            # matching nothing only at DEBUG, six steps into the run.
+            selector = self._matching_selector(box, automation_id, selector, kind)
+
             fields.append(Field(id=fid, selector=selector, label=label,
                                 kind=kind, required=required, options=options))
         return fields
+
+    # Ordered by how specific they are: the real control first, the container
+    # last. A container selector still lets clicking and reading work, which
+    # beats a selector that resolves to nothing at all.
+    _FALLBACK_CONTROLS = ("input", "button", "[role=combobox]", "[role=button]",
+                          "[role=textbox]", "textarea", "select",
+                          "[data-automation-id='multiSelectContainer']")
+
+    def _matching_selector(self, box, automation_id: str, selector: str,
+                           kind: str) -> str:
+        """`selector`, or the nearest thing inside `box` that actually exists."""
+        base = f"{FORM_FIELD}[data-automation-id='{automation_id}']"
+        tail = selector[len(base):].strip() if selector.startswith(base) else ""
+        try:
+            if not tail or box.query_selector(tail) is not None:
+                return selector
+        except Exception:
+            return selector
+
+        for candidate in self._FALLBACK_CONTROLS:
+            try:
+                if box.query_selector(candidate) is not None:
+                    _log.get(f"worker.{self.ats}").debug(
+                        "%s: %r matches nothing, using %r",
+                        automation_id, tail, candidate)
+                    return f"{base} {candidate}"
+            except Exception:
+                continue
+        _log.get(f"worker.{self.ats}").debug(
+            "%s: nothing inside matches; falling back to the container",
+            automation_id)
+        return base
 
     def _radio_labels(self, box) -> list[str]:
         """The choices in a radio or checkbox group, read without touching the
