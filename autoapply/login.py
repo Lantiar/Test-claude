@@ -106,6 +106,13 @@ CREATE_SUBMIT_SELECTORS = (
     "[data-automation-id='createAccountSubmitButton']",
     "button:has-text('Create Account')",
     "div[role=button][aria-label='Create Account']",
+    # Not every registration button says "account". TikTok's create-account
+    # page offers an email box, a password box and a button reading just
+    # "Create", so the run filled the form and then reported "no
+    # create-account button" on a page consisting of little else.
+    "button:text-is('Create')", "button:text-is('Sign Up')",
+    "button:text-is('Sign up')", "button:text-is('Register')",
+    "button:text-is('Join')", "button:text-is('Continue')",
 )
 SIGNIN_SUBMIT_SELECTORS = (
     "button[data-automation-id='signInSubmitButton']",
@@ -114,6 +121,9 @@ SIGNIN_SUBMIT_SELECTORS = (
 CREATE_SWITCH_SELECTORS = (
     "[data-automation-id='createAccountLink']",
     "a:has-text('Create Account')", "button:has-text('Create Account')",
+    # TikTok renders it as a plain link beside the sign-in form.
+    "a:has-text('Create account')", "a:text-is('Sign up')",
+    "a:has-text('Need an email account')",
 )
 # "already registered" rather than "wrong password" -- the two are worth telling
 # apart, because only one of them means registering would help.
@@ -328,6 +338,7 @@ def sign_in(worker, creds: dict, wait_for_code=None, log=None) -> tuple[bool, st
             return False, "password field never appeared"
     _set(pw_frame, pw, password)
     say("filled password")
+    _accept_required_consent(worker, say)
 
     btn, _ = _find(worker.frames(), SUBMIT_SELECTORS)
     if btn is None:
@@ -349,6 +360,36 @@ def sign_in(worker, creds: dict, wait_for_code=None, log=None) -> tuple[bool, st
         return False, "still on a sign-in page after submitting"
     return True, "signed in"
 
+
+
+def _accept_required_consent(worker, say) -> None:
+    """Tick the agreement a sign-in or registration form will not proceed without.
+
+    TikTok's sign-in carries "I have read and agree to the User Agreement and
+    Applicant Privacy Policy" beside the password box, and submitting without
+    it leaves you on the same page -- which the run reported as "still on a
+    sign-in page after submitting", a true statement about the wrong cause.
+
+    Same narrow test as registration uses: what the form requires, never what
+    it would merely like. A marketing opt-in is not ours to accept.
+    """
+    for fr in worker.frames():
+        try:
+            boxes = fr.query_selector_all("input[type=checkbox]")
+        except Exception:
+            continue
+        for box in boxes:
+            try:
+                if not box.is_visible() or box.is_checked():
+                    continue
+                label = (fr.evaluate(LABEL_JS, box) or "").strip().lower()
+                required = (box.get_attribute("required") is not None
+                            or box.get_attribute("aria-required") == "true")
+                if required or _REQUIRED_CONSENT.search(label):
+                    box.check()
+                    say(f"agreed to: {label[:60] or '(unlabelled)'}")
+            except Exception:
+                continue
 
 def create_account(worker, creds: dict, wait_for_code=None,
                    log=None) -> tuple[bool, str]:
