@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><title>Job application form</title></head>
+<body>
+  <h2>Job application form</h2>
+  <p>Authentication screen.</p>
+  <h3>You don't need to have an account</h3>
+  <p>Get started right away by simply using your email. Your profile will be
+     created and kept up to date automatically as you enter details for each of
+     your job applications.</p>
+  <form onsubmit="window.__honeypot=document.getElementById('hp').value; document.body.innerHTML=document.getElementById('real').innerHTML; return false;">
+    <label for="em">Email Address</label>
+    <input id="em" name="primary-email" type="email">
+    <!-- Visible on purpose: this must be refused by name, not by luck. -->
+    <label for="hp">honeypot</label><input id="hp" name="honeypot" type="email">
+    <label><input id="tc" type="checkbox"> I agree with the terms and conditions</label>
+    <button type="button">CANCEL</button>
+    <button type="submit">NEXT</button>
+  </form>
+  <template id="real">
+    <form>
+      <label for="fn">First Name</label><input id="fn">
+      <label for="ln">Last Name</label><input id="ln">
+      <label for="sp">Will you require sponsorship?</label><input id="sp">
+      <label for="rs">Resume</label><input id="rs" type="file">
+      <button type="submit">Submit</button>
+    </form>
+  </template>
+</body></html>

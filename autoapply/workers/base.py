@@ -659,9 +659,17 @@ class Worker:
     # Next button, no password anywhere. Read as a wall, the run tried to sign
     # in, found nothing to sign in with, and stopped on the first page of an
     # application it could have filled -- which it had in fact already filled.
+    #
+    # BNY's Oracle site does the same thing in different words. Clicking APPLY
+    # NOW lands on /apply/email: "You don't need to have an account. Get
+    # started right away by simply using your email", an email box, "I agree
+    # with the terms and conditions", and NEXT. Not one of the phrases below
+    # matched it, so the door was not recognised and the run went no further.
     ENTRY_TEXT = ("begin the application", "start the application",
                   "start your application", "begin your application",
-                  "to apply for this", "application process")
+                  "to apply for this", "application process",
+                  "need to have an account", "get started right away",
+                  "simply using your email")
 
     def looks_like_an_entry_step(self) -> bool:
         """A /login URL that is really the application's own first page."""
@@ -737,6 +745,14 @@ class Worker:
 
         el, frame = _first_in(list(self.frames()), EMAIL_SELECTORS)
         if el is None:
+            return False
+        # BNY's door carries a field literally named "honeypot", there to catch
+        # something that fills in every box it finds. _first already skips it,
+        # since it is not visible -- but a trap is worth refusing by name as
+        # well as by accident, and the cost of tripping one is being taken for
+        # a bot on a real person's application.
+        if _is_a_trap(el):
+            log.info("entry step: refusing to fill a honeypot field")
             return False
         _set(frame, el, email)
         _accept_required_consent(self, lambda msg: log.info("  %s", msg))
@@ -898,6 +914,14 @@ class Worker:
         frame_url = "" if frame is self.page.main_frame else (frame.url or "")
         root = self._form_root(frame)
         for idx, el in enumerate(root.query_selector_all("input, textarea, select")):
+            # A honeypot is a field put there to catch something that fills in
+            # every box it finds. Invisibility is how they are usually hidden,
+            # so the check below already skips most of them -- but that is a
+            # side effect, and BNY's is named "honeypot" outright. Refusing by
+            # name too costs nothing, and what it protects is a real person's
+            # application not being taken for a bot's.
+            if _is_a_trap(el):
+                continue
             try:
                 if not el.is_visible():
                     continue
@@ -1710,6 +1734,21 @@ class Worker:
 
 def css_escape(value: str) -> str:
     return re.sub(r"([^a-zA-Z0-9_-])", r"\\\1", value)
+
+
+_TRAP = re.compile(r"honeypot|honey_pot|bot[-_]?trap|leave[-_]?(this|it)[-_]?blank",
+                   re.I)
+
+
+def _is_a_trap(el) -> bool:
+    """A field that exists to catch something that fills in everything."""
+    try:
+        for attr in ("name", "id", "class", "aria-label", "placeholder"):
+            if _TRAP.search(el.get_attribute(attr) or ""):
+                return True
+    except Exception:
+        return False
+    return False
 
 
 def _selector_list(selector: str) -> list[str]:

@@ -495,3 +495,51 @@ def test_the_application_s_own_front_door_is_walked_through():
         # The required consent was ticked -- the form does not proceed without
         # it -- and that is the only kind of box this may touch.
         browser.close()
+
+
+def test_oracles_email_door_is_walked_through_without_tripping_its_honeypot():
+    """BNY's posting reaches its form through the same kind of door as AMD's.
+
+    Clicking APPLY NOW lands on /apply/email: "You don't need to have an
+    account. Get started right away by simply using your email", an email box,
+    "I agree with the terms and conditions", and NEXT. None of the phrases that
+    recognise an entry step matched Oracle's wording, so the door was not
+    recognised and the run went no further -- it discovered one field on the
+    whole page and fell through to the agent lane every time.
+
+    The page also carries a field named "honeypot". Invisibility is how those
+    are usually hidden, and the visibility check already skips most of them --
+    but that is a side effect, and what it protects is a real person's
+    application not being taken for a bot's. So it is refused by name.
+    """
+    import os
+    from autoapply.models import Job
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    os.environ["AUTOAPPLY_EMAIL"] = "someone@example.com"
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "oracle_entry.html").as_uri())
+        worker = GenericWorker(pg)
+
+        assert worker.looks_like_an_entry_step(), "Oracle's wording must count"
+        found = worker.discover()
+        assert not [f for f in found
+                    if pg.eval_on_selector(f.selector, "e => e.id") == "hp"], (
+            f"the trap was discovered: {[(f.id, f.label) for f in found]}")
+        assert [f.label for f in found if f.kind == "email"] == ["Email Address"]
+
+        assert worker.pass_entry_step(Job(url=pg.url, ats="generic"))
+        assert not pg.query_selector("#hp"), "still on the door"
+        # What the door saw when it was submitted. Anything in here is what
+        # gets a real person's application flagged as a bot's.
+        assert pg.evaluate("() => window.__honeypot") == "", "the trap was filled"
+
+        labels = {(f.label or "").lower() for f in worker.discover()}
+        assert any("first name" in x for x in labels), labels
+        browser.close()
