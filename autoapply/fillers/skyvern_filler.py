@@ -88,6 +88,22 @@ class SkyvernFiller:
                                      required_env_vars=["OPENAI_API_KEY"],
                                      supports_vision=True,
                                      add_assistant_prefix=False,
+                                     # Skyvern's default completion budget is
+                                     # 4096 tokens, which predates reasoning
+                                     # models and is now a budget the model can
+                                     # spend entirely on thinking. Every call
+                                     # came back finish_reason='length',
+                                     # reasoning_tokens=4096, content='' -- the
+                                     # model reasoned to the cap and had nothing
+                                     # left to answer with. Skyvern read the
+                                     # empty string as a malformed response,
+                                     # retried five times, and reported the task
+                                     # as failed. Room to answer in, and a
+                                     # reasoning effort that leaves some.
+                                     max_completion_tokens=int(
+                                         os.getenv("SKYVERN_MAX_TOKENS", "16000")),
+                                     reasoning_effort=os.getenv(
+                                         "SKYVERN_REASONING", "low"),
                                      litellm_params=LiteLLMParams(
                                          api_key=os.getenv("OPENAI_API_KEY"),
                                          api_base=os.getenv("OPENAI_BASE_URL"))),
@@ -139,7 +155,17 @@ class SkyvernFiller:
 
         thread = threading.Thread(target=runner, daemon=True)
         thread.start()
-        thread.join(timeout=float(os.getenv("AGENT_TIMEOUT", "900")))
+        # Fifteen minutes was not enough, and the way it was not enough is
+        # the reason this is half an hour. Skyvern spent thirty actions on one
+        # Greenhouse form -- entering the phone country code, matching Rutgers
+        # University and Bachelor's Degree out of custom dropdowns -- and was
+        # cut off mid-form. The thread cannot be stopped once it is past this
+        # point, so it kept driving the page while the harness read it, and the
+        # readback came back empty: a contender that had filled most of an
+        # application scored 0. Time is already in the score at a second per
+        # two points; a contender that is merely slow should lose on that,
+        # rather than be recorded as having done nothing.
+        thread.join(timeout=float(os.getenv("AGENT_TIMEOUT", "1800")))
         if thread.is_alive():
             report.errors.append("skyvern did not finish within AGENT_TIMEOUT")
             return report

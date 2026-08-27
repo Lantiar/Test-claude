@@ -98,7 +98,7 @@ class BrowserUseFiller:
 
         thread = threading.Thread(target=runner, daemon=True)
         thread.start()
-        thread.join(timeout=float(os.getenv("AGENT_TIMEOUT", "900")))
+        thread.join(timeout=float(os.getenv("AGENT_TIMEOUT", "1800")))
         if thread.is_alive():
             report.errors.append("agent did not finish within AGENT_TIMEOUT")
             return report

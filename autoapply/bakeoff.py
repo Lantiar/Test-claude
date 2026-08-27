@@ -82,28 +82,44 @@ def prepare(page, job: Job, profile: dict) -> tuple[bool, str]:
     return True, f"{len(fields)} field(s) on the application"
 
 
-def read_back(page, job: Job) -> dict[str, str]:
-    """What the form actually holds now, read by the harness.
+def read_back(page, job: Job) -> tuple[dict[str, str], str]:
+    """What the form actually holds now, read by the harness, and what went wrong.
 
     Scoring a filler on its own report is how you end up ranking the one that
     is most confident rather than the one that is most correct.
+
+    The second half of the return exists because this failed silently and was
+    scored as a zero. Skyvern spent thirty actions on a Greenhouse form --
+    entering a phone country code, matching Rutgers University and Bachelor's
+    Degree out of two custom dropdowns -- ran past AGENT_TIMEOUT, and its
+    thread kept driving the page while this read it. Every per-field read threw
+    and every throw was swallowed, so the scan returned an empty dict, and the
+    table reported 0 filled of 0 found: not "we could not measure this" but
+    "this contender did nothing", which is a different claim and a false one.
     """
     from .verify import _read_field
     from .workers import get_worker
 
     worker = get_worker(job.ats, page) or get_worker("generic", page)
     held: dict[str, str] = {}
+    seen = failed = 0
     for f in worker.discover():
+        seen += 1
         try:
             el = worker.frame_for(f).query_selector(f.selector)
             if el is None:
                 continue
             value = (_read_field(page, f, el)[0] or "").strip()
         except Exception:
+            failed += 1
             continue
         if value:
             held[f.label or f.id] = value
-    return held
+    if not seen:
+        return held, "the readback found no fields to read"
+    if failed == seen:
+        return held, f"every one of the {seen} field(s) failed to read back"
+    return held, ""
 
 
 def _free_port() -> int:
@@ -175,7 +191,9 @@ def run_one(filler_name: str, job: Job, profile: dict,
             report.reached_review = False
 
         try:
-            held = read_back(page, job)
+            held, unread = read_back(page, job)
+            if unread:
+                report.errors.append(unread)
         except Exception as exc:
             held = {}
             report.errors.append(f"readback failed: {exc}")
