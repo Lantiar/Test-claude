@@ -42,6 +42,21 @@ REVIEW_SYSTEM = (
     "  - an answer asserts something the profile does not support\n"
     "Do NOT block for style, brevity, or an answer merely being unremarkable. "
     "An answer that is truthful and responsive is fine.\n"
+    "Do NOT block for any of these, which look like contradictions and are "
+    "not:\n"
+    "  - a picklist answer that is the closest offered option rather than the "
+    "profile's exact wording. A form can only be answered with what it offers: "
+    "if the profile says the source was a company website and the menu lists "
+    "only Job Board, University/College and Recruiter, the closest of those is "
+    "the correct answer, not a contradiction.\n"
+    "  - the form's own wording of a profile fact -- \"Bachelors\" for "
+    "\"Bachelor's Degree\", \"New Jersey\" for \"NJ\", a URL with or "
+    "without www.\n"
+    "  - an answer whose source is \"account\": that value was already on the "
+    "candidate's saved profile at this employer and was deliberately left "
+    "untouched. It is not something being submitted on our say-so.\n"
+    "  - a signature or acknowledgement date holding today's date, given "
+    "above. Signing a form today is not an unsupported claim.\n"
     'Reply with JSON only: {"safe_to_submit": true|false, '
     '"blocking": ["short reason", ...], "notes": "one sentence"}'
 )
@@ -61,8 +76,10 @@ def _payload(outcome: FillOutcome, profile: dict) -> str:
         (f.label or f.id) for f in outcome.fields
         if f.required and f.id not in outcome.filled_ids
     ]
+    from .llm import today_note
+
     return (
-        "Candidate profile:\n" + json.dumps(profile, indent=2)
+        today_note() + "\n\nCandidate profile:\n" + json.dumps(profile, indent=2)
         + "\n\nAnswers about to be submitted:\n" + json.dumps(answers, indent=2)
         + "\n\nRequired questions left unanswered:\n" + json.dumps(unanswered)
     )
