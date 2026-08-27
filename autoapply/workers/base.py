@@ -580,6 +580,18 @@ class Worker:
         if any(query_first(fr, self.auth_selectors) is not None
                for fr in self.frames()):
             return True
+        # A password box means an account, whatever the URL says. TikTok serves
+        # its wall from lifeattiktok.com/search/<id> -- no /login, no marker,
+        # and the generic worker has no auth_selectors -- so the run read
+        # "Enter your email / Set your password" as an ordinary form, never
+        # tried to sign in or register, and refused to fill it. Which was the
+        # right refusal and the wrong reason: there was an account to make.
+        for frame in self.frames():
+            try:
+                if frame.query_selector("input[type=password]") is not None:
+                    return True
+            except Exception:
+                continue
         try:
             path = (self.page.url or "").lower().split("?")[0]
         except Exception:
