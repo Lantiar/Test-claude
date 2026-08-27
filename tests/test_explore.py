@@ -768,3 +768,34 @@ def test_a_tick_box_takes_a_yes_or_a_no_and_nothing_else():
         assert worker._write(box, "No") == "No"
         assert not pg.eval_on_selector("#pn", "e => e.checked")
         browser.close()
+
+
+def test_an_invisible_recaptcha_is_not_a_challenge():
+    """Axon's application stopped at 29 of 32 fields filled over a reCAPTCHA
+    that asks nobody anything.
+
+    The enterprise/invisible setup Greenhouse boards run by default scores the
+    session in the background and the form submits normally; its anchor frame
+    is the widget, not a challenge. The challenge -- the "select all the
+    buses" grid -- is a separate bframe. Blocking on the anchor would stop most
+    of the Greenhouse and Lever boards on a Summer-2027 list, which between
+    them are hundreds of live postings.
+    """
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+
+        pg.goto((FIXTURES / "recaptcha_anchor.html").as_uri())
+        assert not GenericWorker(pg).saw_captcha(), \
+            "an invisible reCAPTCHA challenges nobody"
+
+        pg.goto((FIXTURES / "recaptcha_challenge.html").as_uri())
+        assert GenericWorker(pg).saw_captcha(), \
+            "the grid a person has to solve must still stop the run"
+        browser.close()

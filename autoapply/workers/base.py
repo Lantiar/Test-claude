@@ -686,8 +686,24 @@ class Worker:
       const sel = 'iframe[src*="recaptcha" i], iframe[src*="hcaptcha" i],' +
                   ' iframe[src*="turnstile" i], .g-recaptcha, #g-recaptcha,' +
                   ' .h-captcha, .cf-turnstile';
+      // The anchor frame is the widget itself, and on the enterprise/invisible
+      // setup that Greenhouse boards run by default it never asks anything: it
+      // scores the session in the background and the form submits normally.
+      // The challenge -- the "select all the buses" grid -- is a *separate*
+      // bframe, and it is the one worth stopping for. Blocking on the anchor
+      // stopped Axon's application at 29 of 32 fields filled, and would stop
+      // most of the Greenhouse boards on a Summer-2027 list the same way.
+      const ANCHOR = /\/(anchor|webworker)\b/i;
+      const CHALLENGE = /\/bframe\b/i;
       for (const n of document.querySelectorAll(sel)) {
         if (n.classList.contains('grecaptcha-badge')) continue;
+        const src = n.getAttribute('src') || '';
+        if (ANCHOR.test(src) && !CHALLENGE.test(src)) {
+          // ...unless it is showing a tick box a person has to click, which
+          // is an anchor that has been given a real size on screen.
+          const r = n.getBoundingClientRect();
+          if (r.width < 100 || r.height < 40) continue;
+        }
         const cs = getComputedStyle(n);
         // Being hidden on purpose is what separates an invisible v3 -- which
         // scores silently and asks nothing of anyone -- from a challenge. Size
