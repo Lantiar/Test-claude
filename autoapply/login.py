@@ -359,9 +359,24 @@ def sign_in(worker, creds: dict, wait_for_code=None, log=None) -> tuple[bool, st
     if not ok:
         return False, detail
 
-    if worker.needs_auth():
-        return False, "still on a sign-in page after submitting"
-    return True, "signed in"
+    # Wait for the wall to go, rather than deciding on one early reading.
+    #
+    # This asked once, about 2.5 seconds after the click, and Workday's SPA had
+    # not swapped the sign-in form out yet -- so a sign-in that had in fact
+    # worked was reported as "still on a sign-in page after submitting". The
+    # run then went off to register an account it already had, found the
+    # create-account page equally unrendered, and gave up on the whole
+    # application. The screenshot it saved shows the candidate signed in, on
+    # Workday's My Information step, with the step rail all the way to Review.
+    #
+    # networkidle does not settle this: a Workday page keeps connections open,
+    # so the wait returns immediately and the fixed pause after it is the only
+    # thing standing between the click and the verdict.
+    for _ in range(int(os.getenv("SIGNIN_SETTLE_SECONDS", "20"))):
+        if not worker.needs_auth():
+            return True, "signed in"
+        page.wait_for_timeout(1000)
+    return False, "still on a sign-in page after submitting"
 
 
 

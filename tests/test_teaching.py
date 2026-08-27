@@ -1101,3 +1101,76 @@ def test_the_vendors_own_marketing_site_is_not_a_hop_to_the_ats():
         [Anchor("https://campus-amd.icims.com/jobs/91176/login", "Apply")]))
     worker.open(Job(url=worker.page.url, ats="generic"))
     assert went == [], f"navigated away from the application to {went}"
+
+
+def test_a_sign_in_is_not_condemned_by_one_early_reading():
+    """Mastercard's run signed in, then reported that it had not.
+
+    The check asked needs_auth() once, about 2.5 seconds after clicking, and
+    Workday's SPA had not swapped the sign-in form out yet. So a sign-in that
+    worked was reported as "still on a sign-in page after submitting"; the run
+    went off to register an account it already had, found the create-account
+    page equally unrendered, and abandoned the application. The screenshot it
+    saved shows the candidate signed in, on Workday's My Information step,
+    with the step rail all the way to Review.
+
+    networkidle does not settle this -- a Workday page keeps connections open,
+    so the wait returns immediately and the fixed pause after it is the only
+    thing between the click and the verdict.
+    """
+    import os
+    from autoapply import login
+
+    os.environ["SIGNIN_SETTLE_SECONDS"] = "5"
+
+    class Frame:
+        def query_selector(self, _):
+            return None
+
+    class Page:
+        url = "https://x.wd1.myworkdayjobs.com/en-US/Campus/job/y/apply/applyManually"
+
+        def __init__(self):
+            self.waited = 0
+
+        def wait_for_timeout(self, ms):
+            self.waited += ms
+
+        def wait_for_load_state(self, *a, **k):
+            pass
+
+    class Worker:
+        """Still walled for the first two readings, then through."""
+
+        def __init__(self):
+            self.page = Page()
+            self.reads = 0
+
+        def frames(self):
+            return [Frame()]
+
+        def needs_auth(self):
+            self.reads += 1
+            return self.reads <= 2
+
+    worker = Worker()
+    stubs = {"_on_registration_form": lambda *a: False,
+             "_find": lambda *a: (object(), Frame()),
+             "_set": lambda *a: None,
+             "_accept_required_consent": lambda *a: None,
+             "_clear_code": lambda *a: (True, ""),
+             "_click": lambda *a: True}
+    # Restored afterwards. Left in place, these leak into every test that runs
+    # after this one in the same process -- which is how a green suite came to
+    # report a failure in a test that passes on its own.
+    original = {name: getattr(login, name) for name in stubs}
+    try:
+        for name, stub in stubs.items():
+            setattr(login, name, stub)
+        ok, detail = login.sign_in(worker, {"email": "a@b.c", "password": "x"})
+    finally:
+        for name, value in original.items():
+            setattr(login, name, value)
+
+    assert ok, detail
+    assert worker.reads > 1, "it gave up on the first reading again"
