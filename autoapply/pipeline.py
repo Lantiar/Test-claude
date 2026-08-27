@@ -110,7 +110,23 @@ def _needs_agent_fallback(outcome: FillOutcome | None) -> bool:
         # is one widget on step six, the tier for it is exploring that widget on
         # the page we are already standing on -- not starting over.
         return False
-    return (not outcome.fields) or (not outcome.filled_ids) or (not outcome.verified)
+    if not outcome.fields or not outcome.filled_ids:
+        return True
+    # Unverified on its own is not enough. Verification fails over one field in
+    # twenty-two, and starting over in a fresh browser does not fix one field:
+    # it re-reads the same page from scratch, spends the tokens the audit and
+    # repair tiers want, and files a second opinion on top of the real
+    # findings. On Notion that meant a DOM pass which had filled 20 of 22 and
+    # taught itself three answers being followed by an agent clicking around
+    # the live form it had just completed.
+    #
+    # What the fallback is for is a lane that got nowhere -- markup it cannot
+    # read at all, an iframe, a shadow root, a tenant that renders differently.
+    # A lane that filled most of the form got somewhere, and the tier for its
+    # last field is the one that explores that field on the page we are
+    # already standing on.
+    filled = len(set(outcome.filled_ids))
+    return filled < max(3, len(outcome.fields) // 4)
 
 
 def _fallback_note(outcome: FillOutcome | None) -> str:

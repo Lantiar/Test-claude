@@ -169,8 +169,12 @@ def solve_field(worker, field: Field, profile: dict, provider,
             break
 
         if decision.get("done"):
-            log.debug("%s: model says the control is already answered (shows "
-                      "%r)", field.label, current)
+            if path:
+                log.info("%s solved in %d click(s): %s -> %s", field.label,
+                         len(path), " > ".join(path), _log.brief(current, 40))
+            else:
+                log.debug("%s: model says the control is already answered "
+                          "(shows %r)", field.label, current)
             break
         index = decision.get("click")
         if not isinstance(index, int) or not 0 <= index < len(items):
@@ -223,9 +227,20 @@ def solve_field(worker, field: Field, profile: dict, provider,
 
         value = read_value()
         if value and value != current:
-            log.info("%s solved in %d click(s): %s",
-                     field.label, len(path), " > ".join(path))
-            return value, path
+            # Changed, not necessarily answered. This returned here, so any
+            # non-empty value the control came to hold was the answer -- and
+            # what this tier returns is taught, replayed with confidence 1.0 on
+            # every future run, and outranks every rule beneath it. A wrong
+            # lesson is worse than no lesson.
+            #
+            # So go round once more instead. The next pass shows the model the
+            # value it just produced under "currently_shows", and its own
+            # "done" then means it looked at the result and accepted it, rather
+            # than meaning nobody checked. It can also click again from there,
+            # which is how a nested menu gets past the category it opened.
+            log.debug("%s: now shows %r after %s -- confirming",
+                      field.label, _log.brief(value, 40), " > ".join(path))
+            continue
         log.debug("%s: clicked %r, control still shows %r", field.label,
                   choice["label"], value)
 

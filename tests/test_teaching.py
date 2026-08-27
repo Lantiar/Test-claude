@@ -1008,7 +1008,7 @@ def test_a_finding_about_a_question_that_is_not_on_the_form_is_dropped():
              {"question": "Have you ever worked for Mastercard?", "answer": "No"}]
 
     kept = _cited([
-        {"question": "Have you ever worked for Mastercard?",
+        {"question": "Have you ever worked for Mastercard?", "answer": "No",
          "problem": "contradicts a previous answer"},
         {"question": "Salary expectation", "problem": "left blank"},
         {"question": None, "problem": "ended on a job search page"},
@@ -1025,6 +1025,19 @@ def test_a_finding_about_a_question_that_is_not_on_the_form_is_dropped():
     # them, and a blocker is too important to lose to a formatting slip.
     assert _cited(["ended on a job search page"], pairs) == [
         "ended on a job search page"]
+
+    # The same discipline one level down. Citing a real question was not
+    # enough: Mastercard was blocked twice more by findings correctly
+    # addressed to real questions and wrong about them -- "Race/Ethnicity:
+    # answer entered into a field that plainly asks something else", where the
+    # answer was "Asian", and "worked for Mastercard: duplicate question with
+    # conflicting answers", where both said "No".
+    assert _cited([{"question": "First Name", "answer": "Bharath",
+                    "problem": "wrong given name"}], pairs) == [], \
+        "an objection to an answer nobody entered must not block"
+    assert _cited([{"question": "First Name", "answer": "Nideesh",
+                    "problem": "is a surname"}], pairs) == [
+        "First Name: is a surname"], "a real objection must survive"
 
 
 def test_the_vendors_own_marketing_site_is_not_a_hop_to_the_ats():
@@ -1180,3 +1193,37 @@ def test_a_sign_in_is_not_condemned_by_one_early_reading():
 
     assert ok, detail
     assert worker.reads > 1, "it gave up on the first reading again"
+
+
+def test_the_agent_does_not_start_over_on_a_form_that_is_nearly_filled():
+    """Unverified on its own is not a reason to begin again.
+
+    Verification fails over one field in twenty-two, and a fresh browser does
+    not fix one field: it re-reads the same page from scratch, spends the
+    tokens the audit and repair tiers want, and files a second opinion on top
+    of the real findings. On Notion that meant a DOM pass which had filled 20
+    of 22 and taught itself three answers being followed by an agent clicking
+    around the live form it had just completed.
+
+    What the fallback is for is a lane that got nowhere -- markup it cannot
+    read at all, an iframe, a shadow root, a tenant that renders differently.
+    """
+    from autoapply.models import FillOutcome, Job
+    from autoapply.pipeline import _needs_agent_fallback
+
+    job = Job(url="https://jobs.ashbyhq.com/notion/x/application", ats="ashby")
+
+    def outcome(found, filled, verified=False):
+        o = FillOutcome(job=job, verified=verified)
+        o.fields = [Field(id=f"f{i}", selector=f"#f{i}", label=f"Q{i}")
+                    for i in range(found)]
+        o.filled_ids = [f"f{i}" for i in range(filled)]
+        return o
+
+    assert not _needs_agent_fallback(outcome(22, 20)), \
+        "a nearly-complete form is not a failure to start over from"
+    assert _needs_agent_fallback(outcome(22, 0)), "nothing filled is"
+    assert _needs_agent_fallback(FillOutcome(job=job)), "empty discovery is"
+    assert _needs_agent_fallback(outcome(22, 2)), "barely anything filled is"
+    # And a verified run never needed the fallback in the first place.
+    assert not _needs_agent_fallback(outcome(22, 22, verified=True))

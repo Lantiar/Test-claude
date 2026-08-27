@@ -71,14 +71,22 @@ SYSTEM = (
     "Say nothing about answers that are merely terse, and nothing about a run "
     "that is simply incomplete: stopping early is normal and is not itself "
     "implausible.\n"
+    "Most runs are fine. An empty \"problems\" list is the normal result and "
+    "the right answer whenever nothing here is actually wrong -- you are not "
+    "expected to find something, and a report with nothing in it is a good "
+    "report.\n"
     'Reply with JSON only: {"plausible": true|false, "problems": [{"question": '
     '"<the question this is about, copied exactly from "form", or null if the '
-    'finding is about the page rather than about one answer>", "problem": '
-    '"<short phrase>"}, ...]}\n'
-    "A finding about an answer must name its question, and the question must "
-    "be one that appears in \"form\", copied exactly. A finding whose question "
-    "is not on the form is discarded, so do not report one you cannot point "
-    "to."
+    'finding is about the page rather than about one answer>", "answer": '
+    '"<the answer you are objecting to, copied exactly from "form">", '
+    '"problem": "<short phrase>"}, ...]}\n'
+    "A finding about an answer must quote both the question and the answer, "
+    "exactly as they appear in \"form\". A finding whose question or answer is "
+    "not there is discarded, so do not report one you cannot point to. If you "
+    "are claiming two answers disagree, they must be two different answers -- "
+    "the same answer given twice is a repeated question, not a contradiction. "
+    "A finding about the page rather than about one answer carries no question "
+    "and no answer."
 )
 
 
@@ -223,15 +231,33 @@ def _cited(problems, pairs: list[dict]) -> list[str]:
     question and is kept as it stands; those are the ones this tier exists for.
     """
     known = {(p.get("question") or "").strip().lower() for p in pairs}
+    given = {((p.get("question") or "").strip().lower(),
+              str(p.get("answer") or "").strip().lower()) for p in pairs}
     kept: list[str] = []
     for problem in (problems or []):
         if isinstance(problem, dict):
             text = str(problem.get("problem") or problem.get("text") or "").strip()
             question = str(problem.get("question") or "").strip()
+            answer = str(problem.get("answer") or "").strip()
             if question and question.lower() not in known:
                 _log.get("sanity").info(
                     "dropped a finding about %r, which is not on this form: %s",
                     _log.brief(question, 60), _log.brief(text, 80))
+                continue
+            # The same discipline, one level down. Citing a real question was
+            # not enough: Mastercard's run was blocked twice more by findings
+            # correctly addressed to real questions and wrong about them --
+            # "What is your Race/Ethnicity?*: answer entered into a field that
+            # plainly asks something else" (the answer was "Asian"), and "Have
+            # you ever worked for Mastercard?*: duplicate question with
+            # conflicting answers" (both said "No"). The payload it was shown
+            # said exactly that. An objection has to be to something that is
+            # actually on the form.
+            if question and answer and (question.lower(), answer.lower()) not in given:
+                _log.get("sanity").info(
+                    "dropped a finding quoting %r as the answer to %r, which is "
+                    "not what was entered: %s", _log.brief(answer, 40),
+                    _log.brief(question, 50), _log.brief(text, 80))
                 continue
             problem = f"{question}: {text}" if question else text
         problem = str(problem).strip()

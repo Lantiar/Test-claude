@@ -40,10 +40,15 @@ class Chooser:
     def __init__(self, *wanted: str):
         self.wanted = list(wanted)
         self.asked: list[list[dict]] = []
+        # What the control held each time it was asked. The last entry is what
+        # the model was looking at when it said the field was done.
+        self.saw: list[str] = []
 
     def _chat(self, system, user):
-        items = json.loads(user)["on_screen"]
+        payload = json.loads(user)
+        items = payload["on_screen"]
         self.asked.append(items)
+        self.saw.append(payload.get("currently_shows"))
         if self.wanted:
             target = self.wanted.pop(0)
             for item in items:
@@ -582,3 +587,33 @@ def test_an_upload_that_offers_to_fill_the_form_in_is_not_a_field():
         assert len(names) == 1, "the autofill widget still doubles as a name field"
         assert names[0].kind != "file"
         browser.close()
+
+
+def test_the_value_explore_returns_was_looked_at_before_being_accepted(page):
+    """This tier's answer is taught, and a wrong lesson is worse than none.
+
+    It returned as soon as the control held anything different from what it
+    held before -- so any non-empty change was the answer, and that answer is
+    stored, replayed with confidence 1.0 on every future run, and outranks
+    every rule beneath it. Nobody ever looked at it.
+
+    Going round once more costs one model call on a tier that only fires for
+    controls no other tier can drive, and it turns "done" into a statement
+    about the value produced rather than about nothing at all.
+    """
+    field = Field(id="veteranStatus", selector="#vet", label="Have you ever "
+                  "served in the military?", kind="select")
+    chooser = Chooser("served in the military", "not a protected veteran")
+
+    value, path = solve_field(
+        _Worker(page), field, PROFILE, chooser,
+        lambda: (page.eval_on_selector("#vet", "e => e.value") or "").strip())
+
+    assert value == "I am not a protected veteran", f"{value!r} via {path}"
+    # The reading it was asked to accept is the one the clicks produced -- not
+    # the empty control it started on.
+    assert chooser.saw[-1] == "I am not a protected veteran", chooser.saw
+    # ...and not the unanswered control it started on.
+    assert chooser.saw[0] == "Select One", chooser.saw
+    assert len(chooser.saw) == len(path) + 1, (
+        f"one reading per click plus the confirming one: {chooser.saw}")
