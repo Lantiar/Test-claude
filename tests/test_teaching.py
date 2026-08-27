@@ -1090,11 +1090,17 @@ def test_the_vendors_own_marketing_site_is_not_a_hop_to_the_ats():
         def open(self, job):
             # Stand in for the base worker finding the form and returning.
             self._landing = (self.page.url, [object()])
+            # Put the real method back, rather than deleting the attribute.
+            # `del` removed Worker.open from the class outright, so every test
+            # that ran afterwards in the same process failed with "'super'
+            # object has no attribute 'open'" -- six of them, in a file this
+            # test has nothing to do with.
+            original = Worker.open
             Worker.open = lambda *a, **k: None
             try:
                 GenericWorker.open(self, job)
             finally:
-                del Worker.open
+                Worker.open = original
 
     worker = Stopped(Page2(
         "https://careers.amd.com/careers-home/jobs/91176",

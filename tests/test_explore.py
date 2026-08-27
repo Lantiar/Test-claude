@@ -543,3 +543,42 @@ def test_oracles_email_door_is_walked_through_without_tripping_its_honeypot():
         labels = {(f.label or "").lower() for f in worker.discover()}
         assert any("first name" in x for x in labels), labels
         browser.close()
+
+
+def test_an_upload_that_offers_to_fill_the_form_in_is_not_a_field():
+    """Notion's Ashby form opens with an autofill widget above the real upload.
+
+    "Autofill from resume -- Upload your resume here to autofill key
+    application fields": a 1x1 file input with no id and no name. Discovery
+    took it for an application field and, with nothing else nearby to read,
+    labelled it "Full Name" -- the caption of the input after it. The reviewer
+    then reported duplicate entries for the same question, which was true of
+    what it had been shown.
+
+    Uploading there is worse than useless: Ashby's parser would rewrite the
+    fields the run had just filled. BNY's careers page has the same shape in
+    other words -- "upload or drag and drop your PDF resume file here to get AI
+    recommended jobs" -- and that one cost a whole run, by making a search page
+    look like an application. The real upload says what it is for; these say
+    what they will do for you.
+    """
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "ashby_autofill.html").as_uri())
+
+        fields = GenericWorker(pg).discover()
+        uploads = [f for f in fields if f.kind == "file"]
+        assert len(uploads) == 1, [(f.id, f.label) for f in uploads]
+        assert uploads[0].label == "Resume", uploads[0].label
+
+        names = [f for f in fields if (f.label or "") == "Full Name"]
+        assert len(names) == 1, "the autofill widget still doubles as a name field"
+        assert names[0].kind != "file"
+        browser.close()

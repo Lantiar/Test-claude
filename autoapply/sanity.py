@@ -46,6 +46,10 @@ SYSTEM = (
     "name\", eleven \"Description\" -- is a repeating section with several "
     "entries in it, not a mistake; judge each entry against the ones next to "
     "it.\n"
+    "An entry marked \"answer_shortened\": true was cut to fit this payload. "
+    "Never report such an answer as incomplete, cut off, or as not finishing "
+    "its thought -- you are looking at an excerpt, not at what is on the "
+    "form.\n"
     "An entry marked \"already_on_the_account\": true was NOT entered by this "
     "run. The ATS keeps the candidate's profile between applications, and "
     "writing into an entry that already holds an answer is what makes these "
@@ -83,6 +87,12 @@ SYSTEM = (
 # what this tier judges is the run as a whole.
 MAX_PAIRS = int(os.getenv("SANITY_MAX_PAIRS", "80"))
 
+# How much of one answer. A "why do you want to work here" answer is two to
+# four sentences, so this has to hold one whole -- the previous 80 characters
+# cut every one of them mid-word, and the reviewer duly reported that they did
+# not finish.
+MAX_ANSWER = int(os.getenv("SANITY_MAX_ANSWER", "500"))
+
 
 def _form_digest(outcome: FillOutcome) -> list[dict]:
     """Each question beside the answer given to it, repeats kept apart.
@@ -116,13 +126,21 @@ def _form_digest(outcome: FillOutcome) -> list[dict]:
     answers, sources = {}, {}
     for m in outcome.mappings:
         if m.action in ("fill", "generate") and m.value:
-            answers[m.field_id] = str(m.value)[:80]
+            answers[m.field_id] = str(m.value)
             sources[m.field_id] = m.source or ""
 
     pairs = []
     for f in outcome.fields:
-        pair = {"question": (f.label or f.id or "?")[:80],
-                "answer": answers.get(f.id, None)}
+        answer = answers.get(f.id)
+        pair = {"question": (f.label or f.id or "?")[:120],
+                "answer": None if answer is None else answer[:MAX_ANSWER]}
+        if answer is not None and len(answer) > MAX_ANSWER:
+            # Say so, because otherwise the reviewer judges our scissors. Every
+            # answer was cut to 80 characters, so Notion's "Why do you want to
+            # work at Notion?" -- 342 characters of finished prose -- reached
+            # the reviewer severed mid-word, and it reported, accurately, that
+            # the answer does not complete the thought.
+            pair["answer_shortened"] = True
         if sources.get(f.id) == "account":
             pair["already_on_the_account"] = True
         pairs.append(pair)

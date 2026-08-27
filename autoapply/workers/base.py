@@ -186,6 +186,7 @@ class Worker:
         self.page.goto(job.url, wait_until="domcontentloaded")
         self.page.wait_for_timeout(1500)
         self.dismiss_consent()
+        self.settle_landing()
         if self._already_on_the_application():
             return
         target = self.start_application(click=False, job_url=job.url)
@@ -226,6 +227,31 @@ class Worker:
             self.settle_step(timeout_ms=15000, reloads=0)
             self.dismiss_consent()
             self._escape_sso(target)
+
+    def settle_landing(self, timeout_ms: int = 12000) -> None:
+        """Wait until the landing page shows a form, or a way into one.
+
+        open() looked after a fixed 1500ms. BNY's Oracle posting renders its
+        two APPLY NOW buttons later than that, so the run found no fields and
+        no apply control, did nothing, and fell through to the agent lane on
+        every single attempt -- a link whose form is three clicks away and
+        which a probe reaches in four seconds.
+
+        Neither half of that wait can be a fixed number, because the two pages
+        this has to serve are opposites: an application is ready when it has
+        fields, a posting when it has the button that leads to them. So wait
+        for whichever arrives, and stop as soon as it does.
+        """
+        deadline = time.time() + timeout_ms / 1000
+        while time.time() < deadline:
+            try:
+                if self.discover():
+                    return
+                if self.start_application(click=False, job_url=""):
+                    return
+            except Exception:
+                pass
+            self.page.wait_for_timeout(600)
 
     def _already_on_the_application(self) -> bool:
         """Is the page we were handed the form itself?
@@ -769,10 +795,26 @@ class Worker:
             return False
         self.settle_step(timeout_ms=15000, reloads=0)
 
-        moved = self.page.url != before or bool(self.discover())
-        log.info("entry step -> %s (%s)", "through" if moved else "stuck",
-                 _log.brief(self.page.url, 60))
-        return moved
+        # Through means the door is behind us, not that the URL twitched.
+        #
+        # This asked whether the URL had changed or discovery returned
+        # anything, and AMD's answers yes to both while standing still: the
+        # click appends ?mobile=false to the same /login, and discovery finds
+        # the same Email box it found before. So the run logged "entry step ->
+        # through" and then, one line later, refused to fill the page it was
+        # still on. A step that reports success while nothing moved is worse
+        # than one that fails, because the failure it hides is the diagnosis.
+        from ..gate import looks_like_an_application as _is_app
+
+        fields = self.discover()
+        through = bool(fields) and (
+            _is_app(FillOutcome(job=job, fields=fields))
+            or not self.looks_like_an_entry_step())
+        log.info("entry step -> %s (%s, %d field(s)%s)",
+                 "through" if through else "still on the door",
+                 _log.brief(self.page.url, 50), len(fields),
+                 "" if self.page.url != before else ", url unchanged")
+        return through
 
     # Signing in is attempted at most once per run. A second try after a
     # refusal is how an account gets locked, and the credentials would be the
@@ -932,6 +974,8 @@ class Worker:
             if tag == "input" and itype in SKIP_TYPES:
                 continue
             if (el.get_attribute("aria-hidden") or "") == "true":
+                continue
+            if itype == "file" and _fills_the_form_in_for_you(el):
                 continue
 
             kind = ("textarea" if tag == "textarea"
@@ -1738,6 +1782,43 @@ def css_escape(value: str) -> str:
 
 _TRAP = re.compile(r"honeypot|honey_pot|bot[-_]?trap|leave[-_]?(this|it)[-_]?blank",
                    re.I)
+
+# An upload that offers to fill the form in for you, rather than one the
+# application is asking for.
+_AUTOFILL_UPLOAD = re.compile(
+    r"autofill|auto-fill|automatically fill|fill (in )?(the |your )?"
+    r"(application|form|fields)|recommended jobs|job recommendations", re.I)
+
+
+def _fills_the_form_in_for_you(el) -> bool:
+    """Is this upload a convenience widget rather than an application field?
+
+    Notion's Ashby form opens with "Autofill from resume -- Upload your resume
+    here to autofill key application fields", a 1x1 file input with no id and
+    no name, sitting above the real Resume field. Discovery took it for an
+    application field and, having nothing else nearby to read, labelled it
+    "Full Name" -- the caption of the input after it. The reviewer then
+    reported duplicate entries for the same question, which was true of what
+    it was shown.
+
+    Uploading there is worse than useless: Ashby's parser would rewrite the
+    fields the run had just filled. BNY's careers page has the same shape in
+    different words -- "upload or drag and drop your PDF resume file here to
+    get AI recommended jobs" -- and that one cost a whole run, because it made
+    a search page look like an application.
+
+    The real upload says what it is for; these say what they will do for you.
+    """
+    try:
+        text = el.evaluate(
+            """e => {
+                 const box = e.closest('div,section,fieldset,form') || e;
+                 return ((box.innerText || '') + ' ' +
+                         (box.className || '')).replace(/\\s+/g, ' ');
+               }""") or ""
+    except Exception:
+        return False
+    return bool(_AUTOFILL_UPLOAD.search(text))
 
 
 def _is_a_trap(el) -> bool:
