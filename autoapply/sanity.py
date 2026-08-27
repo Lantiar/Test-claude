@@ -39,8 +39,13 @@ from .models import FillOutcome
 SYSTEM = (
     "You are checking whether an automated job-application run did something "
     "sensible. You are given the job URL, the page it ended on, that page's "
-    "title, the questions it found, what it entered, and the verdicts it "
-    "reached.\n"
+    "title, the verdicts it reached, and \"form\": every question it found, in "
+    "page order, each beside the answer it gave.\n"
+    "An \"answer\" of null means the field was left blank, which is ordinary "
+    "and is never itself a problem. A question repeating -- three \"Company "
+    "name\", eleven \"Description\" -- is a repeating section with several "
+    "entries in it, not a mistake; judge each entry against the ones next to "
+    "it.\n"
     "Report anything IMPLAUSIBLE. In particular:\n"
     "- The page is not a job application at all. A job search box, a location "
     "filter, a newsletter or lead-capture box, a support or careers chat "
@@ -59,6 +64,48 @@ SYSTEM = (
 )
 
 
+# How many question/answer pairs the reviewer is shown. A TikTok application is
+# 66 fields; sending them all is a few thousand characters and worth it, since
+# what this tier judges is the run as a whole.
+MAX_PAIRS = int(os.getenv("SANITY_MAX_PAIRS", "80"))
+
+
+def _form_digest(outcome: FillOutcome) -> list[dict]:
+    """Each question beside the answer given to it, repeats kept apart.
+
+    Both halves of this were wrong, and both manufactured blockers out of
+    nothing on TikTok's 66-field form:
+
+    The answers went in a dict keyed on label. An application with eleven
+    "Description" fields therefore showed the reviewer one, and it objected --
+    correctly, given what it was shown -- that "repeated generic fields suggest
+    multiple experience entries, but only one set of answers is shown". The
+    run had answered all eleven.
+
+    And the questions and the answers were two independently truncated lists,
+    25 each out of 66 and 49. So answers routinely arrived whose questions had
+    been cut off, and the reviewer reported "entered values into fields not
+    shown in questions_found" -- a description of the payload, not of the run.
+
+    Pairing them makes both impossible: an answer cannot be orphaned from its
+    question, and a repeated label cannot collapse.
+    """
+    answers = {}
+    for m in outcome.mappings:
+        if m.action in ("fill", "generate") and m.value:
+            answers[m.field_id] = str(m.value)[:80]
+
+    pairs = [{"question": (f.label or f.id or "?")[:80],
+              "answer": answers.get(f.id, None)}
+             for f in outcome.fields]
+    if len(pairs) <= MAX_PAIRS:
+        return pairs
+    # Keep the answered ones: an unanswered field says little, and the
+    # judgement this tier exists to make is about what was typed.
+    answered = [p for p in pairs if p["answer"] is not None]
+    return (answered or pairs)[:MAX_PAIRS]
+
+
 def review_run(outcome: FillOutcome, landed_url: str = "",
                page_title: str = "", provider=None) -> tuple[bool, list[str]]:
     """(plausible, problems). Never clears a block, only adds one."""
@@ -69,14 +116,11 @@ def review_run(outcome: FillOutcome, landed_url: str = "",
     if not outcome.fields:
         return True, []
 
-    entered = {(m.label or m.field_id): m.value for m in outcome.mappings
-               if m.action in ("fill", "generate") and m.value}
     payload = {
         "job_url": outcome.job.url,
         "ended_on": landed_url or outcome.job.url,
         "page_title": page_title,
-        "questions_found": [f.label or f.id for f in outcome.fields][:25],
-        "answers_entered": {k: str(v)[:80] for k, v in list(entered.items())[:25]},
+        "form": _form_digest(outcome),
         "verdicts": {
             "saw_captcha": outcome.saw_captcha,
             "needs_sign_in": outcome.needs_auth,

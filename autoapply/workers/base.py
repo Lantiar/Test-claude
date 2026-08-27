@@ -913,11 +913,21 @@ class Worker:
 
         mappings = mapper.map_fields(fields, profile, job.ats,
                                      store=store, provider=provider)
-        outcome = self.fill(job, fields, mappings, screenshot_dir)
+        outcome = self.fill(job, fields, mappings, screenshot_dir, profile)
         self._review_and_repair(job, fields, mappings, outcome, profile,
                                 store, provider)
         if not fields and self.needs_auth():
             outcome.needs_auth = True
+        if self._signed_in:
+            # This form was reached by signing in, so it exists only inside
+            # this browser's session. The agent fallback launches a fresh
+            # profile at the job URL: it gets the sign-in wall, reports "no
+            # form fields discovered; sign-in required", and the pipeline
+            # merges that into the queue row on top of the real findings. On
+            # TikTok that buried a run that had filled 49 of 66 fields under a
+            # verdict describing a page it never reached. The wizard lane has
+            # said so since it was written; the single-page lane never did.
+            outcome.session_bound = True
         return outcome
 
     def _review_and_repair(self, job, fields, mappings, outcome, profile,
@@ -984,7 +994,11 @@ class Worker:
 
     # ---- filling ---------------------------------------------------------
     def fill(self, job: Job, fields: list[Field], mappings: list[Mapping],
-             screenshot_dir: str) -> FillOutcome:
+             screenshot_dir: str, profile: dict | None = None) -> FillOutcome:
+        from .. import mapper
+
+        profile = profile if profile is not None else {}
+
         outcome = FillOutcome(job=job, fields=fields, mappings=mappings)
         by_id = {f.id: f for f in fields}
 
@@ -1009,9 +1023,20 @@ class Worker:
                 current = (el.evaluate("e => e.value || ''") or "").strip() if el else ""
             except Exception:
                 current = ""
-            if current:
-                prefilled[f.id] = current
-                outcome.filled_ids.append(f.id)
+            if not current:
+                continue
+            # ...unless it is one of our own links that an earlier run left in
+            # a field that never asked for one. That is the one stored value
+            # this tool can prove it put there, so it is the one it may take
+            # back. Everything else the account holds stays: on TikTok it is
+            # the resume, parsed by TikTok, and richer than the profile.
+            if mapper.is_a_stray_link(f.label or "", current, profile):
+                _log.get(f"worker.{self.ats}").info(
+                    "%s holds %s, left by an earlier run -- overwriting",
+                    f.label or f.id, _log.brief(current, 60))
+                continue
+            prefilled[f.id] = current
+            outcome.filled_ids.append(f.id)
 
         for m in mappings:
             if m.action not in ("fill", "generate") or not m.value:
@@ -1610,7 +1635,8 @@ class WizardWorker(Worker):
                           _log.brief(m.label or m.field_id, 34), m.action,
                           m.source or "-", _log.brief(m.value, 40))
 
-            step = self.fill(job, fields, mappings, screenshot_dir="")
+            step = self.fill(job, fields, mappings, screenshot_dir="",
+                             profile=profile)
             log.info("step %d: filled %d/%d", step_no, len(step.filled_ids),
                      len([m for m in mappings if m.action in ("fill", "generate")]))
             for err in step.errors:

@@ -794,3 +794,95 @@ def test_a_spare_link_only_answers_a_question_about_a_link():
     # The link-shaped ones still get distinct links, which is what it is for.
     assert got["u1"][0] == "fill" and got["u2"][0] == "fill"
     assert got["u1"][1] != got["u2"][1]
+
+
+def test_only_a_link_this_tool_left_behind_is_taken_back():
+    """The account's memory is only worth deferring to while it is right --
+    but proving it wrong needs evidence, not taste.
+
+    TikTok saves the application profile between runs, so a value an earlier
+    run of this tool got wrong comes back on the next one as an answer
+    "already on the account". Title held https://github.com/nb923/NutriCart
+    for six iterations: the filler left it alone as the account's own, the
+    presubmit reviewer objected to it every run, and nothing could act on the
+    objection because the value had never been ours to retract.
+
+    The counterweight is that most of what TikTok holds is the *resume*, parsed
+    by TikTok, and richer than config/profile.json -- which carries no project
+    or award records at all. A rule that overwrote whatever looked wrong for a
+    label would replace parsed resume entries with generic profile answers.
+    So the test is only ever: is this one of our own profile links, in a field
+    that never asked for a link.
+    """
+    from autoapply.mapper import is_a_stray_link
+
+    profile = {"links": {"github": "https://github.com/nb923",
+                         "portfolio": "https://nideesh.ai"}}
+
+    assert is_a_stray_link("Title", "https://github.com/nb923", profile)
+    # Spelling is not the question -- the same link is the same link.
+    assert is_a_stray_link("Company name", "www.nideesh.ai/", profile)
+
+    # A link the resume parser found. Not ours, not touched.
+    assert not is_a_stray_link("Title", "https://acme.example.com", profile)
+    # A field that is asking for a link is answered by one.
+    assert not is_a_stray_link("Project URL", "https://github.com/nb923", profile)
+    # Prose that cites a repo is prose, and a parsed record stays put.
+    assert not is_a_stray_link(
+        "Description", "Built the parser; see https://github.com/nb923", profile)
+    assert not is_a_stray_link("Title", "Data Analyst Intern", profile)
+    assert not is_a_stray_link("Title", "", profile)
+
+
+def test_a_form_reached_by_signing_in_is_not_retried_from_a_fresh_browser():
+    """The single-page lane must say so too, not just the wizard lane.
+
+    The guard in _needs_agent_fallback has existed since the wizard lane was
+    written, and only WizardWorker.walk ever set the flag. So on TikTok -- a
+    single-page form behind a login -- a run that signed in and filled 49 of 66
+    fields was handed to the agent fallback, which launched a fresh profile at
+    the job URL, met the sign-in wall, and reported "no form fields
+    discovered; sign-in or account creation required". The pipeline merged that
+    into the queue row, and the verdict on the run described a page it had
+    never reached.
+    """
+    import inspect
+    from autoapply.workers.base import Worker
+
+    src = inspect.getsource(Worker.run)
+    assert "session_bound" in src, (
+        "the single-page lane signs in; it has to mark the outcome as living "
+        "inside that session, or the fallback overwrites its findings")
+
+
+def test_the_run_reviewer_sees_every_answer_beside_its_own_question():
+    """The reviewer's two false blockers on TikTok were both payload artefacts.
+
+    Answers keyed on label collapsed eleven "Description" entries into one, so
+    the reviewer reported that a repeating section had only one set of answers
+    filled in. And questions and answers were truncated independently -- 25 of
+    66, 25 of 49 -- so answers arrived with no question attached and it
+    reported values entered into fields that were never found. Both blocked the
+    run. Neither described anything the run had done.
+    """
+    from autoapply.models import FillOutcome, Job, Mapping
+    from autoapply.sanity import _form_digest
+
+    job = Job(url="https://lifeattiktok.com/x", ats="unknown")
+    outcome = FillOutcome(job=job)
+    for i in range(11):
+        outcome.fields.append(
+            Field(id=f"d{i}", selector=f"#d{i}", label="Description"))
+        outcome.mappings.append(
+            Mapping(field_id=f"d{i}", action="fill", value=f"entry {i}",
+                    label="Description"))
+    outcome.fields.append(Field(id="blank", selector="#b", label="Middle name"))
+
+    digest = _form_digest(outcome)
+    assert [p["answer"] for p in digest if p["question"] == "Description"] == [
+        f"entry {i}" for i in range(11)], "a repeating section must stay eleven"
+    assert {p["question"] for p in digest} == {"Description", "Middle name"}
+    # A field left alone is shown as unanswered, not dropped -- and never as
+    # an answer with no question.
+    assert digest[-1] == {"question": "Middle name", "answer": None}
+    assert all(p["question"] for p in digest)

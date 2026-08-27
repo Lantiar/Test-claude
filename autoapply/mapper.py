@@ -505,6 +505,46 @@ _WANTS_A_LINK = re.compile(
     r"\burl\b|\blink\b|website|portfolio|github|linked\s*in|profile\s*(page|link)",
     re.I)
 
+# A value that is nothing but a link. Anchored on purpose: a Description that
+# happens to cite a repo mid-sentence is prose, not a URL.
+_IS_ONLY_A_LINK = re.compile(r"^(https?://|www\.)\S*$", re.I)
+
+
+def _bare_host(url: str) -> str:
+    return re.sub(r"^(https?://)?(www\.)?", "", (url or "").strip().lower()).rstrip("/")
+
+
+def is_a_stray_link(label: str, value: str, profile: dict) -> bool:
+    """Did an earlier run of this tool leave this link here by mistake?
+
+    An ATS that keeps the candidate's profile between applications gives the
+    filler a real problem: a repeating section arrives already populated, and
+    writing into a populated entry is what produced Workday's "You can't add
+    duplicate website URLs". So a prefilled entry is left alone -- and on
+    TikTok that data is the *resume's*, parsed by TikTok itself, richer than
+    anything config/profile.json holds. Leaving it alone is right.
+
+    But _spread_repeated_values used to hand a spare profile link to every
+    repeated field, not only the ones asking for a link, so it put
+    https://github.com/nb923/NutriCart under "Title". TikTok saved it. From
+    then on it came back as an answer "already on the account", was preserved
+    untouched, and drew a presubmit objection on every run that nothing could
+    act on: the value had never been ours to retract.
+
+    The test is therefore evidence, not taste. Not "does this look wrong for
+    the label" -- that would let a generic profile answer overwrite a parsed
+    resume entry it knows nothing about -- but "is this one of *our own*
+    profile links, sitting in a field that is not asking for a link". Only a
+    value this tool can prove it put there is a value this tool may remove.
+    """
+    value = (value or "").strip()
+    if not value or not _IS_ONLY_A_LINK.match(value):
+        return False
+    if _WANTS_A_LINK.search(label or ""):
+        return False
+    ours = {_bare_host(v) for v in (get_value(profile, p) for p in _LINK_PATHS) if v}
+    return _bare_host(value) in ours
+
 
 def _spread_repeated_values(mappings: list[Mapping], repeated: set[str],
                             profile: dict) -> None:
