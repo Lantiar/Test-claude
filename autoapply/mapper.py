@@ -11,6 +11,7 @@ import re
 from typing import Any, Optional
 
 from . import budget as _budget
+from . import log as _log
 from .models import Field, Mapping
 
 
@@ -351,6 +352,20 @@ def map_fields(fields: list[Field], profile: dict, ats: str,
         # last, the teaching store was inert for exactly the cases it exists for.
         if store is not None:
             learned = store.literal_for(signature(ats, f.label))
+            # ...but only where it is an answer this form will take. A lesson
+            # is keyed on (ats, label), which is right for a question every
+            # tenant asks the same way -- Country Phone Code is "United States
+            # of America (+1)" on all of them. It is wrong for a question whose
+            # choices each employer writes itself: "Job Board", learned from
+            # Mastercard, was replayed on Auto-Owners, whose list does not
+            # contain it, and the field was left on "Select One" while the run
+            # reported it filled with confidence 1.0. Where the lesson is not
+            # on offer, say so and let the tiers below answer instead.
+            if learned and f.options and not resolve_option(learned, f.options):
+                _log.get("mapper").info(
+                    "%s: the learned answer %r is not among this form's "
+                    "options -- deriving it again", f.label, learned)
+                learned = ""
             if learned:
                 mappings.append(Mapping(field_id=f.id, action="fill", value=learned,
                                         confidence=1.0, source="learned",

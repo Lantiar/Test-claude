@@ -1621,7 +1621,20 @@ class Worker:
         from ..mapper import resolve_option
 
         if not f.options:
-            want = str(value).strip().lower() in ("yes", "true", "1", "on")
+            text = str(value).strip().lower()
+            # A tick box holds yes or no and nothing else. Auto-Owners asks
+            # "I have a preferred name" as a lone checkbox, the preferred-name
+            # rule matched the label and handed it "Nideesh", and this read
+            # that as not-yes, unticked the box, and returned the name as the
+            # value written. The run counted the field filled and verification
+            # then found it empty. Refusing a value that is neither answers the
+            # question honestly: nothing was written.
+            if text not in ("yes", "true", "1", "on", "no", "false", "0", "off"):
+                _log.get(f"write.{self.ats}").debug(
+                    "choice %s: %r is not a yes or a no for a tick box",
+                    _log.brief(f.label or f.id, 40), value)
+                return None
+            want = text in ("yes", "true", "1", "on")
             # Look before touching it. TikTok serves "I have read and agreed to
             # the Privacy Policy" already ticked, and clicking a ticked box
             # unticks it: the run then reported "could not write 'Yes'" and

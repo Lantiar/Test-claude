@@ -733,3 +733,38 @@ def test_a_site_holding_us_off_says_so():
         pg.goto((FIXTURES / "apply.html").as_uri())
         assert GenericWorker(pg).rate_limited() == ""
         browser.close()
+
+
+def test_a_tick_box_takes_a_yes_or_a_no_and_nothing_else():
+    """Auto-Owners asks "I have a preferred name" as a lone checkbox.
+
+    The preferred-name rule matched the label and handed it "Nideesh". The
+    write read that as not-yes, unticked the box, and returned the name as the
+    value written -- so the run counted the field filled, and verification
+    found it empty. Refusing a value that is neither a yes nor a no answers
+    the question honestly: nothing was written, and the gate can see it.
+    """
+    from autoapply.models import Field
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.set_content('<label><input id="pn" type="checkbox"> '
+                       'I have a preferred name</label>')
+        worker = GenericWorker(pg)
+        box = Field(id="pn", selector="#pn", label="I have a preferred name",
+                    kind="checkbox")
+
+        assert worker._write(box, "Nideesh") is None, "a name is not an answer"
+        assert not pg.eval_on_selector("#pn", "e => e.checked")
+
+        assert worker._write(box, "Yes") == "Yes"
+        assert pg.eval_on_selector("#pn", "e => e.checked")
+        assert worker._write(box, "No") == "No"
+        assert not pg.eval_on_selector("#pn", "e => e.checked")
+        browser.close()
