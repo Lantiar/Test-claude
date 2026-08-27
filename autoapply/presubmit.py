@@ -63,15 +63,29 @@ REVIEW_SYSTEM = (
 
 
 def _payload(outcome: FillOutcome, profile: dict) -> str:
-    answers = [
-        {"question": m.label or m.field_id,
-         "answer": m.value,
-         "source": m.source,
-         "required": next((f.required for f in outcome.fields
-                           if f.id == m.field_id), False)}
-        for m in outcome.mappings
-        if m.action in ("fill", "generate") and m.value
-    ]
+    by_id = {f.id: f for f in outcome.fields}
+
+    def entry(m):
+        field = by_id.get(m.field_id)
+        row = {"question": m.label or m.field_id,
+               "answer": m.value,
+               "source": m.source,
+               "required": bool(field.required) if field else False}
+        # What the field actually offered. Told that the closest offered option
+        # is a correct answer, the reviewer still blocked "University Job
+        # Board" against a profile saying "Company website" -- because it was
+        # never shown that the menu holds no such entry. A rule it cannot check
+        # against evidence is a rule it cannot apply.
+        if field is not None and field.options:
+            row["options_offered"] = field.options[:25]
+        return row
+
+    answers = [entry(m) for m in outcome.mappings
+               if m.action in ("fill", "generate") and m.value
+               # Values already on the candidate's saved profile at this
+               # employer, which the filler deliberately left untouched. We are
+               # reviewing the answers we produced.
+               and m.source != "account"]
     unanswered = [
         (f.label or f.id) for f in outcome.fields
         if f.required and f.id not in outcome.filled_ids
