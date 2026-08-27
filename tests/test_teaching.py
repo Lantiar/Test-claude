@@ -1025,3 +1025,79 @@ def test_a_finding_about_a_question_that_is_not_on_the_form_is_dropped():
     # them, and a blocker is too important to lose to a formatting slip.
     assert _cited(["ended on a job search page"], pairs) == [
         "ended on a job search page"]
+
+
+def test_the_vendors_own_marketing_site_is_not_a_hop_to_the_ats():
+    """Two reasons the Notion run left a form it had already found.
+
+    GenericWorker.open() hunts for a company careers page's link through to the
+    real ATS -- AMD's careers.amd.com wrapper points at campus-amd.icims.com --
+    and it ran even when the base worker had already stopped on the
+    application. So on Notion it went looking anyway.
+
+    And what it found was Ashby's own footer link. The offsite test compared
+    hostnames exactly, so on jobs.ashbyhq.com a link to www.ashbyhq.com read as
+    a hop to a different site; the domain is a real ATS domain, so detect()
+    agreed it was one. It navigated away from a page holding 23 discovered
+    fields, and the run reported the posting closed.
+    """
+    from autoapply.workers.generic import GenericWorker
+
+    class Anchor:
+        def __init__(self, href, text):
+            self._href, self._text = href, text
+
+        def get_attribute(self, _):
+            return self._href
+
+        def inner_text(self):
+            return self._text
+
+    class Page:
+        def __init__(self, url, anchors):
+            self.url, self._anchors = url, anchors
+
+        def query_selector_all(self, _):
+            return self._anchors
+
+    ashby = GenericWorker(Page(
+        "https://jobs.ashbyhq.com/notion/3fba1c39/application",
+        [Anchor("https://www.ashbyhq.com/", "Powered by Ashby"),
+         Anchor("https://www.ashbyhq.com/apply-with-ashby", "Apply with Ashby")]))
+    assert ashby._ats_apply_link() is None, "the vendor's own site is not the form"
+
+    # The case the hop exists for still works.
+    amd = GenericWorker(Page(
+        "https://careers.amd.com/careers-home/jobs/91176",
+        [Anchor("https://campus-amd.icims.com/jobs/91176/login", "Apply")]))
+    assert amd._ats_apply_link() == "https://campus-amd.icims.com/jobs/91176/login"
+
+    # And once the base worker has stopped on the application, open() does not
+    # go looking at all -- not even for a hop that would otherwise qualify.
+    from autoapply.models import Job
+    from autoapply.workers.base import Worker
+
+    went = []
+
+    class Page2(Page):
+        def goto(self, url, **kw):
+            went.append(url)
+
+        def wait_for_timeout(self, _):
+            pass
+
+    class Stopped(GenericWorker):
+        def open(self, job):
+            # Stand in for the base worker finding the form and returning.
+            self._landing = (self.page.url, [object()])
+            Worker.open = lambda *a, **k: None
+            try:
+                GenericWorker.open(self, job)
+            finally:
+                del Worker.open
+
+    worker = Stopped(Page2(
+        "https://careers.amd.com/careers-home/jobs/91176",
+        [Anchor("https://campus-amd.icims.com/jobs/91176/login", "Apply")]))
+    worker.open(Job(url=worker.page.url, ats="generic"))
+    assert went == [], f"navigated away from the application to {went}"

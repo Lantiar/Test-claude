@@ -30,6 +30,13 @@ class GenericWorker(Worker):
 
     def open(self, job):
         super().open(job)
+        # Unless the base already found the form. It returns early when the
+        # page it was handed is the application, and this ran anyway: on
+        # Notion's Ashby form it went looking for an ATS to hop to, found
+        # Ashby's own footer link, and left a page holding 23 discovered
+        # fields for www.ashbyhq.com. The run reported the posting closed.
+        if self._landing is not None:
+            return
         # A company careers page is often a shell around a real ATS: AMD's
         # careers.amd.com posting is an AMD-branded wrapper whose Apply button
         # goes to campus-amd.icims.com. Discovery on the wrapper finds nothing
@@ -48,8 +55,8 @@ class GenericWorker(Worker):
         from urllib.parse import urljoin, urlparse
 
         from ..router import detect
+        from .base import _offsite
 
-        here = urlparse(self.page.url).hostname or ""
         ats_any = None          # a known ATS host, but not an Apply control
         offsite_apply = None    # an Apply control on a host we do not recognise
 
@@ -59,7 +66,13 @@ class GenericWorker(Worker):
                 continue
             url = urljoin(self.page.url, href)
             host = urlparse(url).hostname or ""
-            if not host or host == here:
+            # Exact-hostname comparison called this offsite, so on
+            # jobs.ashbyhq.com a footer link to www.ashbyhq.com read as a hop
+            # to a different ATS -- and since the domain is a real ATS domain,
+            # detect() agreed. The vendor's own marketing site is never the
+            # form. _offsite already compares registrable domains, which is
+            # the question being asked.
+            if not host or not _offsite(self.page.url, url):
                 continue
 
             text = (a.inner_text() or "").strip().lower()
