@@ -71,6 +71,14 @@ SIGNIN_SWITCH_SELECTORS = (
 # button -- a submit-button list matching it starts registering an account on an
 # employer's system under the candidate's name. Signing in is recoverable;
 # that is not, and it is not a run's decision to make.
+# Boxes a form genuinely will not proceed without: the terms, the privacy
+# notice, the age attestation. Deliberately narrow -- anything about updates,
+# offers, partners, newsletters or sharing a profile is somebody's marketing
+# and is not ours to accept on the candidate's behalf.
+_REQUIRED_CONSENT = re.compile(
+    r"\b(terms|conditions|privacy|policy|agree|acknowledg|consent to the|"
+    r"read and understand|certify|i am at least|18 years)\b", re.I)
+
 FORBIDDEN_CLICK_TEXT = ("create account", "create an account", "sign up",
                         "signup", "register", "join now", "new user")
 
@@ -382,14 +390,32 @@ def create_account(worker, creds: dict, wait_for_code=None,
         _set(v_frame, verify, password)
     say("filled the registration fields")
 
-    # The terms checkbox, where there is one -- the form will not submit without it.
+    # The terms checkbox, where there is one -- the form will not submit
+    # without it. ONLY that one: this ticked every visible unchecked box on
+    # the page, which on a real create-account form means the marketing
+    # opt-in and "share my profile with partner employers" as well, agreed to
+    # under the candidate's name with no record of what was agreed to. A
+    # required box the form will not submit without is a different thing from
+    # a box someone would like you to tick.
     for fr in worker.frames():
         try:
-            for box in fr.query_selector_all("input[type=checkbox]"):
-                if box.is_visible() and not box.is_checked():
-                    box.check()
+            boxes = fr.query_selector_all("input[type=checkbox]")
         except Exception:
             continue
+        for box in boxes:
+            try:
+                if not box.is_visible() or box.is_checked():
+                    continue
+                label = (fr.evaluate(LABEL_JS, box) or "").strip().lower()
+                required = (box.get_attribute("required") is not None
+                            or box.get_attribute("aria-required") == "true")
+                if required or _REQUIRED_CONSENT.search(label):
+                    box.check()
+                    say(f"ticked the required consent: {label[:60] or '(unlabelled)'}")
+                elif label:
+                    say(f"left unticked: {label[:60]}")
+            except Exception:
+                continue
 
     btn, _ = _first_in(worker.frames(), CREATE_SUBMIT_SELECTORS,
                        allow_account_creation=True)

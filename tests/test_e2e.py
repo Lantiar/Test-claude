@@ -6,12 +6,30 @@ import os
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from autoapply.pipeline import apply_to          # noqa: E402
 from autoapply.store import Store                # noqa: E402
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+
+@pytest.fixture(autouse=True)
+def _submit_mechanics_only(monkeypatch):
+    """These tests are about the submit path, not the presubmit reviewer.
+
+    That reviewer declines when no model is configured -- deliberately, since
+    passing by default costs a wrong application sent under someone's name --
+    and the fixture tests run with LLM_PROVIDER=rules. They passed until now
+    only because the reviewer was never reachable from the pipeline at all;
+    with that fixed it correctly blocks every one of them. Switch it off here
+    explicitly rather than weaken the rule it enforces: it has its own tests
+    in test_presubmit.py.
+    """
+    monkeypatch.setenv("PRESUBMIT_REVIEW", "0")
+    monkeypatch.setenv("SANITY_REVIEW", "0")
+
 def _profile() -> dict:
     """Example profile, with the resume pointed at the test fixture."""
     p = json.load(open("config/profile.example.json"))

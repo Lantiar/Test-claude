@@ -150,7 +150,16 @@ def _run_dom(job: Job, profile: dict, store, provider, shots: str, mode: str,
         if not worker.verifies_internally:
             outcome = verify(page, outcome)
 
-        return _decide(job, outcome, mode, store, dry_run, worker.submit)
+        # profile= and provider= are not optional extras here: they are the
+        # guards gate.blockers() uses to decide whether the sanity reviewer and
+        # the presubmit reviewer run at all. Omitted, both tiers were skipped
+        # on every normal DOM application -- silently, with no log and no key
+        # in verify_detail -- including the tier written specifically to catch
+        # a check that stops running and looks like a check that found
+        # nothing. The unit tests call blockers() directly, so they passed the
+        # whole time.
+        return _decide(job, outcome, mode, store, dry_run, worker.submit,
+                       profile=profile, provider=provider)
 
 
 def _run_agent(job: Job, profile: dict, store, mode: str, dry_run: bool,
@@ -168,7 +177,7 @@ def _run_agent(job: Job, profile: dict, store, mode: str, dry_run: bool,
     # The agent does not get to grade itself; the judge reads the page fresh.
     outcome = judge(outcome)
     result = _decide(job, outcome, mode, store, dry_run, worker.submit,
-                     profile=profile)
+                     profile=profile, provider=get_provider())
     if note:
         result.detail = f"{note}; {result.detail}"
     return result

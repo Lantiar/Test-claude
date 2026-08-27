@@ -210,5 +210,10 @@ def verify(page, outcome: FillOutcome) -> FillOutcome:
         detail["_no_fields"] = {"note": "discovery found no fields to verify"}
 
     outcome.verified = ok
-    outcome.verify_detail = detail
+    # update, not replace. Assigning a fresh dict here wiped _landed_url and
+    # _page_title, which fill() had just recorded -- so the sanity reviewer was
+    # handed the URL we asked for instead of the one we ended up on, and BNY's
+    # posting being swapped for the careers homepage was invisible to the one
+    # tier that could have named it.
+    outcome.verify_detail.update(detail)
     return outcome

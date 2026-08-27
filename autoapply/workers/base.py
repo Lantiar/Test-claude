@@ -1226,13 +1226,43 @@ class Worker:
         return self.confirmed(before)
 
     def confirmed(self, url_before: str) -> tuple[bool, str]:
+        """Did the application actually land?
+
+        This searched the whole page body, so a footer reading "Thank you for
+        visiting", a testimonial, or a chat widget's greeting confirmed a
+        submission that never happened -- and a false confirmation is the one
+        mistake here with no way back: the job is recorded applied, and
+        already_applied() skips it forever after.
+
+        So: only text that appeared *because* we submitted. The form is gone
+        or the URL changed, and the confirming words are near the top of what
+        replaced it rather than anywhere on the page.
+        """
         body = ""
         try:
             body = (self.page.inner_text("body") or "").lower()
         except Exception:
             pass
+
+        moved = self.page.url != url_before
+        # The submit control, not "a form element": form_selector falls back to
+        # body on Workday ("form, div[data-automation-id='applyFlowPage'], body")
+        # so it matches on every page ever rendered and could never be gone.
+        # The button we just clicked is specific to the form we just sent, and
+        # a page that accepted a submission does not still offer it.
+        submit_gone = True
+        try:
+            submit_gone = query_first(self.page, (self.submit_selector,)) is None
+        except Exception:
+            pass
+        if not (moved or submit_gone):
+            return False, ("the submit button is still on screen and the URL "
+                           "did not change; not treating this as submitted")
+
+        # Near the top of what replaced the form, not buried in a footer.
+        head = body[:1200]
         for pattern in self.confirm_patterns:
-            if re.search(pattern, body):
+            if re.search(pattern, head):
                 return True, f"confirmed: matched /{pattern}/"
         if self.page.url != url_before and "confirmation" in self.page.url.lower():
             return True, f"confirmed: redirected to {self.page.url}"
