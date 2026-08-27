@@ -704,6 +704,60 @@ class Worker:
             return False
         return not self.looks_like_an_entry_step()
 
+    def pass_entry_step(self, job) -> bool:
+        """Walk through the application's own first page. True if it moved.
+
+        Recognising the entry step was only half the job. AMD's iCIMS tenant
+        serves /jobs/91176/login with an email box, a privacy acceptance and a
+        Next button -- no password anywhere -- and needs_auth() correctly says
+        that is not a wall. Nothing then walked through it: discovery found
+        Email plus a consent tick, looks_like_an_application() correctly said
+        two such fields are not an application, and the run stopped on the
+        first page of a form it could have filled, reporting "no form fields
+        discovered" about an application it never reached.
+
+        The consent here is required and specific -- it is what the form will
+        not proceed without -- and is ticked by the same narrow test the
+        sign-in path uses, which never touches a marketing opt-in.
+        """
+        from ..login import (EMAIL_SELECTORS, SUBMIT_SELECTORS,
+                             _accept_required_consent, _first_in, _set)
+
+        log = _log.get(f"worker.{self.ats}")
+        creds = None
+        try:
+            from ..login import credentials_for
+            creds = credentials_for(job.url)
+        except Exception:
+            pass
+        email = (creds or {}).get("email") or os.getenv("AUTOAPPLY_EMAIL", "")
+        if not email:
+            log.info("entry step needs an email address and none is configured")
+            return False
+
+        el, frame = _first_in(list(self.frames()), EMAIL_SELECTORS)
+        if el is None:
+            return False
+        _set(frame, el, email)
+        _accept_required_consent(self, lambda msg: log.info("  %s", msg))
+
+        before = self.page.url
+        button, _ = _first_in(list(self.frames()), SUBMIT_SELECTORS)
+        if button is None:
+            log.info("entry step has no submit control")
+            return False
+        try:
+            button.click()
+        except Exception as exc:
+            log.info("entry step would not submit: %s", exc)
+            return False
+        self.settle_step(timeout_ms=15000, reloads=0)
+
+        moved = self.page.url != before or bool(self.discover())
+        log.info("entry step -> %s (%s)", "through" if moved else "stuck",
+                 _log.brief(self.page.url, 60))
+        return moved
+
     # Signing in is attempted at most once per run. A second try after a
     # refusal is how an account gets locked, and the credentials would be the
     # same ones that just failed.
@@ -999,6 +1053,20 @@ class Worker:
                 if not self.discover():
                     self.open(job)
         fields = self.take_landing_fields() or self.discover()
+
+        # An ATS that puts its own front door before the form. Walk through it
+        # rather than reporting the door as an empty application: AMD's run
+        # said "no form fields discovered" about a form it had never reached,
+        # because two fields called Email and "you must indicate that you have
+        # read the privacy notice" are correctly not an application, and
+        # nothing went any further.
+        from ..gate import looks_like_an_application as _is_app
+
+        if (fields and not _is_app(FillOutcome(job=job, fields=fields))
+                and self.looks_like_an_entry_step()
+                and self.pass_entry_step(job)):
+            self._signed_in = True
+            fields = self.discover()
 
         # Do not type into a page we were redirected to. A closed Ashby posting
         # redirects to Ashby's marketing homepage, where discovery found the

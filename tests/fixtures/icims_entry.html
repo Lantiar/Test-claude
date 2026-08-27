@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><title>Apply</title></head>
+<body>
+  <h1>Please enter your email to begin the application process</h1>
+  <form onsubmit="document.body.innerHTML=document.getElementById('real').innerHTML; return false;">
+    <label for="em">Email</label><input id="em" name="email" type="email">
+    <label for="pn">You must indicate that you have read the privacy notice and
+      consent to the processing of your personal data</label>
+    <input id="pn" type="checkbox" required>
+    <button type="submit">Next</button>
+  </form>
+  <template id="real">
+    <form>
+      <label for="fn">First Name</label><input id="fn">
+      <label for="ln">Last Name</label><input id="ln">
+      <label for="wa">Are you authorized to work in the US?</label><input id="wa">
+      <label for="rs">Resume</label><input id="rs" type="file">
+      <button type="submit">Submit</button>
+    </form>
+  </template>
+</body></html>

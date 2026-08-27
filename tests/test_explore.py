@@ -458,3 +458,40 @@ def test_a_search_box_is_not_mistaken_for_the_application_form():
         assert "first name" in labels and "cover letter" in labels, labels
         assert "search jobs" not in labels, labels
         browser.close()
+
+
+def test_the_application_s_own_front_door_is_walked_through():
+    """AMD's iCIMS tenant puts an email box in front of the form.
+
+    /jobs/91176/login asks for an email and a privacy acceptance, with no
+    password anywhere, and needs_auth() correctly says that is not a wall.
+    Recognising it was only half the job: nothing walked through it. Discovery
+    found Email plus a consent tick, looks_like_an_application() correctly said
+    two such fields are not an application, and the run stopped on the first
+    page of a form it could have filled -- reporting "no form fields
+    discovered" about an application it never reached.
+    """
+    import os
+    from autoapply.models import Job
+    from autoapply.workers.generic import GenericWorker
+    from playwright.sync_api import sync_playwright
+
+    launch = {"headless": True}
+    if exe := find_chromium():
+        launch["executable_path"] = exe
+    os.environ["AUTOAPPLY_EMAIL"] = "someone@example.com"
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch)
+        pg = browser.new_page()
+        pg.goto((FIXTURES / "icims_entry.html").as_uri())
+        worker = GenericWorker(pg)
+
+        assert worker.looks_like_an_entry_step()
+        assert not worker.needs_auth(), "no password: this is a door, not a wall"
+        assert worker.pass_entry_step(Job(url=pg.url, ats="generic"))
+
+        labels = {(f.label or "").lower() for f in worker.discover()}
+        assert any("first name" in x for x in labels), labels
+        # The required consent was ticked -- the form does not proceed without
+        # it -- and that is the only kind of box this may touch.
+        browser.close()
