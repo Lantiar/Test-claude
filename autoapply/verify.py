@@ -61,7 +61,14 @@ READ_COMBO_JS = r"""
   }
   const box = el.closest('[class*="control"], [class*="select"]') || el.parentElement;
   const text = box ? (box.innerText || '') : '';
-  const first = text.split('\n').map(s => s.trim()).filter(Boolean)[0];
+  // Screen-reader state text is not a value. An open Workday multiselect
+  // renders "Expanded" into its container, so the readback returned Expanded
+  // as the field's answer -- verification compared it against what we meant to
+  // write, called the mismatch a failure, and the real problem (the write
+  // never landed) was reported as the wrong thing entirely.
+  const STATE = /^(expanded|collapsed|selected|required|optional|open|closed|clear|remove|search)$/i;
+  const first = text.split('\n').map(s => s.trim())
+                    .filter(Boolean).filter(s => !STATE.test(s))[0];
   return first || el.value || '';
 }
 """

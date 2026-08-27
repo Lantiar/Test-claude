@@ -206,6 +206,26 @@ def resolve_option(value: str, options: list[str]) -> Optional[str]:
             low = opt.strip().lower()
             if low.startswith(want) or re.match(rf"^{want}\b", low):
                 return opt
+    # A candidate can be more specific than the menu allows. A double major
+    # reads "Computer Science and Data Science" in the profile and no Workday
+    # field-of-study list contains that string, so the write failed, the audit
+    # said "doesn't match the listed options exactly", and one field held up
+    # the whole application. Try the parts: naming one half of a double major
+    # is true, where leaving the field empty stops the form.
+    parts = [p.strip() for p in re.split(r"\s+and\s+|\s*[/,;&]\s*", want)
+             if len(p.strip()) > 2]
+    if len(parts) > 1:
+        for part in parts:
+            for opt in options:
+                if opt.strip().lower() == part:
+                    return opt
+        for part in parts:
+            for opt in options:
+                low = opt.strip().lower()
+                if low and (re.search(rf"\b{re.escape(low)}\b", part)
+                            or re.search(rf"\b{re.escape(part)}\b", low)):
+                    return opt
+
     if any(h in want for h in DECLINE_HINTS):              # any decline-shaped option
         for opt in options:
             if any(h in opt.lower() for h in DECLINE_HINTS):
