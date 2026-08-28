@@ -20,11 +20,26 @@ const STAGES = ["interested", "applied", "oa", "interview", "final", "offer",
                 "accepted", "rejected"];
 
 function creds() {
-  // Vercel's Upstash integration injects one pair or the other depending on
-  // how the store was added. Accepting both is cheaper than telling someone
-  // their correctly-connected database is missing.
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  // Found by shape rather than by exact name. Vercel's Upstash integration
+  // names these differently depending on how the store was added -- KV_REST_API_*
+  // or UPSTASH_REDIS_REST_* -- and the connect dialog offers a custom prefix on
+  // top of that, so STORAGE_KV_REST_API_URL is as likely as any. Matching a
+  // fixed pair would have meant a correctly connected database reported as
+  // missing, which is a confusing way to say "rename your variable".
+  const env = process.env;
+  const find = (suffix) => {
+    const exact = Object.keys(env).find((k) => k === suffix && env[k]);
+    if (exact) return env[exact];
+    const key = Object.keys(env).find((k) => k.endsWith(suffix) && env[k]);
+    return key ? env[key] : undefined;
+  };
+  const url = find("KV_REST_API_URL") || find("UPSTASH_REDIS_REST_URL")
+           || find("REDIS_REST_URL");
+  const token = find("KV_REST_API_TOKEN") || find("UPSTASH_REDIS_REST_TOKEN")
+             || find("REDIS_REST_TOKEN");
+  // A read-only token would let reads succeed and every write fail with a
+  // permission error from the store, so prefer the read-write one when both
+  // are present.
   return url && token ? { url, token } : null;
 }
 
