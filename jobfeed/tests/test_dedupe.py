@@ -177,3 +177,28 @@ def test_a_text_match_never_writes_an_identity(con):
     assert row["url_key"] is None, "a text match wrote a URL identity"
     # The softer fields are still worth having from a text match.
     assert row["season"] == "Summer 2027"
+
+
+def test_seeding_twice_does_not_duplicate_a_job_with_no_identity(con, tmp_path):
+    """The careers-index listings have neither key, and were re-added every seed.
+
+    Three syncs made three copies of each of the 39 of them, in a database that
+    otherwise looked exactly like one that was working.
+    """
+    from jobfeed import publish as _publish
+    from jobfeed import seed as _seed
+
+    dedupe.record(con, listing(
+        source_record_id="a", url="https://zipline.com/open-roles",
+        title="Hardware Test Intern", company="Zipline"))
+    out = tmp_path / "site"
+    _publish.publish(con, str(out))
+
+    fresh = _db.connect(str(tmp_path / "f.sqlite3"))
+    try:
+        assert _seed.seed(fresh, str(out / "jobs.json"))["restored"] == 1
+        assert _seed.seed(fresh, str(out / "jobs.json"))["restored"] == 0
+        assert _seed.seed(fresh, str(out / "jobs.json"))["restored"] == 0
+        assert fresh.execute("SELECT COUNT(*) FROM job").fetchone()[0] == 1
+    finally:
+        fresh.close()

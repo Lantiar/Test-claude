@@ -70,6 +70,19 @@ def seed(con, path_or_url: str) -> dict:
                                    (url_key,)).fetchone():
             skipped += 1
             continue
+        # Neither key: the careers-index listings, whose URL names a page
+        # rather than a posting and so is not an identity. There are 39 of
+        # them, and without this they were re-inserted on every single seed --
+        # three syncs produced three copies of each, and a database that grew
+        # by 39 rows an hour while looking exactly like one that was working.
+        # The pair that identifies them is the same one the text tier uses.
+        if not ats_key and not url_key and con.execute(
+                "SELECT 1 FROM job WHERE title=? AND "
+                "COALESCE(canonical_url,'')=COALESCE(?,'') AND "
+                "ats_key IS NULL AND url_key IS NULL",
+                (j.get("title") or "", j.get("url"))).fetchone():
+            skipped += 1
+            continue
 
         cid = dedupe.company_id(con, j["company"]) if j.get("company") else None
         cur = con.execute(
