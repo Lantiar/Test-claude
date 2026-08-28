@@ -115,17 +115,21 @@ every slot for the first hour after the workflow was added -- and a scheduler
 that silently does not fire is the worst kind in front of a source that
 expires.
 
-So an external scheduler calls `workflow_dispatch` on a real cron:
+So cron-job.org calls `workflow_dispatch` on a real schedule:
 
 ```
-GH_PAT=... QSTASH_TOKEN=... bash scripts/setup-trigger.sh
+GH_PAT=... CRONJOB_KEY=... bash scripts/setup-trigger.sh
 ```
 
-`GH_PAT` is a fine-grained token for this repo with **Actions: read and
-write**; `QSTASH_TOKEN` comes from the Upstash console. Neither goes near the
-repository -- QStash holds the token and forwards it as a header. The script
-dispatches once first, so a token without the right scope fails immediately
-rather than at 3am.
+`GH_PAT` is a fine-grained token for this repo with exactly two permissions --
+**Actions: read and write**, and the Metadata read GitHub adds itself.
+`CRONJOB_KEY` comes from cron-job.org under Settings -> API. Neither goes near
+the repository: cron-job.org holds the token and sends it as a header.
+
+The script dispatches once before creating the schedule, so a token missing
+the right scope fails while someone is watching rather than at 3am. GitHub
+answers a permissions problem with 404 rather than 403, so that check is worth
+more than it looks.
 
 Both triggers can fire. The workflow refuses to poll again within
 `JOBFEED_MIN_MINUTES` (default 20) of the last publish, so a duplicate costs
