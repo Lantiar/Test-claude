@@ -118,3 +118,40 @@ def serve(db_path: str | None, port: int = 8765, host: str = "127.0.0.1") -> Non
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nstopped")
+
+
+def render(con, out: str = "dashboard.html") -> dict:
+    """The same viewer as one self-contained file, data baked in.
+
+    The server is the better tool when it can be reached; it cannot always be
+    reached. A session running in a container serves 127.0.0.1 to itself and
+    nobody else, so the useful artefact there is a file: the same page with the
+    job list inlined and no fetch, openable from anywhere and mailable to a
+    phone.
+
+    Read-only about stages by design rather than by omission. The database is
+    where a stage lives, and a copy of the page writing to its own browser
+    storage would be a second, quieter answer to the same question -- fine
+    until the two disagree and neither knows it. The page shows the stages the
+    database holds; changing one goes through the database.
+    """
+    jobs = rows(con)
+    with open(os.path.join(HERE, "viewer.html")) as fh:
+        html = fh.read()
+    payload = json.dumps({
+        "jobs": jobs, "stages": list(_apply.STAGES), "counts": _apply.counts(con),
+        "generated_at": time.time(),
+    })
+    html = html.replace(
+        'async function load(){\n  const r = await fetch("/api/jobs");\n  const d = await r.json();',
+        'const BAKED = ' + payload + ';\nasync function load(){\n  const d = BAKED;')
+    # Without a server there is nothing to save to, so the control that implies
+    # otherwise is disabled rather than left to fail silently on click.
+    html = html.replace('<select class="stage', '<select disabled class="stage')
+    html = html.replace(
+        "Stage is stored locally and is never published.",
+        "Stage is read from the database and is never published. This is a "
+        "snapshot: to change a stage, run the viewer or ask for it to be set.")
+    with open(out, "w") as fh:
+        fh.write(html)
+    return {"jobs": len(jobs), "bytes": len(html), "path": out}

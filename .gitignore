@@ -25,3 +25,5 @@ session-*
 # jobfeed: the published JSON is regenerated every run
 site/
 data/jobs.jsonl
+
+dashboard.html

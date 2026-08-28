@@ -110,6 +110,42 @@ def cmd_serve(args, con) -> int:
     return 0
 
 
+def cmd_render(args, con) -> int:
+    from .server import render
+
+    d = render(con, args.out)
+    print(f"wrote {d['path']} -- {d['jobs']} jobs, {d['bytes']//1024}KB")
+    return 0
+
+
+def cmd_stage(args, con) -> int:
+    """Set a stage by naming the job rather than by knowing its key."""
+    from . import apply as _apply
+
+    like = f"%{args.match.lower()}%"
+    rows = con.execute(
+        "SELECT j.*, c.name AS company FROM job j LEFT JOIN company c "
+        "ON c.id=j.company_id WHERE j.status='open' AND "
+        "(LOWER(j.title) LIKE ? OR LOWER(c.name) LIKE ?) LIMIT 12",
+        (like, like)).fetchall()
+    if not rows:
+        print(f"nothing matches {args.match!r}", file=sys.stderr)
+        return 1
+    if len(rows) > 1:
+        # Refusing rather than picking: setting a stage on the wrong job is
+        # quiet and wrong, and the list is short enough to choose from.
+        print(f"{args.match!r} matches {len(rows)} jobs -- be more specific:",
+              file=sys.stderr)
+        for r in rows:
+            print(f"   {(r['company'] or '?')[:24]:26} {r['title'][:52]}",
+                  file=sys.stderr)
+        return 1
+    r = rows[0]
+    saved = _apply.set_stage(con, _apply.job_key(r), args.to, args.note)
+    print(f"{r['company']} — {r['title']}: {saved['stage']}")
+    return 0
+
+
 def cmd_sync(args, con) -> int:
     """Pull the hourly published feed into the local database.
 
@@ -238,6 +274,15 @@ def main(argv=None) -> int:
     p = sub.add_parser("serve"); p.set_defaults(fn=cmd_serve)
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--host", default="127.0.0.1")
+
+    p = sub.add_parser("render"); p.set_defaults(fn=cmd_render)
+    p.add_argument("--out", default="dashboard.html")
+
+    p = sub.add_parser("stage"); p.set_defaults(fn=cmd_stage)
+    p.add_argument("match", help="company or title substring")
+    p.add_argument("to", help="one of: " + ", ".join(__import__(
+        "jobfeed.apply", fromlist=["x"]).STAGES))
+    p.add_argument("--note", default=None)
 
     p = sub.add_parser("sync"); p.set_defaults(fn=cmd_sync)
     p.add_argument("--from", dest="url", default=FEED_URL)
