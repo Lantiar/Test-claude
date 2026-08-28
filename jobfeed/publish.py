@@ -124,6 +124,12 @@ def publish(con, out: str = "site", recent_days: int = 14) -> dict:
 
     shutil.copyfile(os.path.join(os.path.dirname(__file__), "web.html"),
                     os.path.join(out, "index.html"))
+    # The write endpoint, for the deployment that has one. Harmless where
+    # nothing runs it: GitHub Pages serves the file as text, the page's probe
+    # fails, and it falls back to keeping stages in the browser.
+    api_src = os.path.join(os.path.dirname(__file__), "api")
+    if os.path.isdir(api_src):
+        shutil.copytree(api_src, os.path.join(out, "api"), dirs_exist_ok=True)
 
     # For Vercel, if this directory is deployed there instead of served by
     # Pages. Ignored everywhere else. The page must not be cached longer than

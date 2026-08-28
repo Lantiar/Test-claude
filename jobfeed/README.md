@@ -13,10 +13,30 @@ works unchanged wherever these files are served from:
   framework to "Other". Every hourly push redeploys it. `vercel.json` is in
   the output and stops the JSON being cached.
 
-Application stages on the hosted page live in that browser's localStorage.
-They are never sent anywhere -- the data beside them is public and where you
-applied is not -- which also means they do not follow you to another device.
-The local viewer (`jobfeed serve`) is the one backed by the database.
+## Stages, centrally
+
+The Vercel deployment carries `api/stages`, which keeps every application
+stage in one place so a laptop and a phone show the same list. Two settings
+make it work, both in the Vercel project:
+
+1. **Storage → Upstash Redis**, connected to the project. It injects
+   `KV_REST_API_URL` and `KV_REST_API_TOKEN`; the function reads either those
+   or the `UPSTASH_REDIS_REST_*` pair.
+2. **Environment variable `JOBFEED_PASSPHRASE`.** Anyone may read the stages;
+   only someone with the passphrase may change one. Writing is refused
+   outright while this is unset -- on a public site, a missing variable must
+   not quietly mean "anyone".
+
+The page asks for the passphrase the first time you change a stage and keeps
+it in that browser afterwards.
+
+Stages are held as a Redis hash rather than one JSON blob, so two devices
+setting two different jobs at the same moment touch two different fields and
+neither edit can silently lose the other.
+
+Served anywhere without that API -- GitHub Pages, or the files opened
+locally -- the page finds no endpoint and keeps stages in the browser
+instead. The footer says which of the two is in force.
 
 ## Endpoints
 

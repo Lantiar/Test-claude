@@ -92,8 +92,8 @@ footer{padding:0 20px 40px;color:var(--dim);font-size:12px}
   <div class="empty" id="empty" hidden>Nothing matches those filters.</div>
 </div>
 <footer>A <b>~</b> date is when this feed first saw the job, not when the employer
-posted it. Stage is kept in this browser only — it is never sent anywhere and does not
-follow you to another device. The job data refreshes hourly.</footer>
+posted it. <span id="mode">Checking where stages are saved…</span>
+The job data refreshes hourly.</footer>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -102,6 +102,13 @@ let JOBS = [], STAGES = [], filter = {q:"", season:"", source:"", stage:""};
 const fmt = ts => ts ? new Date(ts*1000).toISOString().slice(0,10) : "—";
 
 const STAGE_KEY = "jobfeed.stages.v1";
+const PASS_KEY = "jobfeed.pass.v1";
+// Central when there is an API beside this page, local when there is not.
+// The same file is served from GitHub Pages, which has no write path at all,
+// so absence is an expected state rather than a failure -- and the footer says
+// which mode is in force, because a tracker that silently keeps your stages
+// somewhere other than you think is worse than one that cannot keep them.
+let CENTRAL = false;
 // Stages live in this browser and nowhere else. The data beside them is
 // public -- anyone with the URL reads the same jobs.json -- and where someone
 // has applied is not. It never goes over the wire, which also means it does
@@ -111,13 +118,53 @@ function localStages(){
   try { return JSON.parse(localStorage.getItem(STAGE_KEY) || "{}"); }
   catch(e){ return {}; }        // private window, cleared storage, blocked
 }
-function saveStage(key, stage){
+function saveLocal(key, stage){
   try {
     const all = localStages();
     if(stage) all[key] = stage; else delete all[key];
     localStorage.setItem(STAGE_KEY, JSON.stringify(all));
     return true;
   } catch(e){ return false; }
+}
+
+function passphrase(){
+  try { return localStorage.getItem(PASS_KEY) || ""; } catch(e){ return ""; }
+}
+function rememberPassphrase(p){
+  try { localStorage.setItem(PASS_KEY, p); } catch(e){}
+}
+
+// Returns "" on success, or a sentence explaining what stopped it.
+async function saveStage(key, stage){
+  if(!CENTRAL){
+    return saveLocal(key, stage) ? ""
+      : "This browser will not let the page store anything, so the stage "
+      + "cannot be kept. Private windows and blocked site data do this.";
+  }
+  let pass = passphrase();
+  if(!pass){
+    pass = window.prompt("Passphrase for saving stages:") || "";
+    if(!pass) return "No passphrase given, so nothing was saved.";
+    rememberPassphrase(pass);
+  }
+  let r;
+  try {
+    r = await fetch("./api/stages", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({key, stage, passphrase: pass})});
+  } catch(e){
+    return "Could not reach the store, so the stage was not saved.";
+  }
+  if(r.status === 401){
+    try { localStorage.removeItem(PASS_KEY); } catch(e){}
+    return "That passphrase was not right. Try the change again.";
+  }
+  if(!r.ok){
+    const d = await r.json().catch(() => ({}));
+    return d.detail || d.error || `The store refused that (${r.status}).`;
+  }
+  saveLocal(key, stage);      // a local echo, so a reload is instant offline
+  return "";
 }
 
 async function load(){
@@ -133,7 +180,17 @@ async function load(){
       'It publishes to jobs.json beside this page.';
     return;
   }
-  const mine = localStages();
+  // The central store if this deployment has one, otherwise this browser's.
+  let mine = localStages();
+  try {
+    const r = await fetch("./api/stages", {cache:"no-store"});
+    if(r.ok){
+      const d = await r.json();
+      CENTRAL = true;
+      mine = d.stages || {};
+    }
+  } catch(e){ /* no API here: GitHub Pages serves the page and no functions */ }
+  setMode();
   JOBS = jobs.map(j => ({...j,
     key: j.ats_key || j.url_key || j.url,
     posted_at: j.posted_at_epoch,
@@ -144,6 +201,19 @@ async function load(){
   showAge(meta);
   buildControls({counts: countStages()});
   render();
+}
+
+function job_previous(key){
+  const j = JOBS.find(x => x.key === key);
+  return j ? (j.stage || "") : "";
+}
+
+function setMode(){
+  const el = document.querySelector("#mode");
+  if(!el) return;
+  el.textContent = CENTRAL
+    ? "Stages are saved centrally — the same on every device."
+    : "Stages are kept in this browser only; this copy has no central store.";
 }
 
 function countStages(){
@@ -232,9 +302,12 @@ document.addEventListener("change", async e => {
   const key = sel.dataset.key, stage = sel.value;
   sel.className = "stage s-" + (stage || "interested");
   sel.dataset.set = stage ? 1 : 0;
-  if(!saveStage(key, stage)){
-    alert("This browser will not let the page store anything, so the stage "
-        + "cannot be kept. Private windows and blocked site data do this.");
+  const problem = await saveStage(key, stage);
+  if(problem){
+    sel.value = job_previous(key);          // put the control back
+    sel.className = "stage s-" + (sel.value || "interested");
+    sel.dataset.set = sel.value ? 1 : 0;
+    alert(problem);
     return;
   }
   const job = JOBS.find(j=>j.key===key); if(job) job.stage = stage;
