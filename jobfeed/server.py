@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import apply as _apply
 from . import db as _db
+from . import tiers as _tiers
 
 HERE = os.path.dirname(__file__)
 
@@ -41,6 +42,7 @@ def rows(con) -> list[dict]:
             "locations": json.loads(r["locations"] or "[]"),
             "season": r["season"] or "",
             "ats": r["ats"] or "",
+            "tier": _tiers.tier(r["company"] or ""),
             "posted_at": r["posted_at"],
             "posted_is_estimate": bool(r["posted_at_is_estimate"]),
             "sources": sorted((r["sources"] or "").split(",")) if r["sources"] else [],

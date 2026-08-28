@@ -22,6 +22,8 @@ import json
 import os
 import time
 
+from . import tiers as _tiers
+
 
 def _iso(ts) -> str | None:
     if not ts:
@@ -46,6 +48,10 @@ def _job(row) -> dict:
         "category": row["category"] or None,
         "sponsorship": row["sponsorship"] or None,
         "ats": row["ats"],
+        # Derived, not stored: the tier lists change by editing a file, and a
+        # job's badge should follow the list rather than whatever the list said
+        # on the day it was first seen.
+        "tier": _tiers.tier(row["company"] or ""),
         # The ATS's own id for the posting, and the stable key across runs.
         # Absent from the first version of this file, which mattered more than
         # it looked: the snapshot is what a fresh runner restores from, so

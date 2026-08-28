@@ -195,3 +195,27 @@ than the sending account.
 
 Locally, `jobfeed notify --dry-run` prints what would be sent without sending
 it or moving the watermark.
+
+## Tiers
+
+Companies on a curated S/A/B list get a badge on the dashboard and a mark in
+the notifications, and tiered postings sort to the top of a notification --
+it is read for about two seconds, and the interesting one must not be twelfth.
+
+The lists live in `jobfeed/tiers.py`. A tier is derived at publish time rather
+than stored, so editing that file re-badges the whole corpus on the next run
+instead of only what arrives afterwards.
+
+Matching is on the normalised company name -- the same function the
+deduplicator uses -- and it is exact, with aliases written out. Substring
+matching would be shorter and wrong: "Meta" is inside Metabolon and Metagenomi,
+"Block" inside Blockdaemon, "Apple" inside Applied Materials. Fuzzy matching is
+worse still; the corpus contains a company called Intropic, which is 82%
+similar to Anthropic and has nothing to do with it. A badge on the wrong
+company is worse than no badge, because the point is to trust it at a glance.
+
+Names carrying a bracketed alias are tried both ways, since either half can be
+the listed one -- Susquehanna appears as both "Susquehanna International Group"
+and "Susquehanna International Group (SIG)".
+
+486 of 2,244 live postings currently carry a badge: 145 S, 67 A, 274 B.

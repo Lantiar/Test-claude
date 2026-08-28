@@ -22,6 +22,7 @@ import urllib.request
 from email.message import EmailMessage
 
 from . import db as _db
+from . import tiers as _tiers
 
 STATE_KEY = "notified_through"
 
@@ -47,7 +48,8 @@ def new_jobs(con, since: float | None = None, limit: int = 60) -> list[dict]:
         "WHERE j.status='open' AND j.first_seen_at > ? "
         "ORDER BY j.first_seen_at DESC, j.posted_at DESC LIMIT ?",
         (since, limit)).fetchall()
-    return [{
+    out = [{
+        "tier": _tiers.tier(r["company"] or ""),
         "company": r["company"] or "?",
         "title": r["title"] or "(untitled)",
         "url": r["canonical_url"] or "",
@@ -56,6 +58,11 @@ def new_jobs(con, since: float | None = None, limit: int = 60) -> list[dict]:
         "first_seen_at": r["first_seen_at"],
         "sources": r["id"],
     } for r in rows]
+    # Tiered companies first. A notification is read for about two seconds and
+    # the interesting one must not be twelfth -- within a tier the original
+    # newest-first order is kept, so this reorders rather than re-ranks.
+    out.sort(key=lambda j: _tiers.ORDER.get(j["tier"], 9))
+    return out
 
 
 def render(jobs: list[dict]) -> tuple[str, str]:
@@ -64,7 +71,8 @@ def render(jobs: list[dict]) -> tuple[str, str]:
     for j in jobs:
         where = ", ".join(j["locations"])[:60]
         tail = " — ".join(x for x in (where, j["season"]) if x)
-        lines.append(f"{j['company']} — {j['title']}"
+        mark = f"[{j['tier']}] " if j.get("tier") else ""
+        lines.append(f"{mark}{j['company']} — {j['title']}"
                      + (f"\n  {tail}" if tail else "")
                      + f"\n  {j['url']}\n")
         rows.append(
@@ -85,6 +93,13 @@ def render(jobs: list[dict]) -> tuple[str, str]:
         'From jobfeed · <a href="https://lantiar.github.io/Test-claude/" '
         'style="color:#1f5f4f">the full list</a></p></div>')
     return text, html
+
+
+# The same three colours the pages use, inline because mail clients drop
+# stylesheets.
+_TIER_FG = {"S": "#8a6212", "A": "#1f5f4f", "B": "#5b6470"}
+_TIER_BG = {"S": "#faf3e2", "A": "#eaf3ef", "B": "#f1f3f5"}
+_TIER_LINE = {"S": "#e3d4ac", "A": "#bcd8ce", "B": "#d7dbe0"}
 
 
 def _esc(s: str) -> str:
@@ -112,7 +127,8 @@ def send_ntfy(subject: str, jobs: list[dict]) -> None:
     lines = []
     for j in jobs[:20]:
         where = ", ".join(j["locations"])[:44]
-        lines.append(f"[{j['company']} — {j['title']}]({j['url']})"
+        mark = f"**{j['tier']}** · " if j.get("tier") else ""
+        lines.append(f"{mark}[{j['company']} — {j['title']}]({j['url']})"
                      + (f"  \n_{where}_" if where else ""))
     if len(jobs) > 20:
         lines.append(f"\n_and {len(jobs) - 20} more_")
@@ -193,8 +209,12 @@ def run(con, dry_run: bool = False, limit: int = 60) -> dict:
     if not jobs:
         return {"new": 0, "sent": False}
     text, html = render(jobs)
+    # The title says whether anything tiered is in there, because that is the
+    # part worth interrupting someone for.
+    top = next((j for j in jobs if j.get("tier")), None)
     subject = (f"{len(jobs)} new internship{'s' if len(jobs) != 1 else ''}"
-               f" — {jobs[0]['company']}"
+               + (f" — {top['tier']}-tier: {top['company']}" if top
+                  else f" — {jobs[0]['company']}")
                + (f" and {len(jobs) - 1} more" if len(jobs) > 1 else ""))
     if dry_run:
         return {"new": len(jobs), "sent": False, "subject": subject,

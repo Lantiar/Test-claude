@@ -13,18 +13,27 @@
   --s-applied:#3b6ea5; --s-oa:#7a5ea8; --s-interview:#b06d1f;
   --s-final:#a2531d; --s-offer:#1f7a4d; --s-accepted:#146b3a; --s-rejected:#8b3a3a;
   --s-interested:#6d675f;
+  --t-s:#8a6212; --t-s-line:#e3d4ac; --t-s-bg:#faf3e2;
+  --t-a:#1f5f4f; --t-a-line:#bcd8ce; --t-a-bg:#eaf3ef;
+  --t-b:#5b6470; --t-b-line:#d7dbe0; --t-b-bg:#f1f3f5;
 }
 @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
   --bg:#14140f; --panel:#1c1c17; --line:#2f2e28; --ink:#eeece6; --dim:#9a948a;
   --accent:#6fbfa4; --accent-soft:#1d2f29;
   --s-applied:#7aa7d8; --s-oa:#b39ae0; --s-interview:#e0a95e; --s-final:#e08f52;
   --s-offer:#5fc48c; --s-accepted:#4fbd7d; --s-rejected:#e08585; --s-interested:#9a948a;
+  --t-s:#d8b263; --t-s-line:#4a3c1c; --t-s-bg:#2a2312;
+  --t-a:#6fbfa4; --t-a-line:#274038; --t-a-bg:#152520;
+  --t-b:#98a2ae; --t-b-line:#333a42; --t-b-bg:#1c2026;
 }}
 :root[data-theme="dark"]{
   --bg:#14140f; --panel:#1c1c17; --line:#2f2e28; --ink:#eeece6; --dim:#9a948a;
   --accent:#6fbfa4; --accent-soft:#1d2f29;
   --s-applied:#7aa7d8; --s-oa:#b39ae0; --s-interview:#e0a95e; --s-final:#e08f52;
   --s-offer:#5fc48c; --s-accepted:#4fbd7d; --s-rejected:#e08585; --s-interested:#9a948a;
+  --t-s:#d8b263; --t-s-line:#4a3c1c; --t-s-bg:#2a2312;
+  --t-a:#6fbfa4; --t-a-line:#274038; --t-a-bg:#152520;
+  --t-b:#98a2ae; --t-b-line:#333a42; --t-b-bg:#1c2026;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
@@ -65,6 +74,14 @@ select.stage[data-set="1"]{border-color:currentColor;font-weight:600}
 .s-oa{color:var(--s-oa)} .s-interview{color:var(--s-interview)}
 .s-final{color:var(--s-final)} .s-offer{color:var(--s-offer)}
 .s-accepted{color:var(--s-accepted)} .s-rejected{color:var(--s-rejected)}
+
+.tier{display:inline-flex;align-items:center;justify-content:center;
+  width:17px;height:17px;border-radius:4px;font-size:10.5px;font-weight:700;
+  letter-spacing:0;margin-right:6px;vertical-align:1px;
+  border:1px solid;font-variant-numeric:normal}
+.tier-S{color:var(--t-s);border-color:var(--t-s-line);background:var(--t-s-bg)}
+.tier-A{color:var(--t-a);border-color:var(--t-a-line);background:var(--t-a-bg)}
+.tier-B{color:var(--t-b);border-color:var(--t-b-line);background:var(--t-b-bg)}
 .empty{padding:50px 10px;text-align:center;color:var(--dim)}
 footer{padding:0 20px 40px;color:var(--dim);font-size:12px}
 </style>
@@ -78,6 +95,7 @@ footer{padding:0 20px 40px;color:var(--dim);font-size:12px}
     <input type="search" id="q" placeholder="company, title, location…" autocomplete="off">
     <select id="season"><option value="">any season</option></select>
     <select id="source"><option value="">any source</option></select>
+    <select id="tier"><option value="">any tier</option><option value="S">S-tier</option><option value="A">A-tier</option><option value="B">B-tier</option><option value="SAB">S, A or B</option></select>
     <select id="sort">
       <option value="posted">newest posted</option>
       <option value="added">newest to the feed</option>
@@ -102,7 +120,7 @@ The job data refreshes hourly.</footer>
 
 <script>
 const $ = s => document.querySelector(s);
-let JOBS = [], STAGES = [], filter = {q:"", season:"", source:"", stage:""};
+let JOBS = [], STAGES = [], filter = {q:"", season:"", source:"", stage:"", tier:""};
 let sortBy = "posted";
 
 // The published file already arrives newest-posted first, with first_seen and
@@ -283,6 +301,8 @@ function buildControls(d){
 function matches(j){
   if(filter.season && j.season !== filter.season) return false;
   if(filter.source && !j.sources.includes(filter.source)) return false;
+  if(filter.tier === "SAB"){ if(!j.tier) return false; }
+  else if(filter.tier && j.tier !== filter.tier) return false;
   if(filter.stage && j.stage !== filter.stage) return false;
   if(filter.q){
     const hay = (j.company+" "+j.title+" "+j.locations.join(" ")).toLowerCase();
@@ -305,7 +325,7 @@ function render(){
                          : "reached the feed " + fmt(j.first_seen_epoch)}">${
         sortBy==="added" ? fmt(j.first_seen_epoch)
                          : (j.posted_is_estimate ? "~" : "") + fmt(j.posted_at)}</td>
-      <td class="co">${esc(j.company)}</td>
+      <td class="co">${j.tier ? `<span class="tier tier-${j.tier}" title="${j.tier}-tier">${j.tier}</span>` : ""}${esc(j.company)}</td>
       <td>
         <a class="title" href="${esc(j.url||"#")}" target="_blank" rel="noopener">${esc(j.title)}</a>
         <div class="sub">${j.season ? `<span class="tag">${esc(j.season)}</span>` : ""}
@@ -352,6 +372,7 @@ document.addEventListener("change", async e => {
 $("#q").oninput = e => { filter.q = e.target.value; render(); };
 $("#season").onchange = e => { filter.season = e.target.value; render(); };
 $("#source").onchange = e => { filter.source = e.target.value; render(); };
+$("#tier").onchange = e => { filter.tier = e.target.value; render(); };
 $("#sort").onchange = e => { sortBy = e.target.value; render(); };
 load();
 </script>
