@@ -78,13 +78,18 @@ footer{padding:0 20px 40px;color:var(--dim);font-size:12px}
     <input type="search" id="q" placeholder="company, title, location…" autocomplete="off">
     <select id="season"><option value="">any season</option></select>
     <select id="source"><option value="">any source</option></select>
+    <select id="sort">
+      <option value="posted">newest posted</option>
+      <option value="added">newest to the feed</option>
+      <option value="company">by company</option>
+    </select>
     <div class="pills" id="pills"></div>
   </div>
 </header>
 <div class="wrap">
   <table>
     <thead><tr>
-      <th style="width:96px">Posted</th><th style="width:170px">Company</th>
+      <th style="width:96px" id="datehead">Posted</th><th style="width:170px">Company</th>
       <th>Role</th><th style="width:180px">Where</th><th style="width:130px">Stage</th>
     </tr></thead>
     <tbody id="body"></tbody>
@@ -98,6 +103,26 @@ The job data refreshes hourly.</footer>
 <script>
 const $ = s => document.querySelector(s);
 let JOBS = [], STAGES = [], filter = {q:"", season:"", source:"", stage:""};
+let sortBy = "posted";
+
+// The published file already arrives newest-posted first, with first_seen and
+// then name breaking the ties, so "posted" needs no work. The others re-sort a
+// copy and keep the same tiebreaks, so a change of view never leaves two runs
+// disagreeing about the order of two jobs.
+function sorted(list){
+  const byName = (a,b) => (a.company||"").localeCompare(b.company||"")
+                       || (a.title||"").localeCompare(b.title||"");
+  // To the minute, for the same reason the published order is: below that,
+  // first_seen records which row an ingest wrote first, which says nothing
+  // about the job.
+  if(sortBy === "added")
+    return [...list].sort((a,b) =>
+      Math.floor((b.first_seen_epoch||0)/60) - Math.floor((a.first_seen_epoch||0)/60)
+      || byName(a,b));
+  if(sortBy === "company")
+    return [...list].sort((a,b) => byName(a,b) || (b.posted_at||0) - (a.posted_at||0));
+  return list;
+}
 
 const fmt = ts => ts ? new Date(ts*1000).toISOString().slice(0,10) : "—";
 
@@ -267,14 +292,19 @@ function matches(j){
 }
 
 function render(){
-  const shown = JOBS.filter(matches);
+  const shown = sorted(JOBS.filter(matches));
   $("#count").textContent = `${shown.length.toLocaleString()} of ${JOBS.length.toLocaleString()}`;
   const tracked = JOBS.filter(j=>j.stage).length;
   $("#meta").innerHTML = `${tracked} tracked · ${JOBS.length.toLocaleString()} open postings`;
   $("#empty").hidden = shown.length > 0;
+  $("#datehead").textContent = sortBy === "added" ? "Added" : "Posted";
   $("#body").innerHTML = shown.slice(0, 600).map(j => `
     <tr>
-      <td class="date ${j.posted_is_estimate ? "est" : ""}">${j.posted_is_estimate ? "~" : ""}${fmt(j.posted_at)}</td>
+      <td class="date ${sortBy!=="added" && j.posted_is_estimate ? "est" : ""}" title="${
+        sortBy==="added" ? "posted " + (j.posted_is_estimate?"~":"") + fmt(j.posted_at)
+                         : "reached the feed " + fmt(j.first_seen_epoch)}">${
+        sortBy==="added" ? fmt(j.first_seen_epoch)
+                         : (j.posted_is_estimate ? "~" : "") + fmt(j.posted_at)}</td>
       <td class="co">${esc(j.company)}</td>
       <td>
         <a class="title" href="${esc(j.url||"#")}" target="_blank" rel="noopener">${esc(j.title)}</a>
@@ -322,6 +352,7 @@ document.addEventListener("change", async e => {
 $("#q").oninput = e => { filter.q = e.target.value; render(); };
 $("#season").onchange = e => { filter.season = e.target.value; render(); };
 $("#source").onchange = e => { filter.source = e.target.value; render(); };
+$("#sort").onchange = e => { sortBy = e.target.value; render(); };
 load();
 </script>
 </body>

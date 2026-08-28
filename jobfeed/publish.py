@@ -68,7 +68,25 @@ SELECT = """
            WHERE s.job_id = j.id) AS sources
   FROM job j LEFT JOIN company c ON c.id = j.company_id
   WHERE j.status = 'open'
-  ORDER BY j.posted_at DESC
+  -- Every tiebreak here earns its place. 752 of 2,244 jobs share a posted_at
+  -- with another job, because Simplify often knows the date and not the time
+  -- and hands over midnight: 77 listings sit on 2026-08-24 00:00:00 alone.
+  -- Left at one column the order inside those clusters was whatever SQLite
+  -- returned, which looks alphabetical, is not, and could differ between two
+  -- runs over identical data.
+  --
+  -- first_seen_at breaks them with something real: it says which hourly run
+  -- picked the job up, so a midnight cluster comes out newest-run first.
+  --
+  -- Rounded to the minute, and that is the point rather than a detail. Stored
+  -- to the microsecond it discriminates *within* a run -- which of 2,200 rows
+  -- an ingest happened to write first, which is not information about the job
+  -- at all. Sorting on it looked exactly as arbitrary as having no tiebreak,
+  -- because it was: the whole 77-job cluster is one run, and the noise was
+  -- deciding the order. A minute is the resolution at which this field means
+  -- "which run", so below that, name decides.
+  ORDER BY j.posted_at DESC, CAST(j.first_seen_at / 60 AS INTEGER) DESC,
+           c.name, j.title
 """
 
 
