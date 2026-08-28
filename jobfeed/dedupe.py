@@ -150,7 +150,8 @@ def record(con, listing: RawListing, now: float | None = None) -> tuple[int, str
              canonical_url(listing.url) if listing.url else None,
              (ats_key or ":").split(":")[0] or None, ats_key, url_key,
              listing.season, listing.sponsorship, listing.category,
-             posted or now, 0 if posted else 1, now, now,
+             posted or now, 0 if (posted and listing.posted_at_is_real) else 1,
+             now, now,
              "open" if listing.active else "closed"))
         job_id, how = cur.lastrowid, "new"
     else:
@@ -190,9 +191,18 @@ def _enrich(con, job_id: int, listing: RawListing, ats_key, url_key, now: float)
         sets.append("ats=?")
         args.append(ats_key.split(":")[0])
 
-    if listing.posted_at and (row["posted_at_is_estimate"]
-                              or listing.posted_at < (row["posted_at"] or 9e18)):
+    # A real date always beats an estimate. Between two real dates the earlier
+    # wins. An estimate never overwrites a real one, however early it looks --
+    # a story shared before Simplify noticed the job is still not the employer
+    # telling us when they posted it.
+    held_is_estimate = bool(row["posted_at_is_estimate"])
+    if listing.posted_at and listing.posted_at_is_real and (
+            held_is_estimate or listing.posted_at < (row["posted_at"] or 9e18)):
         sets += ["posted_at=?", "posted_at_is_estimate=0"]
+        args.append(listing.posted_at)
+    elif (listing.posted_at and not listing.posted_at_is_real and held_is_estimate
+            and listing.posted_at < (row["posted_at"] or 9e18)):
+        sets.append("posted_at=?")
         args.append(listing.posted_at)
 
     if not listing.active and row["status"] == "open":

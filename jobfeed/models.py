@@ -27,6 +27,13 @@ class RawListing:
     # this is nullable rather than defaulted to the time of the poll.
     posted_at: float | None = None
     updated_at: float | None = None
+    # Whether posted_at is the employer's own posting date or merely the best
+    # upper bound this source can offer. A story's timestamp is when the
+    # account shared the link, which is at or after the employer posted it and
+    # is often days later -- treating that as the release date would quietly
+    # turn "posted this week" into "someone mentioned it this week". Simplify
+    # publishes the real thing and sets this True.
+    posted_at_is_real: bool = True
     # False for a listing the source says is closed, so a run can retire it
     # rather than quietly leaving it open forever.
     active: bool = True

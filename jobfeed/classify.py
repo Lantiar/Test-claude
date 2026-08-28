@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from .identity import identify
+from .identity import identify, unwrap
 
 # Hosts that only ever serve job postings.
 _JOB_HOSTS = re.compile(
@@ -22,6 +22,7 @@ _JOB_HOSTS = re.compile(
     r"myworkdaysite\.com|icims\.com|smartrecruiters\.com|workable\.com|"
     r"rippling\.com|jobvite\.com|breezy\.hr|applytojob\.com|teamtailor\.com|"
     r"eightfold\.ai|oraclecloud\.com|taleo\.net|simplify\.jobs|"
+    r"jobs\.apple\.com|careers\.[\w-]+\.com|"
     r"jobs\.bytedance\.com|lifeattiktok\.com|amazon\.jobs|metacareers\.com)$", re.I)
 
 _JOB_PATH = re.compile(r"/(jobs?|careers?|opening|position|vacanc|apply|"
@@ -32,7 +33,7 @@ _NOT_JOB = re.compile(
     r"(^|\.)(github\.com|youtube\.com|youtu\.be|medium\.com|substack\.com|"
     r"docs\.google\.com|drive\.google\.com|notion\.so|notion\.site|x\.com|"
     r"twitter\.com|discord\.gg|t\.me|reddit\.com|leetcode\.com|"
-    r"instagram\.com)$", re.I)
+    r"instagram\.com|luma\.com|lu\.ma|eventbrite\.com)$", re.I)
 
 _SHORTENER = re.compile(
     r"(^|\.)(bit\.ly|lnkd\.in|tinyurl\.com|t\.co|rb\.gy|shorturl\.at|"
@@ -53,6 +54,11 @@ def kind(url: str) -> str:
         return "unknown"
     if identify(url):
         return "job"                    # an ATS identity is not ambiguous
+    # Unwrapped first, for the same reason the index-page guard reads the
+    # canonical form: judged on the link as given, every story link is
+    # l.instagram.com, which matches the not-a-job list and filed Amazon,
+    # Apple and QTS postings as articles.
+    url = unwrap(url)
     try:
         p = urlparse(url)
     except ValueError:

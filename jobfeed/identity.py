@@ -37,7 +37,41 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 # "tower-research.com/open-positions", which is six jobs collapsed into two.
 _JUNK_PARAMS = re.compile(
     r"^(utm_\w+|gh_src|src|source|ref|referer|referrer|fbclid|gclid|"
-    r"mc_[ce]id|trk|trackingId|lever-source|campaign\w*|_ga)$", re.I)
+    r"mc_[ce]id|trk|trackingId|lever-source|campaign\w*|_ga|igshid|e)$", re.I)
+
+# Instagram wraps every outbound story link in its own redirector, with the
+# real destination sitting url-encoded in ?u= and a signature blob in ?e=.
+# Unwrapped here rather than in the Instagram adapter because the wrapper says
+# nothing about the posting and everything downstream -- the ATS patterns, the
+# canonical form, the index-page guard -- would otherwise be reading
+# l.instagram.com and finding a link shortener where there is a Greenhouse job.
+_WRAPPERS = {
+    "l.instagram.com": "u",
+    "l.facebook.com": "u",
+    "lm.facebook.com": "u",
+    "away.vk.com": "to",
+    "out.reddit.com": "url",
+    "www.google.com": "url",          # /url?q= and /url?url=
+}
+
+
+def unwrap(url: str, hops: int = 3) -> str:
+    """The real destination behind a redirector, without a network call."""
+    for _ in range(hops):
+        try:
+            p = urlparse(url.strip())
+        except ValueError:
+            return url
+        host = (p.netloc or "").lower()
+        param = _WRAPPERS.get(host) or _WRAPPERS.get(host[4:] if host.startswith("www.") else "")
+        if not param:
+            return url
+        q = parse_qs(p.query)
+        target = (q.get(param) or q.get("q") or q.get("url") or [""])[0]
+        if not target.startswith("http"):
+            return url
+        url = target
+    return url
 
 
 # ATSs whose posting id is unique across the whole product, not just within
@@ -53,7 +87,7 @@ _JUNK_PARAMS = re.compile(
 # number is unique inside a tenant and nowhere else: R-12345 at RBC and R-12345
 # at Disney are two unrelated jobs, and merging them would silently lose one.
 _GLOBAL_ID = {"greenhouse", "lever", "ashby", "smartrecruiters",
-              "tiktok", "bytedance", "tesla"}
+              "tiktok", "bytedance", "tesla", "apple", "amazon"}
 
 
 @dataclass(frozen=True)
@@ -75,6 +109,10 @@ _PATTERNS: tuple[tuple[str, re.Pattern, re.Pattern], ...] = (
     # boards.greenhouse.io/acme/jobs/123  and job-boards.greenhouse.io/...
     ("greenhouse", re.compile(r"(^|\.)(job-boards|boards)\.greenhouse\.io$", re.I),
      re.compile(r"^/([^/]+)/jobs/(\d+)", re.I)),
+    # amazon.jobs/en/jobs/10517567/software-development-engineer-intern...
+    # and amazon.jobs/en/jobs/10502743 with no slug at all: same job number.
+    ("amazon", re.compile(r"(^|\.)amazon\.jobs$", re.I),
+     re.compile(r"^/[^/]+/(jobs)/(\d{5,})", re.I)),
     # lifeattiktok.com/search/7572665884037826869
     ("tiktok", re.compile(r"(^|\.)lifeattiktok\.com$", re.I),
      re.compile(r"^/(search)/(\d{6,})", re.I)),
@@ -85,6 +123,12 @@ _PATTERNS: tuple[tuple[str, re.Pattern, re.Pattern], ...] = (
     # other way shows a duplicate, which is the failure worth having.
     ("bytedance", re.compile(r"(^|\.)jobs\.bytedance\.com$", re.I),
      re.compile(r"^/[^/]+/(position)/(\d{6,})", re.I)),
+    # jobs.apple.com/en-us/details/200673612-0836/applied-data-solutions...
+    # The number before the dash is the posting; the suffix varies between
+    # links to one job -- Simplify carries 200673612 and the same job shared
+    # in a story carries 200673612-0836.
+    ("apple", re.compile(r"(^|\.)jobs\.apple\.com$", re.I),
+     re.compile(r"^/[^/]+/(details)/(\d{6,})", re.I)),
     # tesla.com/careers/search/job/269819
     ("tesla", re.compile(r"(^|\.)tesla\.com$", re.I),
      re.compile(r"^/careers/[^/]+/(job)/(\d+)", re.I)),
@@ -129,6 +173,7 @@ _GH_EMBED_HOST = re.compile(r"(^|\.)(job-boards|boards)\.greenhouse\.io$", re.I)
 
 def canonical_url(url: str) -> str:
     """The same link with everything that does not name the posting removed."""
+    url = unwrap(url)
     try:
         p = urlparse(url.strip())
     except ValueError:
@@ -151,6 +196,7 @@ def canonical_url(url: str) -> str:
 
 def identify(url: str) -> Identity | None:
     """The ATS's identity for this posting, when the URL carries one."""
+    url = unwrap(url)
     try:
         p = urlparse(url.strip())
     except ValueError:

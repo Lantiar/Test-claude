@@ -12,7 +12,7 @@ import json
 import sys
 
 from . import db as _db
-from .ingest import poll, retire_missing
+from .ingest import enrich_unresolved, poll, retire_missing
 from .sources import load_all, names
 
 
@@ -62,6 +62,12 @@ def cmd_list(args, con) -> int:
     return 0
 
 
+def cmd_enrich(args, con) -> int:
+    d = enrich_unresolved(con, args.limit)
+    print(f"looked up {d['looked']}, named {d['named']}, could not read {d['failed']}")
+    return 0
+
+
 def cmd_stats(args, con) -> int:
     q = lambda s, *a: con.execute(s, a).fetchone()[0]
     total = q("SELECT COUNT(*) FROM job")
@@ -100,6 +106,9 @@ def main(argv=None) -> int:
     p.add_argument("--since", type=float, default=0, help="days")
     p.add_argument("--limit", type=int, default=40)
     p.add_argument("--company", default="")
+
+    p = sub.add_parser("enrich"); p.set_defaults(fn=cmd_enrich)
+    p.add_argument("--limit", type=int, default=40)
 
     p = sub.add_parser("stats"); p.set_defaults(fn=cmd_stats)
 
