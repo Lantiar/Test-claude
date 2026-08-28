@@ -81,6 +81,7 @@ jobs:
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
           NOTIFY_TO: ${{ vars.NOTIFY_TO }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           JOBFEED_DB: ${{ runner.temp }}/jobfeed.sqlite3
         run: |
           set -e

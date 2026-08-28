@@ -122,10 +122,18 @@ def cmd_notify(args, con) -> int:
         print("nothing new to send")
         return 0
     if args.dry_run:
-        print(f"would send: {d['subject']}\n"); print(d["text"][:2000])
-    else:
-        print(f"sent: {d['subject']} ({d['new']} posting(s))")
-    return 0
+        print(f"would send to {', '.join(d['channels']) or '(nothing configured)'}: "
+              f"{d['subject']}\n")
+        print(d["text"][:2000])
+        return 0
+    print(f"{d['new']} posting(s): {d['subject']}")
+    if d["channels"]:
+        print(f"  delivered by: {', '.join(d['channels'])}")
+    # Named, not swallowed. A channel that quietly stopped working looks
+    # exactly like a quiet week, and this is the whole point of the notifier.
+    for problem in d["failed"]:
+        print(f"  FAILED {problem}", file=sys.stderr)
+    return 0 if d["sent"] else 1
 
 
 def cmd_render(args, con) -> int:

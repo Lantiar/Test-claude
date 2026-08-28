@@ -18,6 +18,7 @@ import json
 import os
 import smtplib
 import ssl
+import urllib.request
 from email.message import EmailMessage
 
 from . import db as _db
@@ -91,6 +92,55 @@ def _esc(s: str) -> str:
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
+def send_ntfy(subject: str, jobs: list[dict]) -> None:
+    """Push to a phone through ntfy.sh.
+
+    One notification for the batch rather than one per job. Twenty new postings
+    at 3am should be one buzz with a list in it, not twenty -- a notifier that
+    is annoying gets muted, and a muted notifier is the same as none.
+
+    The topic is the only secret ntfy has: anyone who knows the name can read
+    the notifications and publish to it. So it is a random string rather than
+    something guessable like "jobfeed", and it belongs in the environment
+    beside the other credentials.
+    """
+    topic = os.getenv("NTFY_TOPIC", "")
+    if not topic:
+        raise RuntimeError("NTFY_TOPIC is not set")
+    server = os.getenv("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
+
+    lines = []
+    for j in jobs[:20]:
+        where = ", ".join(j["locations"])[:44]
+        lines.append(f"[{j['company']} — {j['title']}]({j['url']})"
+                     + (f"  \n_{where}_" if where else ""))
+    if len(jobs) > 20:
+        lines.append(f"\n_and {len(jobs) - 20} more_")
+    body = "\n\n".join(lines)
+
+    req = urllib.request.Request(
+        f"{server}/{topic}", data=body.encode("utf-8"), method="POST")
+    # Headers must be latin-1 safe: ntfy takes the title as a header, and a job
+    # title with an en dash or an accent in it raises UnicodeEncodeError deep
+    # inside http.client rather than anywhere that mentions the title.
+    req.add_header("Title", _ascii(subject))
+    req.add_header("Markdown", "yes")
+    req.add_header("Tags", "briefcase")
+    # Tapping the notification opens the dashboard; the individual links are
+    # in the body.
+    req.add_header("Click", os.getenv(
+        "NTFY_CLICK", "https://lantiar.github.io/Test-claude/"))
+    with urllib.request.urlopen(req, timeout=30) as r:
+        if r.status >= 300:
+            raise RuntimeError(f"ntfy returned {r.status}")
+
+
+def _ascii(s: str) -> str:
+    """What survives an HTTP header. Em dashes and smart quotes do not."""
+    return (str(s).replace("—", "-").replace("–", "-").replace("’", "'")
+            .encode("ascii", "replace").decode("ascii"))
+
+
 def send(subject: str, text: str, html: str = "") -> None:
     user = os.getenv("MAIL_USER", "")
     password = os.getenv("MAIL_APP_PASSWORD", "")
@@ -147,7 +197,34 @@ def run(con, dry_run: bool = False, limit: int = 60) -> dict:
                f" — {jobs[0]['company']}"
                + (f" and {len(jobs) - 1} more" if len(jobs) > 1 else ""))
     if dry_run:
-        return {"new": len(jobs), "sent": False, "subject": subject, "text": text}
-    send(subject, text, html)
-    set_watermark(con, max(j["first_seen_at"] for j in jobs))
-    return {"new": len(jobs), "sent": True, "subject": subject}
+        return {"new": len(jobs), "sent": False, "subject": subject,
+                "text": text, "channels": channels()}
+
+    # Every channel that is configured gets it, and one failing does not stop
+    # the others. The watermark moves if any of them landed -- what it records
+    # is "you were told", and being told once is enough.
+    sent, failed = [], []
+    for name, fn in (("ntfy", lambda: send_ntfy(subject, jobs)),
+                     ("email", lambda: send(subject, text, html))):
+        if name not in channels():
+            continue
+        try:
+            fn()
+            sent.append(name)
+        except Exception as exc:
+            failed.append(f"{name}: {exc}")
+    if sent:
+        set_watermark(con, max(j["first_seen_at"] for j in jobs))
+    return {"new": len(jobs), "sent": bool(sent), "subject": subject,
+            "channels": sent, "failed": failed}
+
+
+def channels() -> list[str]:
+    """Which notifiers are configured. Absent is not an error -- a feed with no
+    notifier is a perfectly ordinary way to run this."""
+    out = []
+    if os.getenv("NTFY_TOPIC"):
+        out.append("ntfy")
+    if os.getenv("MAIL_USER") and os.getenv("MAIL_APP_PASSWORD"):
+        out.append("email")
+    return out

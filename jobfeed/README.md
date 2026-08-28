@@ -171,7 +171,20 @@ The watermark moves only after a send succeeds. A failed send that advanced it
 would drop those postings silently, which is worse than a duplicate mail -- one
 is noise, the other is a job you never hear about.
 
-Two secrets in the repository (Settings -> Secrets -> Actions):
+Delivery is by whatever is configured; each channel is tried and one failing
+does not stop the others. A channel that quietly stopped working looks exactly
+like a quiet week, so failures are named rather than swallowed.
+
+**ntfy** (push to a phone, free, no account):
+
+    NTFY_TOPIC           the topic name
+
+The topic *is* the secret -- anyone who knows it can read the notifications
+and publish to it -- so it is a random string, and it goes in the repository
+secrets like any other credential. Install the ntfy app, subscribe to that
+topic, and that is the whole setup.
+
+**Email**:
 
     MAIL_USER            the Gmail address to send from
     MAIL_APP_PASSWORD    a Google app password, 16 characters, not the
