@@ -95,6 +95,15 @@ def cmd_enrich(args, con) -> int:
     return 0
 
 
+def cmd_publish(args, con) -> int:
+    from .publish import publish
+
+    d = publish(con, args.out)
+    print(f"wrote {args.out}/: {d['jobs']} jobs, {d['recent']} recent, "
+          f"{d['links']} other links")
+    return 0
+
+
 def cmd_export(args, con) -> int:
     """A plain-text snapshot of the job list, one JSON object per line.
 
@@ -171,6 +180,9 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("enrich"); p.set_defaults(fn=cmd_enrich)
     p.add_argument("--limit", type=int, default=40)
+
+    p = sub.add_parser("publish"); p.set_defaults(fn=cmd_publish)
+    p.add_argument("--out", default="site")
 
     p = sub.add_parser("export"); p.set_defaults(fn=cmd_export)
     p.add_argument("--out", default="data/jobs.jsonl")

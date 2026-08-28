@@ -60,13 +60,23 @@ jobs:
         run: |
           cd code
           python -m jobfeed.cli run --retire
-          python -m jobfeed.cli export --out "$GITHUB_WORKSPACE/jobs.jsonl"
+          python -m jobfeed.cli publish --out "$GITHUB_WORKSPACE/site"
+          python -m jobfeed.cli export --out "$GITHUB_WORKSPACE/site/jobs.jsonl"
           python -m jobfeed.cli stats
 
-      - name: Commit the snapshot
+      # Published to a branch rather than through the Pages deploy action so
+      # the same commit is both the served site and the durable backup: if the
+      # build cache is evicted, first_seen_at survives here, and it is the one
+      # field that cannot be reconstructed by refetching.
+      - name: Publish
         run: |
+          cp -f site/*.json site/jobs.jsonl . 2>/dev/null || true
+          rm -rf site
+          # Tells Pages to serve these files as-is rather than running Jekyll,
+          # which would ignore anything it did not recognise.
+          touch .nojekyll
           git config user.name  "jobfeed"
           git config user.email "jobfeed@users.noreply.github.com"
-          git add jobs.jsonl
+          git add -A .
           git diff --cached --quiet || git commit -m "jobfeed: $(date -u +%Y-%m-%dT%H:%M)Z"
           git push origin HEAD:jobfeed-data

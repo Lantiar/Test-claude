@@ -21,3 +21,7 @@ temp/
 jobfeed/data/
 *.sqlite3
 session-*
+
+# jobfeed: the published JSON is regenerated every run
+site/
+data/jobs.jsonl
