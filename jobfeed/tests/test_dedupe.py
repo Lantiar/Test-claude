@@ -116,3 +116,40 @@ def test_the_answer_does_not_depend_on_which_source_is_polled_first(con):
     row = con.execute("SELECT * FROM job WHERE id=?", (bare,)).fetchone()
     assert row["title"] == "Backend Engineer Intern"
     assert row["company_id"] is not None
+
+
+def test_a_snapshot_round_trip_keeps_every_job_and_its_first_seen_date(con, tmp_path):
+    """A fresh runner restores from the published snapshot, not from a cache.
+
+    Two things must survive: story-only jobs, which cannot be refetched from
+    anywhere once the story expires, and first_seen_at, which cannot be
+    reconstructed at all. Losing either looks exactly like a healthy run.
+    """
+    import json
+
+    from jobfeed import publish as _publish
+    from jobfeed import seed as _seed
+
+    old = time.time() - 86400 * 9
+    story, _ = dedupe.record(con, listing(
+        source="instagram", source_record_id="s1",
+        url="https://jobs.ashbyhq.com/acme/6f1c261d-9b65-412b-9f17-34b8968bdd78",
+        title="Robotics Intern", company="Acme", posted_at=old,
+        posted_at_is_real=False), now=old)
+
+    out = tmp_path / "site"
+    _publish.publish(con, str(out))
+
+    fresh = _db.connect(str(tmp_path / "fresh.sqlite3"))
+    try:
+        report = _seed.seed(fresh, str(out / "jobs.json"))
+        assert report["restored"] == 1
+        row = fresh.execute("SELECT * FROM job").fetchone()
+        assert row["title"] == "Robotics Intern"
+        assert row["ats_key"] == "ashby::6f1c261d-9b65-412b-9f17-34b8968bdd78"
+        assert abs(row["first_seen_at"] - old) < 1, "first_seen_at was redated"
+        assert row["posted_at_is_estimate"] == 1, "an estimate came back as real"
+        # And seeding twice must not duplicate it.
+        assert _seed.seed(fresh, str(out / "jobs.json"))["restored"] == 0
+    finally:
+        fresh.close()

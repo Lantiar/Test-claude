@@ -95,6 +95,24 @@ def cmd_enrich(args, con) -> int:
     return 0
 
 
+def cmd_seed(args, con) -> int:
+    from .seed import seed
+
+    try:
+        d = seed(con, args.source)
+    except Exception as exc:
+        # Not fatal: a first run has no snapshot to read, and a run that cannot
+        # reach one should still poll rather than stop. But it is said out
+        # loud, because a silent seed failure looks exactly like a healthy run
+        # that has lost every story-only job.
+        print(f"seed: could not read {args.source}: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 0
+    print(f"seed: {d['in_snapshot']} in snapshot, {d['restored']} restored, "
+          f"{d['already_here']} already here")
+    return 0
+
+
 def cmd_publish(args, con) -> int:
     from .publish import publish
 
@@ -180,6 +198,9 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("enrich"); p.set_defaults(fn=cmd_enrich)
     p.add_argument("--limit", type=int, default=40)
+
+    p = sub.add_parser("seed"); p.set_defaults(fn=cmd_seed)
+    p.add_argument("source", help="path or URL of a published jobs.json")
 
     p = sub.add_parser("publish"); p.set_defaults(fn=cmd_publish)
     p.add_argument("--out", default="site")

@@ -1,17 +1,17 @@
 name: jobfeed
 
-# Hourly, because Instagram stories expire after 24 hours and a missed one is
-# missed permanently. Simplify is free and ETag-cached, so the only per-run
-# cost is the stories actor, billed at $0.015.
+# Hourly, because Instagram stories expire after 24 hours and a link that is
+# missed is missed permanently. Simplify is free and ETag-cached, so the only
+# per-run cost is the stories actor, billed at $0.015.
 on:
   schedule:
-    - cron: "7 * * * *"      # :07 rather than :00 -- GitHub queues the top of
-                             # the hour heavily and delays scheduled runs
+    - cron: "7 * * * *"      # :07, not :00 -- GitHub queues the top of the
+                             # hour heavily and delays scheduled runs
   workflow_dispatch:
 
 concurrency:
-  # Never two at once: they would race on the same database and each would
-  # write a first_seen_at the other did not know about.
+  # Two at once would each publish a snapshot without the other's findings,
+  # and the loser's story links would be gone for good.
   group: jobfeed
   cancel-in-progress: false
 
@@ -19,64 +19,54 @@ jobs:
   poll:
     runs-on: ubuntu-latest
     permissions:
-      contents: write         # to commit the snapshot back
+      contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: jobfeed-data
-          fetch-depth: 1
-        continue-on-error: true
 
-      - name: Start the data branch if it does not exist yet
+      # The published snapshot is the store, not a backup of one. The runner is
+      # stateless and a build cache was the wrong place for the database:
+      # Simplify refetches in a second, but a story link is unreachable a day
+      # later, so losing the cache would delete exactly the jobs that cannot be
+      # re-derived -- and the run afterwards would look perfectly healthy.
+      # Absent on the very first run, which is why nothing here is fatal.
+      - name: Fetch the last snapshot
         run: |
-          git rev-parse --verify HEAD >/dev/null 2>&1 || {
-            git checkout --orphan jobfeed-data
-            git rm -rf . >/dev/null 2>&1 || true
-          }
+          git fetch --depth=1 origin jobfeed-data 2>/dev/null \
+            && git show FETCH_HEAD:jobs.json > previous.json \
+            || echo "no previous snapshot yet (first run)"
+          ls -la previous.json 2>/dev/null || true
 
-      - uses: actions/checkout@v4
-        with:
-          path: code
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # The working database, kept between runs. A cache is the right shape for
-      # it -- rebuildable, not precious -- but it can be evicted, so the branch
-      # holds a text snapshot that survives independently.
-      - name: Restore the database
-        uses: actions/cache@v4
-        with:
-          path: data
-          key: jobfeed-db-${{ github.run_id }}
-          restore-keys: jobfeed-db-
-
-      - name: Poll
+      # No setup-python and no pip: jobfeed is pure standard library, and the
+      # runner's python3 is all it needs.
+      - name: Poll and publish
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           IG_TARGET: ${{ vars.IG_TARGET || 'zero2sudo' }}
-          JOBFEED_DB: ${{ github.workspace }}/data/jobfeed.sqlite3
+          JOBFEED_DB: ${{ runner.temp }}/jobfeed.sqlite3
         run: |
-          cd code
-          python -m jobfeed.cli run --retire
-          python -m jobfeed.cli publish --out "$GITHUB_WORKSPACE/site"
-          python -m jobfeed.cli export --out "$GITHUB_WORKSPACE/site/jobs.jsonl"
-          python -m jobfeed.cli stats
+          set -e
+          python3 --version
+          [ -f previous.json ] && python3 -m jobfeed.cli seed previous.json
+          python3 -m jobfeed.cli run --retire
+          python3 -m jobfeed.cli publish --out site
+          python3 -m jobfeed.cli export --out site/jobs.jsonl
+          python3 -m jobfeed.cli stats
+          # Serve the files as they are; Jekyll would ignore anything it did
+          # not recognise.
+          touch site/.nojekyll
 
-      # Published to a branch rather than through the Pages deploy action so
-      # the same commit is both the served site and the durable backup: if the
-      # build cache is evicted, first_seen_at survives here, and it is the one
-      # field that cannot be reconstructed by refetching.
-      - name: Publish
+      # A fresh single-commit branch each time, rather than a growing history
+      # of megabyte snapshots. Nothing is lost by that: every snapshot is
+      # complete, including each job's original first_seen_at, so the newest
+      # one is the whole state.
+      - name: Publish to the data branch
         run: |
-          cp -f site/*.json site/jobs.jsonl . 2>/dev/null || true
-          rm -rf site
-          # Tells Pages to serve these files as-is rather than running Jekyll,
-          # which would ignore anything it did not recognise.
-          touch .nojekyll
+          cd site
+          git init -q
           git config user.name  "jobfeed"
           git config user.email "jobfeed@users.noreply.github.com"
-          git add -A .
-          git diff --cached --quiet || git commit -m "jobfeed: $(date -u +%Y-%m-%dT%H:%M)Z"
-          git push origin HEAD:jobfeed-data
+          git add -A
+          git commit -qm "jobfeed: $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" \
+            HEAD:jobfeed-data

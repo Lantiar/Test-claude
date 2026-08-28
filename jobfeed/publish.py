@@ -40,6 +40,15 @@ def _job(row) -> dict:
         "category": row["category"] or None,
         "sponsorship": row["sponsorship"] or None,
         "ats": row["ats"],
+        # The ATS's own id for the posting, and the stable key across runs.
+        # Absent from the first version of this file, which mattered more than
+        # it looked: the snapshot is what a fresh runner restores from, so
+        # leaving it out meant every restored job came back without its
+        # identity and had to be re-matched on its URL. Useful to a viewer for
+        # the same reason -- it is the one field that does not change when an
+        # employer edits a title or moves a posting.
+        "ats_key": row["ats_key"],
+        "url_key": row["url_key"],
         # The employer's posting date where a source knew it, otherwise our
         # first sighting standing in. Never render the second as the first:
         # posted_is_estimate is the whole reason both fields are here.
