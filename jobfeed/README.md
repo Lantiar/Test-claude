@@ -105,3 +105,47 @@ means the run was clean.
 A viewer should treat data older than a couple of hours as stale and say so.
 Instagram stories expire after 24 hours, so a feed that stops updating starts
 losing links immediately rather than merely going out of date.
+
+
+## Keeping it running
+
+The pipeline runs in GitHub Actions every half hour. GitHub's own cron is the
+fallback rather than the primary trigger, because it is best-effort and skipped
+every slot for the first hour after the workflow was added -- and a scheduler
+that silently does not fire is the worst kind in front of a source that
+expires.
+
+So an external scheduler calls `workflow_dispatch` on a real cron:
+
+```
+GH_PAT=... QSTASH_TOKEN=... bash scripts/setup-trigger.sh
+```
+
+`GH_PAT` is a fine-grained token for this repo with **Actions: read and
+write**; `QSTASH_TOKEN` comes from the Upstash console. Neither goes near the
+repository -- QStash holds the token and forwards it as a header. The script
+dispatches once first, so a token without the right scope fails immediately
+rather than at 3am.
+
+Both triggers can fire. The workflow refuses to poll again within
+`JOBFEED_MIN_MINUTES` (default 20) of the last publish, so a duplicate costs
+nothing -- the expensive half of a run is a paid API call, and policing which
+trigger is allowed is harder than refusing to do the work twice. A manual run
+from the Actions tab always goes through.
+
+### What each poll costs
+
+Measured, not estimated: $0.01505 per Instagram run, identical across every run
+so far. Simplify is a raw GitHub file with ETag caching and costs nothing at
+any frequency.
+
+| cadence | runs/month | Apify |
+|---|---|---|
+| hourly | 720 | $10.84 |
+| **every 30 min** | **1,440** | **$21.67** |
+| every 15 min | 2,880 | $43.34 |
+| every 5 min | 8,640 | $130.03 |
+
+The Apify STARTER plan includes $29 of usage, so anything up to about every 25
+minutes is covered by it. GitHub Actions is free on a public repository and
+QStash's free tier is 500 messages a day, so neither is a factor.

@@ -1,13 +1,25 @@
 name: jobfeed
 
-# Hourly, because Instagram stories expire after 24 hours and a link that is
-# missed is missed permanently. Simplify is free and ETag-cached, so the only
-# per-run cost is the stories actor, billed at $0.015.
+# Every half hour. Instagram stories expire after 24 hours, so the cadence is
+# about how fresh new links are rather than about losing them; 30 minutes is
+# the fastest that stays inside the Apify credit, at a measured $0.01505 a run
+# ($21.67 a month against a $29 allowance). Simplify is a raw GitHub file with
+# ETag caching and costs nothing at any frequency.
+#
+# GitHub's own schedule is kept as a fallback and is not trusted as the primary
+# trigger: it is best-effort, it skipped the first several slots after this was
+# added, and a scheduler that silently does not fire is the worst kind for a
+# source with an expiry. An external trigger calls workflow_dispatch instead --
+# see jobfeed/README.md. The guard below makes it safe for both to fire.
 on:
   schedule:
-    - cron: "7 * * * *"      # :07, not :00 -- GitHub queues the top of the
-                             # hour heavily and delays scheduled runs
+    - cron: "7,37 * * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if the last run was recent"
+        required: false
+        default: "yes"
 
 concurrency:
   # Two at once would each publish a snapshot without the other's findings,
@@ -30,15 +42,39 @@ jobs:
       # re-derived -- and the run afterwards would look perfectly healthy.
       # Absent on the very first run, which is why nothing here is fatal.
       - name: Fetch the last snapshot
+        id: previous
         run: |
           git fetch --depth=1 origin jobfeed-data 2>/dev/null \
             && git show FETCH_HEAD:jobs.json > previous.json \
             || echo "no previous snapshot yet (first run)"
+          git show FETCH_HEAD:meta.json > previous_meta.json 2>/dev/null || true
           ls -la previous.json 2>/dev/null || true
+
+      # Two triggers now point at this workflow -- GitHub's schedule and an
+      # external caller -- and the expensive half of a run is a paid API call.
+      # Rather than police which one is allowed to fire, refuse to do the work
+      # twice in quick succession whatever asked. A manual run says so and is
+      # always allowed through, since that is someone deliberately asking.
+      - name: Skip if the last run was recent
+        id: guard
+        env:
+          MIN_MINUTES: ${{ vars.JOBFEED_MIN_MINUTES || 20 }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.force }}" ]; then
+            echo "manual run, going ahead"; exit 0
+          fi
+          [ -f previous_meta.json ] || { echo "no previous run to compare against"; exit 0; }
+          AGE=$(python3 -c "import json,time;print(int((time.time()-json.load(open('previous_meta.json'))['generated_at_epoch'])//60))" 2>/dev/null || echo 999)
+          echo "the last publish was $AGE minutes ago (minimum gap $MIN_MINUTES)"
+          if [ "$AGE" -lt "$MIN_MINUTES" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "too soon -- not polling"
+          fi
 
       # No setup-python and no pip: jobfeed is pure standard library, and the
       # runner's python3 is all it needs.
       - name: Poll and publish
+        if: steps.guard.outputs.skip != 'true'
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           IG_TARGET: ${{ vars.IG_TARGET || 'zero2sudo' }}
@@ -60,6 +96,7 @@ jobs:
       # complete, including each job's original first_seen_at, so the newest
       # one is the whole state.
       - name: Publish to the data branch
+        if: steps.guard.outputs.skip != 'true'
         run: |
           cd site
           git init -q
