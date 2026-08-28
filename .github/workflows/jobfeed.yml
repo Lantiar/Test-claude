@@ -1,0 +1,72 @@
+name: jobfeed
+
+# Hourly, because Instagram stories expire after 24 hours and a missed one is
+# missed permanently. Simplify is free and ETag-cached, so the only per-run
+# cost is the stories actor, billed at $0.015.
+on:
+  schedule:
+    - cron: "7 * * * *"      # :07 rather than :00 -- GitHub queues the top of
+                             # the hour heavily and delays scheduled runs
+  workflow_dispatch:
+
+concurrency:
+  # Never two at once: they would race on the same database and each would
+  # write a first_seen_at the other did not know about.
+  group: jobfeed
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write         # to commit the snapshot back
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jobfeed-data
+          fetch-depth: 1
+        continue-on-error: true
+
+      - name: Start the data branch if it does not exist yet
+        run: |
+          git rev-parse --verify HEAD >/dev/null 2>&1 || {
+            git checkout --orphan jobfeed-data
+            git rm -rf . >/dev/null 2>&1 || true
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          path: code
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The working database, kept between runs. A cache is the right shape for
+      # it -- rebuildable, not precious -- but it can be evicted, so the branch
+      # holds a text snapshot that survives independently.
+      - name: Restore the database
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: jobfeed-db-${{ github.run_id }}
+          restore-keys: jobfeed-db-
+
+      - name: Poll
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          IG_TARGET: ${{ vars.IG_TARGET || 'zero2sudo' }}
+          JOBFEED_DB: ${{ github.workspace }}/data/jobfeed.sqlite3
+        run: |
+          cd code
+          python -m jobfeed.cli run --retire
+          python -m jobfeed.cli export --out "$GITHUB_WORKSPACE/jobs.jsonl"
+          python -m jobfeed.cli stats
+
+      - name: Commit the snapshot
+        run: |
+          git config user.name  "jobfeed"
+          git config user.email "jobfeed@users.noreply.github.com"
+          git add jobs.jsonl
+          git diff --cached --quiet || git commit -m "jobfeed: $(date -u +%Y-%m-%dT%H:%M)Z"
+          git push origin HEAD:jobfeed-data

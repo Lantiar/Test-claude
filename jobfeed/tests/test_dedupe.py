@@ -97,3 +97,22 @@ def test_every_sighting_is_kept(con):
             title="SWE Intern"), now=time.time() + i)
     assert con.execute("SELECT COUNT(*) FROM job").fetchone()[0] == 1
     assert con.execute("SELECT COUNT(*) FROM sighting").fetchone()[0] == 3
+
+
+def test_the_answer_does_not_depend_on_which_source_is_polled_first(con):
+    """A story link creates a row with no title; Simplify must fill it in.
+
+    Polled the other way round this always worked, which is why it survived:
+    five jobs present in both sources stayed permanently blank whenever the
+    story feed happened to run first.
+    """
+    url = "https://jobs.ashbyhq.com/acme/5f1c261d-9b65-412b-9f17-34b8968bdd78"
+    bare, _ = dedupe.record(con, listing(
+        source="instagram", source_record_id="s1", url=url, title="", company=""))
+    full, how = dedupe.record(con, listing(
+        source_record_id="s2", url=url, title="Backend Engineer Intern",
+        company="Acme", locations=["NYC"]))
+    assert full == bare and how == "ats"
+    row = con.execute("SELECT * FROM job WHERE id=?", (bare,)).fetchone()
+    assert row["title"] == "Backend Engineer Intern"
+    assert row["company_id"] is not None

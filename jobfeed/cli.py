@@ -62,9 +62,68 @@ def cmd_list(args, con) -> int:
     return 0
 
 
+def cmd_run(args, con) -> int:
+    """One full cycle, for a scheduler to call. Never raises on one bad source.
+
+    A source that fails must not stop the others, and must not look like a
+    source that found nothing: poll() records the failure in source_run either
+    way, and the exit code says whether anything got through -- which is what a
+    cron mail or a red Actions run is actually for.
+    """
+    ok = 0
+    for source in names():
+        try:
+            c = poll(con, source)
+            con.commit()
+            print(f"{source}: {c['seen']} seen, {c['new']} new, "
+                  f"{c.get('ats',0)}+{c.get('url',0)}+{c.get('text',0)} matched, "
+                  f"{c.get('link',0)} non-job links")
+            ok += 1
+        except Exception as exc:
+            print(f"{source}: FAILED {type(exc).__name__}: {exc}", file=sys.stderr)
+    if ok:
+        d = enrich_unresolved(con)
+        print(f"enrich: named {d['named']} of {d['looked']}")
+        if args.retire:
+            print(f"retired {retire_missing(con, 'simplify')} stale")
+    return 0 if ok else 1
+
+
 def cmd_enrich(args, con) -> int:
     d = enrich_unresolved(con, args.limit)
     print(f"looked up {d['looked']}, named {d['named']}, could not read {d['failed']}")
+    return 0
+
+
+def cmd_export(args, con) -> int:
+    """A plain-text snapshot of the job list, one JSON object per line.
+
+    The database is the working state and a 3MB binary; this is the durable,
+    diffable copy. It exists because a scheduler that keeps its SQLite in a
+    build cache can lose it -- and what is lost is not the listings, which can
+    be refetched in a second, but first_seen_at: the record of when each job
+    appeared, which is the one thing here that cannot be reconstructed after
+    the fact.
+    """
+    import os
+
+    rows = con.execute(
+        "SELECT j.*, c.name AS company FROM job j "
+        "LEFT JOIN company c ON c.id=j.company_id ORDER BY j.first_seen_at").fetchall()
+    if d := os.path.dirname(args.out):
+        os.makedirs(d, exist_ok=True)
+    with open(args.out, "w") as fh:
+        for r in rows:
+            fh.write(json.dumps({
+                "company": r["company"], "title": r["title"],
+                "url": r["canonical_url"], "ats_key": r["ats_key"],
+                "locations": json.loads(r["locations"] or "[]"),
+                "season": r["season"], "status": r["status"],
+                "posted_at": r["posted_at"],
+                "posted_at_is_estimate": bool(r["posted_at_is_estimate"]),
+                "first_seen_at": r["first_seen_at"],
+            }, sort_keys=True) + "\n")
+    print(f"exported {len(rows)} jobs to {args.out}")
     return 0
 
 
@@ -107,8 +166,14 @@ def main(argv=None) -> int:
     p.add_argument("--limit", type=int, default=40)
     p.add_argument("--company", default="")
 
+    p = sub.add_parser("run"); p.set_defaults(fn=cmd_run)
+    p.add_argument("--retire", action="store_true")
+
     p = sub.add_parser("enrich"); p.set_defaults(fn=cmd_enrich)
     p.add_argument("--limit", type=int, default=40)
+
+    p = sub.add_parser("export"); p.set_defaults(fn=cmd_export)
+    p.add_argument("--out", default="data/jobs.jsonl")
 
     p = sub.add_parser("stats"); p.set_defaults(fn=cmd_stats)
 

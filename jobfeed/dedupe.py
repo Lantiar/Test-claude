@@ -180,6 +180,25 @@ def _enrich(con, job_id: int, listing: RawListing, ats_key, url_key, now: float)
     row = con.execute("SELECT * FROM job WHERE id=?", (job_id,)).fetchone()
     sets, args = ["last_seen_at=?"], [now]
 
+    # Title, employer and locations are here for a reason that only shows up
+    # when the sources arrive in the other order. A story link carries a URL
+    # and nothing else, so it creates a row with an empty title; Simplify then
+    # matches that row and knows all three. Without backfilling them the answer
+    # depended on which source was polled first -- poll Simplify first and five
+    # jobs were fully described, poll Instagram first and the same five stayed
+    # blank forever, because the enrich pass only looks at rows that are still
+    # missing a title and this one had already been "seen".
+    if listing.company and not row["company_id"]:
+        if cid := company_id(con, listing.company, listing.company_slug):
+            sets.append("company_id=?")
+            args.append(cid)
+    if listing.locations and not json.loads(row["locations"] or "[]"):
+        sets.append("locations=?")
+        args.append(json.dumps(listing.locations))
+    if listing.title and not (row["title"] or "").strip():
+        sets.append("title=?")
+        args.append(listing.title)
+
     for column, value in (("ats_key", ats_key), ("url_key", url_key),
                           ("season", listing.season),
                           ("sponsorship", listing.sponsorship),
