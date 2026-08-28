@@ -117,6 +117,28 @@ def publish(con, out: str = "site", recent_days: int = 14) -> dict:
         "first_seen_at": _iso(r["first_seen_at"]), "source": r["source"],
     } for r in con.execute("SELECT * FROM link ORDER BY first_seen_at DESC")]
 
+    # The dashboard, served from the same place as the data it reads. Relative
+    # fetches, so it works unchanged on GitHub Pages, on Vercel, or from any
+    # directory these files are copied into.
+    import shutil
+
+    shutil.copyfile(os.path.join(os.path.dirname(__file__), "web.html"),
+                    os.path.join(out, "index.html"))
+
+    # For Vercel, if this directory is deployed there instead of served by
+    # Pages. Ignored everywhere else. The page must not be cached longer than
+    # the data behind it: an hour-old index.html against a fresh jobs.json is
+    # harmless, but a cached jobs.json is a dashboard confidently showing
+    # yesterday, which is the one failure this whole project keeps guarding
+    # against.
+    with open(os.path.join(out, "vercel.json"), "w") as fh:
+        json.dump({"headers": [
+            {"source": "/(.*).json",
+             "headers": [{"key": "Cache-Control",
+                          "value": "public, max-age=0, must-revalidate"},
+                         {"key": "Access-Control-Allow-Origin", "value": "*"}]},
+        ]}, fh, indent=1)
+
     for name, payload in (("jobs.json", rows), ("recent.json", recent),
                           ("links.json", links), ("meta.json", meta)):
         with open(os.path.join(out, name), "w") as fh:

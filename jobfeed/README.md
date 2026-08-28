@@ -3,6 +3,21 @@
 Internship postings from several sources, deduplicated into one list, refreshed
 hourly. Published as static JSON so anything can read it.
 
+## The dashboard
+
+`index.html` sits beside the data and fetches it with relative paths, so it
+works unchanged wherever these files are served from:
+
+- GitHub Pages: <https://lantiar.github.io/Test-claude/>
+- Vercel: import the repo, set the production branch to `jobfeed-data` and the
+  framework to "Other". Every hourly push redeploys it. `vercel.json` is in
+  the output and stops the JSON being cached.
+
+Application stages on the hosted page live in that browser's localStorage.
+They are never sent anywhere -- the data beside them is public and where you
+applied is not -- which also means they do not follow you to another device.
+The local viewer (`jobfeed serve`) is the one backed by the database.
+
 ## Endpoints
 
 Once GitHub Pages is pointed at the `jobfeed-data` branch:
