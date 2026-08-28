@@ -85,8 +85,13 @@ SELECT = """
   -- because it was: the whole 77-job cluster is one run, and the noise was
   -- deciding the order. A minute is the resolution at which this field means
   -- "which run", so below that, name decides.
+  -- COLLATE NOCASE, because SQLite compares text byte by byte by default and
+  -- the page does not: "RTX" sorts before "Repsol" here (uppercase T is below
+  -- lowercase e in ASCII) and after it in the browser's localeCompare. So the
+  -- published order and the page's own "by company" view disagreed on 14 rows,
+  -- and which order you got depended on which control you had touched last.
   ORDER BY j.posted_at DESC, CAST(j.first_seen_at / 60 AS INTEGER) DESC,
-           c.name, j.title
+           c.name COLLATE NOCASE, j.title COLLATE NOCASE
 """
 
 
