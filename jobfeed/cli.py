@@ -110,6 +110,24 @@ def cmd_serve(args, con) -> int:
     return 0
 
 
+def cmd_notify(args, con) -> int:
+    from .notify import run as notify_run
+    from .seed import restore_watermark
+
+    if args.watermark_from:
+        mark = restore_watermark(con, args.watermark_from)
+        print(f"watermark restored: {_when(mark).strip() if mark else 'none found'}")
+    d = notify_run(con, dry_run=args.dry_run, limit=args.limit)
+    if not d["new"]:
+        print("nothing new to send")
+        return 0
+    if args.dry_run:
+        print(f"would send: {d['subject']}\n"); print(d["text"][:2000])
+    else:
+        print(f"sent: {d['subject']} ({d['new']} posting(s))")
+    return 0
+
+
 def cmd_render(args, con) -> int:
     from .server import render
 
@@ -274,6 +292,12 @@ def main(argv=None) -> int:
     p = sub.add_parser("serve"); p.set_defaults(fn=cmd_serve)
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--host", default="127.0.0.1")
+
+    p = sub.add_parser("notify"); p.set_defaults(fn=cmd_notify)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--limit", type=int, default=60)
+    p.add_argument("--watermark-from", default="",
+                   help="a meta.json (path or URL) to restore the watermark from")
 
     p = sub.add_parser("render"); p.set_defaults(fn=cmd_render)
     p.add_argument("--out", default="dashboard.html")

@@ -29,6 +29,12 @@ def _iso(ts) -> str | None:
     return dt.datetime.fromtimestamp(ts, dt.timezone.utc).isoformat(timespec="seconds")
 
 
+def _watermark(con) -> float:
+    from .notify import watermark
+
+    return watermark(con)
+
+
 def _job(row) -> dict:
     return {
         "id": row["id"],
@@ -132,6 +138,11 @@ def publish(con, out: str = "site", recent_days: int = 14) -> dict:
             "other_links": con.execute("SELECT COUNT(*) FROM link").fetchone()[0],
         },
         "sources": sources,
+        # How far the new-posting mail has got. Carried in the snapshot
+        # because the runner is stateless and rebuilds from it every half
+        # hour: a watermark it forgot would re-announce all 2,249 jobs, and
+        # that is the kind of mistake you only notice once it has arrived.
+        "notified_through_epoch": _watermark(con),
         "schema": "https://github.com/Lantiar/Test-claude/blob/main/jobfeed/README.md",
     }
 

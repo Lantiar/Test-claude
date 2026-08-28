@@ -41,6 +41,31 @@ def load(path_or_url: str) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
+def restore_watermark(con, meta_path_or_url: str) -> float:
+    """Bring back how far the new-posting mail had got.
+
+    Separate from the jobs because it lives in meta.json, and worth doing even
+    when the job restore is skipped: without it a fresh runner considers every
+    job unannounced.
+    """
+    from . import db as _db
+
+    try:
+        if meta_path_or_url.startswith(("http://", "https://")):
+            with urllib.request.urlopen(meta_path_or_url, timeout=30) as r:
+                meta = json.loads(r.read())
+        else:
+            with open(meta_path_or_url) as fh:
+                meta = json.load(fh)
+        mark = float(meta.get("notified_through_epoch") or 0)
+    except Exception:
+        return 0.0
+    if mark:
+        _db.set_state(con, "notify", "notified_through", repr(mark))
+        con.commit()
+    return mark
+
+
 def seed(con, path_or_url: str) -> dict:
     """Insert snapshot jobs that this database does not already hold."""
     jobs = load(path_or_url)

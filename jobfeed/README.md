@@ -153,3 +153,32 @@ any frequency.
 The Apify STARTER plan includes $29 of usage, so anything up to about every 25
 minutes is covered by it. GitHub Actions is free on a public repository and
 QStash's free tier is 500 messages a day, so neither is a factor.
+
+
+## Being told about new postings
+
+Each run mails whatever appeared since the last mail, as a plain list of
+company, title and link.
+
+"New" means new *to this feed*, not recently posted -- Simplify carries jobs
+the employer posted weeks ago that this feed met for the first time today, and
+an employer's date says nothing about whether you have seen it. So it is a
+watermark over first_seen_at, and the watermark travels in meta.json rather
+than in the local database: the runner rebuilds from that snapshot every half
+hour, and a watermark it forgot would re-announce all 2,249 jobs at once.
+
+The watermark moves only after a send succeeds. A failed send that advanced it
+would drop those postings silently, which is worse than a duplicate mail -- one
+is noise, the other is a job you never hear about.
+
+Two secrets in the repository (Settings -> Secrets -> Actions):
+
+    MAIL_USER            the Gmail address to send from
+    MAIL_APP_PASSWORD    a Google app password, 16 characters, not the
+                         account password
+
+and optionally a `NOTIFY_TO` variable if the mail should go somewhere other
+than the sending account.
+
+Locally, `jobfeed notify --dry-run` prints what would be sent without sending
+it or moving the watermark.

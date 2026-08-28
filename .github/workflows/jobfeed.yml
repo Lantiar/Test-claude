@@ -78,12 +78,22 @@ jobs:
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           IG_TARGET: ${{ vars.IG_TARGET || 'zero2sudo' }}
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ vars.NOTIFY_TO }}
           JOBFEED_DB: ${{ runner.temp }}/jobfeed.sqlite3
         run: |
           set -e
           python3 --version
           [ -f previous.json ] && python3 -m jobfeed.cli seed previous.json
           python3 -m jobfeed.cli run --retire
+          # Mail whatever is new, before publishing, so the watermark the
+          # notifier moves is the one that gets written into meta.json and
+          # survives the next rebuild. Never fatal: a mail that does not go
+          # out is worth knowing about, and is not a reason to throw away a
+          # poll that worked.
+          [ -f previous_meta.json ] && WM="--watermark-from previous_meta.json" || WM=""
+          python3 -m jobfeed.cli notify $WM || echo "::warning::the new-posting mail did not go out"
           python3 -m jobfeed.cli publish --out site
           python3 -m jobfeed.cli export --out site/jobs.jsonl
           python3 -m jobfeed.cli stats
