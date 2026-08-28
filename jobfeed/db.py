@@ -86,6 +86,26 @@ CREATE TABLE IF NOT EXISTS link (
   last_seen_at  REAL NOT NULL
 );
 
+-- Where you are with each job. This is the one table here that is not derived
+-- from a source, and it has two properties the rest do not need.
+--
+-- It is keyed on the job's stable identity rather than on job.id, because
+-- job.id is local to one build of the database: the scheduled runner rebuilds
+-- from a snapshot every hour and hands out fresh row ids, so a status keyed on
+-- the id would silently reattach itself to a different job. ats_key survives.
+--
+-- And it is never published. Where you have applied, and what came back, is
+-- nobody else's business -- publish.py builds its output from `job`, and this
+-- table is not in it.
+CREATE TABLE IF NOT EXISTS application (
+  job_key    TEXT PRIMARY KEY,      -- ats_key, else url_key, else the URL
+  stage      TEXT NOT NULL,
+  note       TEXT,
+  applied_at REAL,                  -- when it first left "interested"
+  updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS application_stage ON application(stage);
+
 CREATE TABLE IF NOT EXISTS merge_log (
   id        INTEGER PRIMARY KEY,
   kept_job  INTEGER NOT NULL,

@@ -46,11 +46,19 @@ def seed(con, path_or_url: str) -> dict:
     jobs = load(path_or_url)
     added = skipped = 0
     for j in jobs:
-        ats_key, url_key = j.get("ats_key"), j.get("url_key")
-        if not url_key and j.get("url"):
-            from .identity import looks_like_one_posting
+        from .identity import canonical_url, identify, looks_like_one_posting
 
-            url_key = j["url"] if looks_like_one_posting(j["url"]) else None
+        ats_key, url_key = j.get("ats_key"), j.get("url_key")
+        # Recomputed when a snapshot predates these fields, and canonicalised
+        # rather than taken verbatim: the lookup this key is compared against
+        # is canonical, so a raw one silently misses and drops the listing to
+        # the text tier. That is how a restore turned 39 text matches into 279.
+        if not ats_key and j.get("url"):
+            ident = identify(j["url"])
+            ats_key = ident.key if ident else None
+        if not url_key and j.get("url"):
+            url_key = (canonical_url(j["url"])
+                       if looks_like_one_posting(j["url"]) else None)
         # Already here (this run polled it before seeding, or it is a repeat
         # seed): leave the live row alone rather than writing an older copy
         # over it.

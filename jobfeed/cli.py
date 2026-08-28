@@ -9,9 +9,14 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 
 from . import db as _db
+
+# Where `sync` reads from by default: the hourly feed this project publishes.
+FEED_URL = os.getenv(
+    "JOBFEED_URL", "https://lantiar.github.io/Test-claude/jobs.json")
 from .ingest import enrich_unresolved, poll, retire_missing
 from .sources import load_all, names
 
@@ -92,6 +97,37 @@ def cmd_run(args, con) -> int:
 def cmd_enrich(args, con) -> int:
     d = enrich_unresolved(con, args.limit)
     print(f"looked up {d['looked']}, named {d['named']}, could not read {d['failed']}")
+    return 0
+
+
+def cmd_serve(args, con) -> int:
+    from .server import serve
+
+    # The server opens its own connection per request, so hand it the path and
+    # let this one go: SQLite objects are not shareable across threads.
+    con.close()
+    serve(args.db, args.port, args.host)
+    return 0
+
+
+def cmd_sync(args, con) -> int:
+    """Pull the hourly published feed into the local database.
+
+    The same code path as the scheduled runner's restore, pointed at the
+    published URL instead of a file. Local application stages are untouched:
+    they live in their own table, keyed on the job's stable identity rather
+    than on a row id, precisely so a sync cannot disturb them.
+    """
+    from .seed import seed
+
+    try:
+        d = seed(con, args.url)
+    except Exception as exc:
+        print(f"sync: could not read {args.url}: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 1
+    print(f"sync: {d['in_snapshot']} in the feed, {d['restored']} new here, "
+          f"{d['already_here']} already had")
     return 0
 
 
@@ -198,6 +234,13 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("enrich"); p.set_defaults(fn=cmd_enrich)
     p.add_argument("--limit", type=int, default=40)
+
+    p = sub.add_parser("serve"); p.set_defaults(fn=cmd_serve)
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--host", default="127.0.0.1")
+
+    p = sub.add_parser("sync"); p.set_defaults(fn=cmd_sync)
+    p.add_argument("--from", dest="url", default=FEED_URL)
 
     p = sub.add_parser("seed"); p.set_defaults(fn=cmd_seed)
     p.add_argument("source", help="path or URL of a published jobs.json")

@@ -153,3 +153,27 @@ def test_a_snapshot_round_trip_keeps_every_job_and_its_first_seen_date(con, tmp_
         assert _seed.seed(fresh, str(out / "jobs.json"))["restored"] == 0
     finally:
         fresh.close()
+
+
+def test_a_text_match_never_writes_an_identity(con):
+    """The weakest tier must not manufacture strong evidence.
+
+    Restoring from a snapshot that carried no identities pushed 279 listings to
+    the text tier, and three wrote their keys onto the wrong row: one Tencent
+    requisition's id and URL landed on another's job. The feed then published
+    two rows claiming one URL, and a row whose url_key pointed at a different
+    posting. Nothing about either row looked wrong.
+    """
+    known, _ = dedupe.record(con, listing(
+        source_record_id="a", url="", title="Game Research Intern",
+        company="Tencent", season="Summer 2027"))
+    same, how = dedupe.record(con, listing(
+        source_record_id="b",
+        url="https://tencent.wd1.myworkdayjobs.com/Careers/job/LA/Game-Research-Intern_R107344",
+        title="Game Research Intern", company="Tencent", season="Summer 2027"))
+    assert same == known and how == "text"
+    row = con.execute("SELECT * FROM job WHERE id=?", (known,)).fetchone()
+    assert row["ats_key"] is None, "a text match wrote an ATS identity"
+    assert row["url_key"] is None, "a text match wrote a URL identity"
+    # The softer fields are still worth having from a text match.
+    assert row["season"] == "Summer 2027"

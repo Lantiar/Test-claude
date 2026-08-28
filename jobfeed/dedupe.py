@@ -155,7 +155,7 @@ def record(con, listing: RawListing, now: float | None = None) -> tuple[int, str
              "open" if listing.active else "closed"))
         job_id, how = cur.lastrowid, "new"
     else:
-        _enrich(con, job_id, listing, ats_key, url_key, now)
+        _enrich(con, job_id, listing, ats_key, url_key, now, how)
 
     con.execute(
         "INSERT OR IGNORE INTO sighting(job_id,source,source_record_id,raw_url,"
@@ -166,7 +166,8 @@ def record(con, listing: RawListing, now: float | None = None) -> tuple[int, str
     return job_id, how
 
 
-def _enrich(con, job_id: int, listing: RawListing, ats_key, url_key, now: float) -> None:
+def _enrich(con, job_id: int, listing: RawListing, ats_key, url_key,
+            now: float, how: str = "ats") -> None:
     """Let a second sighting fill in what the first one did not know.
 
     A story gives a link and nothing else; Simplify gives the season, the
@@ -199,16 +200,28 @@ def _enrich(con, job_id: int, listing: RawListing, ats_key, url_key, now: float)
         sets.append("title=?")
         args.append(listing.title)
 
-    for column, value in (("ats_key", ats_key), ("url_key", url_key),
-                          ("season", listing.season),
-                          ("sponsorship", listing.sponsorship),
-                          ("category", listing.category)):
+    fillable = [("season", listing.season), ("sponsorship", listing.sponsorship),
+                ("category", listing.category)]
+    # Identity is only ever written by a match that was itself made on
+    # identity. A text match is the weakest evidence there is -- two titles
+    # that read alike at the same employer -- and letting it stamp an ATS id
+    # and a URL onto the row it landed on turns that guess into something the
+    # next run will treat as fact.
+    #
+    # It did. Restoring from a snapshot that carried no identities sent 279
+    # listings to the text tier, and three of them wrote their keys onto the
+    # wrong row: Tencent requisition R107344's id and URL ended up on R107363's
+    # job, so the published feed had two rows claiming one URL and a row whose
+    # url_key pointed at a different posting entirely. Nothing looked wrong.
+    if how in ("ats", "url"):
+        fillable = [("ats_key", ats_key), ("url_key", url_key)] + fillable
+        if ats_key and not row["ats"]:
+            sets.append("ats=?")
+            args.append(ats_key.split(":")[0])
+    for column, value in fillable:
         if value and not row[column]:
             sets.append(f"{column}=?")
             args.append(value)
-    if ats_key and not row["ats"]:
-        sets.append("ats=?")
-        args.append(ats_key.split(":")[0])
 
     # A real date always beats an estimate. Between two real dates the earlier
     # wins. An estimate never overwrites a real one, however early it looks --
