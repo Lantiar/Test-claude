@@ -681,3 +681,87 @@ def test_roles_are_named_individually_in_a_grouped_note():
          "roles": ["SWE Intern", "SWE Intern - Networking"]})
     assert "SWE Intern and SWE Intern - Networking" in body, body
     assert "two roles" in body
+
+
+# ---- real posting titles --------------------------------------------------
+#
+# Every title below is one the feed actually stored. Invented titles are tidy
+# in ways real ones are not, and each of these broke something.
+
+def test_a_hyphenated_word_is_not_cut_in_half():
+    """"ASIC Package Engineer Intern Co-op" went out as "... Intern Co":
+    the team-suffix rule matched the hyphen inside Co-op."""
+    assert templates.short_role("ASIC Package Engineer Intern Co-op") == \
+        "ASIC Package Engineer Intern Co-op"
+    assert templates.short_role("Software Development Engineer Intern - "
+                                "Annapurna Labs") == \
+        "Software Development Engineer Intern"
+
+
+def test_a_season_in_the_title_is_not_said_twice():
+    """Employers put it there themselves, so the sentence read "Summer 2027
+    Software Engineer Intern - Vehicle Software - Summer 2027"."""
+    _, body, _ = templates.render(
+        {"id": 1, "first_name": "Dana"},
+        {"company": "Tesla", "season": "Summer 2027",
+         "role": "Software Engineer Intern - Vehicle Software - Summer 2027"})
+    assert body.count("Summer 2027") == 1, body
+
+
+def test_roles_from_different_seasons_do_not_claim_one_season():
+    """Tesla listed a Summer 2027 and a Spring 2027 posting side by side. A
+    note asserting one and then contradicting itself in the list below is
+    worse than one that names neither."""
+    _, body, _ = templates.render(
+        {"id": 1, "first_name": "Dana"},
+        {"company": "Tesla", "season": "Summer 2027", "roles": [
+            "Software Engineer Intern - Vehicle Software - Summer 2027",
+            "Software Engineer Intern - Information Security - Spring 2027"]})
+    assert "Summer 2027" not in body and "Spring 2027" not in body, body
+
+
+def test_the_count_matches_the_list():
+    """The closing phrase said "three notes" whatever the number was, so four
+    applications read "four roles ... rather than send you three notes"."""
+    for n, word in ((2, "two"), (3, "three"), (4, "four"), (5, "five")):
+        _, body, _ = templates.render(
+            {"id": 2, "first_name": "Noor"},
+            {"company": "American Express", "season": "Summer 2027",
+             "roles": [f"Software Engineer Intern - Team {i}" for i in range(n)]})
+        opener = body.split("I am a B.S.")[0]
+        assert word in opener, (n, opener)
+        for other in ("two", "three", "four", "five"):
+            if other != word:
+                assert other not in opener, (n, other, opener)
+
+
+def test_more_than_two_roles_are_listed_rather_than_run_together():
+    """Four real posting titles in one sentence is unreadable -- one of them
+    is "Data Analytics Intern - Global Servicing - Financial Crimes Risk &
+    Controls"."""
+    titles = ["Product Development Intern - Global Servicing",
+              "Data Analytics Intern - Global Servicing - Financial Crimes "
+              "Risk & Controls",
+              "Software Engineer Intern - Enterprise Technology Services"]
+    _, body, _ = templates.render({"id": 1, "first_name": "Noor"},
+                                  {"company": "American Express", "roles": titles})
+    for t in titles:
+        assert f"  - {t}" in body, t
+
+    # Scoped to the opening paragraph: the résumé wins below it are a bulleted
+    # list too, so checking the whole body proves nothing about the roles.
+    _, pair, _ = templates.render({"id": 1, "first_name": "Noor"},
+                                  {"company": "Amex", "roles": titles[:2]})
+    opener = pair.split("I am a B.S.")[0]
+    assert "  - " not in opener, opener
+    assert f"{titles[0]} and {titles[1]}" in opener
+
+
+def test_the_same_title_twice_is_listed_once():
+    """Two distinct Amex postings share a title. Listing it twice reads as a
+    bug in the sender, not as two applications."""
+    dupe = "Software Engineer Intern - Enterprise Technology Services"
+    _, body, _ = templates.render(
+        {"id": 1, "first_name": "Noor"},
+        {"company": "American Express", "roles": [dupe, dupe, "AI Engineer Intern"]})
+    assert body.count(dupe) == 1 and "two roles" in body, body

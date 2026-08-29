@@ -67,13 +67,17 @@ MULTI_SUBJECTS = [
      "[{bracket}] {company} intern applications"],
 ]
 
+# These open the note and are followed by the list of roles. Written to end on
+# a colon so the list can be a sentence for two roles and a block for more:
+# four long posting titles run into one sentence are unreadable, and reading
+# like a mail merge is the one thing this copy cannot afford.
 MULTI_OPENERS = [
-    "I applied to {n} openings at {company}{for_season} -- {roles} -- and "
-    "wanted to put a name to the applications.",
-    "I have just applied to {n} roles at {company}{for_season}: {roles}. "
-    "Rather than send you three notes, here is one.",
-    "I submitted applications for {n} {company} openings{for_season} -- "
-    "{roles} -- and thought it was worth reaching out once.",
+    "I applied to {n} openings at {company}{for_season} and wanted to put a "
+    "name to the applications:",
+    "I have just applied to {n} roles at {company}{for_season}. Rather than "
+    "send {n} separate notes, here is one:",
+    "I submitted applications for {n} {company} openings{for_season} and "
+    "thought it was worth reaching out once:",
 ]
 
 # What a subject line has to fit in. Gmail shows roughly this much on a
@@ -107,7 +111,27 @@ def _pick(options, contact_id: int):
     return options[contact_id % len(options)]
 
 
-_TEAM_SUFFIX = re.compile(r"\s*[-\u2013(].*$")
+# A space is required before the dash. Without it, "ASIC Package Engineer
+# Intern Co-op" was cut at the hyphen inside "Co-op" and the subject went out
+# reading "ASIC Package Engineer Intern Co".
+_TEAM_SUFFIX = re.compile(r"\s+[-\u2013]\s.*$|\s*\(.*$")
+
+# A season the employer put in the title: "... - Summer 2027". Stripped when
+# the note names the season itself, or the sentence says Summer 2027 three
+# times and still contradicts itself when one of the roles is a Spring one.
+_TRAILING_SEASON = re.compile(
+    r"[\s,\u2013-]+(spring|summer|fall|autumn|winter)\s*20\d\d\s*$", re.I)
+
+
+def clean_title(role: str) -> str:
+    """A posting title as it should read inside a sentence."""
+    return _TRAILING_SEASON.sub("", (role or "").strip()).strip(" ,-\u2013")
+
+
+def season_in(role: str) -> str:
+    """The season the title carries, if it carries one."""
+    m = _TRAILING_SEASON.search(role or "")
+    return f"{m.group(1).title()} {m.group(0).strip()[-4:]}" if m else ""
 
 
 def short_role(role: str) -> str:
@@ -119,7 +143,7 @@ def short_role(role: str) -> str:
     reading, and worth dropping from the subject, where it pushes the rest of
     the line past the cut.
     """
-    short = _TEAM_SUFFIX.sub("", role or "").strip()
+    short = _TEAM_SUFFIX.sub("", clean_title(role)).strip()
     return short if 4 <= len(short) <= 46 else (role or "").strip()
 
 
@@ -136,6 +160,15 @@ def _join(items: list[str]) -> str:
     if len(items) <= 1:
         return items[0] if items else ""
     return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def _role_list(titles: list[str]) -> str:
+    """Inline for one or two, a block for more."""
+    if len(titles) == 1:
+        return ""
+    if len(titles) == 2:
+        return f" {_join(titles)}."
+    return "\n\n" + "\n".join(f"  - {t}" for t in titles)
 
 
 def _fit(ladder: list[str], fields: dict) -> str:
@@ -184,13 +217,26 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         or [job.get("role") or "Software Engineer Intern"]
     role = roles[0]
     short = short_role(role)
+    titles = [clean_title(r) for r in roles]
+
+    # Employers put the season in the title, and the seasons need not agree:
+    # Tesla listed a Summer 2027 and a Spring 2027 posting side by side. When
+    # they disagree the note names none of them rather than asserting one and
+    # then contradicting it two lines later in the list.
+    carried = {season_in(r) for r in roles if season_in(r)}
     season = usable_season(job.get("season"))
+    if len(carried) == 1 and len(roles) == 1:
+        season = usable_season(carried.pop()) or season
+    elif len(carried) > 1:
+        season = ""
     fields = {
         "bracket": bracket(),
         "company": job.get("company") or "your team",
-        "role": role,
+        # The cleaned title, or a single-role note reads "Summer 2027 Software
+        # Engineer Intern - Vehicle Software - Summer 2027".
+        "role": titles[0],
         "season": season,
-        "season_role": f"{season} {role}".strip(),
+        "season_role": f"{season} {titles[0]}".strip(),
         "short_role": short,
         "season_short_role": f"{season} {short}".strip(),
         "for_season": f" for {season}" if season else "",
@@ -204,7 +250,7 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         # thing telling "Software Engineer Intern" from "Software Engineer
         # Intern - Azure Networking", and dropping it turns a list of three
         # roles into the same role written twice.
-        "roles": _join(roles),
+        "roles": _join(titles),
     }
     cid = int(contact.get("id") or 0)
     multi = len(roles) > 1
@@ -222,7 +268,8 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
     wins = "\n".join(f"  - {label}: {text}" for label, text in WINS[:3])
     body = (
         f"Hi {fields['first_name']},\n\n"
-        f"{_pick(MULTI_OPENERS if multi else OPENERS, cid).format(**fields)}\n\n"
+        f"{_pick(MULTI_OPENERS if multi else OPENERS, cid).format(**fields)}"
+        f"{_role_list(titles)}\n\n"
         f"I am a {ME['degree']} student at {ME['school']} "
         f"({ME['honors']}, {ME['gpa']} GPA), graduating {ME['grad']}. "
         f"A few things I have worked on:\n\n"

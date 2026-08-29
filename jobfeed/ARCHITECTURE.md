@@ -134,6 +134,13 @@ three recruiters — and each names all three roles. Drafting per posting instea
 produced *nine* near-identical emails, and the cooldown then held eight of them
 permanently, so two of the three applications got no outreach at all.
 
+Titles come from `job.title`, exactly as the source reported them, and are
+used three ways: cleaned of any trailing season for the body, additionally
+stripped of the team suffix for the subject, and deduplicated so two postings
+sharing a title are listed once. Beyond two roles the note switches from a
+sentence to a bulleted list — four real posting titles run together are
+unreadable.
+
 `outreach_job` records every application a note covers. Without it the roles a
 note did not name as primary look undrafted and get written again the next day.
 
@@ -316,6 +323,10 @@ what it claims**. None of these raised an error.
 | `emails` (list) read as `email` (string) | No addresses found | Full-price run, zero drafts |
 | `plan_sends` clamped past slots to "now" | Scheduled sends | A queue built at 2am sent at 2am, undoing every other guard |
 | Verifier probed without controls | A confident split | Nonsense addresses scoring `verified` were invisible |
+| Team-suffix rule matched a hyphen inside a word | Tidy subjects | "ASIC Package Engineer Intern Co-op" went out as "… Intern Co" |
+| Season quoted when the title already carried it | A correct season | "Summer 2027 SWE Intern - Vehicle Software - Summer 2027" |
+| One season asserted over roles from several | A confident sentence | Named Summer 2027, then listed a Spring 2027 posting under it |
+| "three notes" hardcoded in the closing phrase | Fine at n=3 | "four roles … rather than send you three notes" |
 | Drafts written per posting, not per person | Nine tidy drafts | Three applications at one company sent **one** email; the cooldown held the other eight forever |
 | Cooldown applied per send, not per campaign | A working guard | The first note of a batch blocked the other two, collapsing three recruiters to one |
 | Roster never topped up | A cache hit | The first application spent all three cached names; every later one found nobody new |
@@ -328,7 +339,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 58 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 64 tests, `python -m pytest jobfeed/tests -q`.
 
 Fixtures in `jobfeed/tests/fixtures/` are captured live API responses.
 `people_probe.json` has had identities replaced — the shape is what the tests
