@@ -360,8 +360,18 @@ attachment would quietly stop happening. It is refused unless it really begins
 a value straight from a web form must not be able to point at a file.
 
 A blank field means "whatever the repository says", which is a real state and
-must not blank the sentence. Settings apply to notes drafted from then on;
-ones already written keep their wording, and the per-note editor changes those.
+must not blank the sentence.
+
+**Saved settings become the default for every note drafted afterwards** — the
+bullets, the graduation date, the portfolio. **They do not rewrite notes that
+already exist**, deliberately: a settings change would otherwise silently
+reword something already read and approved. To bring a queued note up to date,
+edit it, or cancel it and press ▶ again.
+
+**Editing works on scheduled notes, not only unsent drafts.** Anything
+`draft`, `queued` or `held` can be rewritten and keeps its send time. Only a
+sent note refuses, because editing that would make the dashboard disagree with
+the recruiter's inbox.
 
 ### How the mail is built
 
