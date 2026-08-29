@@ -144,7 +144,7 @@ def main():
     titles = apply_to(con, "Tesla", 3)
     for t in titles:
         print(f"    applied: {t}")
-    d = _run.prepare(con, limit=5, per_company=3)
+    d = _run.prepare(con, limit=5, per_company=3, dry_run=False)
     check("three drafts, not nine", d["drafts"] == 3, str(d["drafts"]))
     body = con.execute("SELECT body FROM outreach o JOIN contact c ON c.id=o.contact_id "
                        "WHERE c.email LIKE '%tesla%' LIMIT 1").fetchone()["body"]
@@ -157,6 +157,10 @@ def main():
           _run.prepare(con, limit=5)["drafts"] == 0)
 
     # ---------------------------------------------------------------- 3
+    body_all = "\n".join(r["body"] for r in con.execute("SELECT body FROM outreach"))
+    check("no start-date fragment survived into a note",
+          "2026 Start" not in body_all and "Plus one semester" not in body_all)
+
     banner("3. The copy editor runs on the drafts")
     p = _run.polish_drafts(con, limit=3)
     print(f"    {p['seen']} seen, {p['edited']} edited, {p['unchanged']} unchanged, "

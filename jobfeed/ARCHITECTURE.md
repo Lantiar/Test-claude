@@ -184,6 +184,37 @@ to a different set of strangers at a company you have already contacted.
 
 Writes drafts. Nothing leaves.
 
+### 1a. `titles` — a model judges, but may only delete
+
+A posting title arrives from the employer and goes into the email verbatim, so
+it is the one place text a stranger wrote reaches a recruiter under your name.
+Most are fine; a minority carry a fragment that reads as machine output —
+`- 2026 Start`, `- 4 Months`, `Plus one semester`.
+
+A regex cannot make this call. In this feed `Geometry and 3D Vision` and
+`- 2027 Summer` both contain digits and only one is noise. So the judgement is
+a model's — but **its only permitted action is deletion**. The answer is
+accepted only if it is a *subsequence* of the original: same words, same order,
+nothing introduced. `is_subsequence` is the whole guarantee, and it means a
+title can never be written, only chosen from the employer's own words.
+
+That is also what keeps generated prose out of the mail entirely. Every word a
+recruiter reads comes from the template or from the posting itself, so there is
+no model-written sentence to recognise.
+
+- **Only flagged titles are sent.** A cheap detector (digit runs, requisition
+  ids, durations, trailing fragments, shouted words, repeats) fires on about
+  10% of the feed. `Geometry and 3D Vision` is never shown to the model at all,
+  so its digits are safe by construction rather than by good judgement.
+- **A dangling separator is cleaned up by us**, not by asking the model to.
+- **Two words is the floor.** "Intern" alone does not name a role.
+- **An unsalvageable title is dropped from the list**; if it was the only one,
+  the whole draft waits for a human rather than going out naming nothing.
+- Seasons are read off the titles **before** trimming, or removing them is what
+  makes two postings that disagree look like they agree.
+
+About $0.10 per 1,000 titles.
+
 ### 1b. `polish` — a cheap model fixes grammar, and only grammar
 
 Template copy fails mechanically: a doubled space where a field was empty, a
@@ -394,6 +425,7 @@ what it claims**. None of these raised an error.
 | Follow-ups subject to the company cooldown | A guard holding | A nudge on an open thread held because a *different* person at that employer was written to |
 | Signature sent to the copy editor and reattached | An accepted edit | A reformatted signature made the reattach point unfindable, so the mail went out signed twice |
 | A test that corrupted a draft without checking the corruption applied | A passing check | `str.replace` matched nothing, so "unchanged" measured an unmodified draft |
+| Seasons read off titles *after* trimming | A clean title | Trimming removed the evidence that two postings disagreed, so the note asserted one season again |
 | `cursor.lastrowid` trusted after `INSERT OR IGNORE` | A normal insert | Not zero for an ignored row — it is the connection's last rowid, so drafts pointed at contact ids that did not exist |
 
 The last one is the general lesson: **the verification probe only became
@@ -402,7 +434,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 80 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 88 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

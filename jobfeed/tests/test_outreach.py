@@ -1163,3 +1163,122 @@ def test_the_signature_is_never_shown_to_the_editor(con, monkeypatch):
     if not out["rejected"]:
         assert out["body"].count("Nideesh Bharath Kumar") == 1, out["body"]
         assert out["body"].count("https://nideesh.ai") == 1
+
+
+# ---- title cleaning -------------------------------------------------------
+#
+# The one place a stranger's text reaches a recruiter under his name. The
+# model may judge, but its only permitted action is deletion, and the check
+# is mechanical.
+
+def test_only_words_from_the_original_survive():
+    """The entire guarantee. A model that reorders, rephrases, corrects a
+    spelling or adds a word fails here and the original is kept, so no title
+    can ever be written rather than chosen."""
+    from jobfeed.outreach.titles import is_subsequence as sub
+    original = "Software Engineer Intern - Global E-Commerce - 2027 Summer"
+    assert sub("Software Engineer Intern - Global E-Commerce", original)
+    assert sub("Software Engineer Intern", original)
+    assert sub(original, original)
+    assert not sub("Software Engineering Intern", original)      # rephrased
+    assert not sub("Global E-Commerce Software Engineer Intern", original)  # reordered
+    assert not sub("Software Engineer Intern - E-Commerce Team", original)  # invented
+    assert not sub("Software Engineer Intern - Global E-Commerce!", original)
+    assert not sub("", original)
+
+
+def test_a_digit_that_belongs_to_the_work_is_never_asked_about():
+    """"Geometry and 3D Vision" and "- 2027 Summer" both carry digits and only
+    one is noise. The detector keeps the first away from the model entirely,
+    so it is safe by construction rather than by the model's good judgement."""
+    from jobfeed.outreach.titles import needs_review
+    assert not needs_review("Computer Vision Scientist Intern - Geometry and 3D Vision")
+    assert not needs_review("ASIC Package Engineer Intern Co-op")
+    assert not needs_review("Software Engineer Intern - Vehicle Software")
+    for noisy in ("Analyst Co-op Intern - Winter 2027 - 4 Months",
+                  "Engineer Co-op - Summer 2027 - Plus one semester",
+                  "Data Enablement Co-op - CFO - 8 Months",
+                  "Software Engineer Intern - Network Security - 2026 Start",
+                  "Engineer Intern R129582"):
+        assert needs_review(noisy), noisy
+
+
+def test_an_invented_title_is_refused(monkeypatch):
+    from jobfeed.outreach import titles as _t
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(_t, "_ask", lambda m, k: (
+        {"keep": "Senior Software Engineering Internship", "reason": "tidied"}, "", 0.0))
+    out = _t.clean("Software Engineer Intern - 2026 Start")
+    assert out["rejected"].startswith("not a subsequence")
+    assert out["title"] == "Software Engineer Intern - 2026 Start"
+    assert not out["changed"]
+
+
+def test_a_title_trimmed_to_nothing_is_refused(monkeypatch):
+    """Two words is the floor. "Intern" alone does not name a role, and an
+    email that says it reads worse than one quoting the employer verbatim."""
+    from jobfeed.outreach import titles as _t
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    for answer in ("Intern", ""):
+        monkeypatch.setattr(_t, "_ask", lambda m, k, a=answer: (
+            {"keep": a, "reason": ""}, "", 0.0))
+        out = _t.clean("Data Enablement Co-op - CFO - 8 Months")
+        assert out["rejected"] and not out["changed"], answer
+
+
+def test_the_api_failing_leaves_the_title_alone(monkeypatch):
+    from jobfeed.outreach import titles as _t
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(_t, "_ask", lambda m, k: ({}, "HTTP 429: no credits", 0.0))
+    out = _t.clean("Data Enablement Co-op - CFO - 8 Months")
+    assert out["title"] == "Data Enablement Co-op - CFO - 8 Months"
+    assert out["rejected"].startswith("HTTP 429")
+
+
+def test_a_dangling_separator_is_cleaned_up_by_us(monkeypatch):
+    """Deleting a trailing fragment leaves the dash that introduced it. We
+    strip punctuation ourselves rather than asking the model to."""
+    from jobfeed.outreach import titles as _t
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(_t, "_ask", lambda m, k: (
+        {"keep": "Data Enablement Co-op - CFO -", "reason": ""}, "", 0.0))
+    out = _t.clean("Data Enablement Co-op - CFO - 8 Months")
+    assert out["title"] == "Data Enablement Co-op - CFO", out
+
+
+def test_an_unusable_title_is_dropped_but_the_others_still_go(monkeypatch):
+    """One bad title in a batch should not cost the whole note; the only
+    title being bad should not send a note naming nothing."""
+    from jobfeed.outreach import run as _run, titles as _t
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(_t, "clean", lambda t: (
+        {"title": t, "changed": False, "reason": "", "cost": 0.0,
+         "flagged": "", "rejected": "unsalvageable" if "R129582" in t else ""}))
+
+    jobs = [{"title": "Software Engineer Intern"}, {"title": "Engineer Intern R129582"}]
+    roles, dropped, _ = _run._clean_roles(jobs, dry_run=False)
+    assert roles == ["Software Engineer Intern"] and len(dropped) == 1
+
+    roles, dropped, _ = _run._clean_roles([jobs[1]], dry_run=False)
+    assert roles == [] and len(dropped) == 1
+
+
+def test_trimming_a_season_off_a_title_does_not_hide_a_conflict(monkeypatch):
+    """Tesla listed a Summer 2027 and a Spring 2027 posting side by side. The
+    note names neither -- but only if the disagreement is read off the titles
+    before the cleaner removes it, which is precisely what makes two postings
+    that disagree look like they agree."""
+    from jobfeed.outreach import run as _run, titles as _t
+    monkeypatch.setattr(_t, "clean", lambda t: {
+        "title": t.rsplit(" - ", 1)[0], "changed": True, "reason": "",
+        "cost": 0.0, "flagged": "season", "rejected": ""})
+
+    jobs = [{"title": "SWE Intern - Vehicle Software - Summer 2027"},
+            {"title": "SWE Intern - Information Security - Spring 2027"}]
+    roles, _, meta = _run._clean_roles(jobs, dry_run=False)
+    assert all("2027" not in r for r in roles), roles
+    assert meta["seasons"] == {"Summer 2027", "Spring 2027"}
+
+    same = [{"title": "SWE Intern - A - Summer 2027"},
+            {"title": "SWE Intern - B - Summer 2027"}]
+    assert _run._clean_roles(same, dry_run=False)[2]["seasons"] == {"Summer 2027"}

@@ -183,11 +183,9 @@ def _ask(messages: list, key: str) -> tuple[dict, str, float]:
     cost = (usage.get("prompt_tokens", 0) * cin
             + usage.get("completion_tokens", 0) * cout) / 1_000_000
     try:
-        answer = json.loads(data["choices"][0]["message"]["content"])
-        return ({"subject": str(answer["subject"]).strip(),
-                 "body": str(answer["body"]),
-                 "notes": [str(n) for n in (answer.get("notes") or [])]},
-                "", cost)
+        # Returned as parsed, not reshaped: this is shared with titles.py,
+        # which asks a different question and needs different keys back.
+        return json.loads(data["choices"][0]["message"]["content"]), "", cost
     except Exception:
         return {}, "editor returned no usable JSON", cost
 
@@ -240,14 +238,19 @@ def polish(subject: str, body: str, context: dict) -> dict:
             out["rejected"], out["cost"] = [err], cost
             return out
 
-        new_subject, new_head = answer["subject"], answer["body"].rstrip()
+        new_subject = str(answer.get("subject", "")).strip()
+        new_head = str(answer.get("body", "")).rstrip()
+        if not new_subject or not new_head:
+            out["rejected"], out["cost"] = ["editor returned no subject or body"], cost
+            return out
         # Checked on the part the model was actually given, so the untouched
         # signature cannot pad the length band or supply a token the edit
         # dropped from the body above it.
         problems = verify(subject, head, new_subject, new_head, context)
         new_body = (new_head + "\n\n" + sig + "\n") if sig in body else new_head
         if not problems:
-            out.update(subject=new_subject, body=new_body, notes=answer["notes"],
+            out.update(subject=new_subject, body=new_body,
+                       notes=[str(n) for n in (answer.get("notes") or [])],
                        cost=cost, retried=attempt > 0,
                        changed=(new_subject, new_body) != (subject, body))
             return out

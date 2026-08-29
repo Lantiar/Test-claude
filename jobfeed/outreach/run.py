@@ -13,7 +13,7 @@ import time
 
 from .. import apply as _apply
 from .. import db as _db
-from . import apify, guards, polish as _polish
+from . import apify, guards, polish as _polish, titles as _titles
 from .gmail import classify, inbound_since, send as gmail_send
 from .templates import render
 
@@ -80,6 +80,18 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = True) -> 
         # One batch at one company: the sends inside it do not count against
         # each other's cooldown, and the next batch waits on the last of them.
         campaign = f"{cid}-{int(time.time())}"
+        roles, dropped, meta = _clean_roles(jobs, dry_run)
+        stats["cost"] = stats.get("cost", 0.0) + meta["cost"]
+        season = (jobs[0]["season"] or "").split(",")[0].strip()
+        if len(meta["seasons"]) > 1:
+            season = ""          # the postings disagree; name none of them
+        for note in dropped:
+            stats["skipped"].append(f"{company}: {note}")
+        if not roles:
+            stats["skipped"].append(
+                f"{company}: no usable role title, nothing drafted")
+            continue
+
         contacts, why = _pick_contacts(con, found, cid, per_company, campaign)
         if not contacts:
             stats["skipped"].append(f"{company}: {why}")
@@ -87,9 +99,7 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = True) -> 
 
         for contact in contacts:
             subject, body, variant = render(
-                contact, {"company": company,
-                          "roles": [j["title"] for j in jobs],
-                          "season": (jobs[0]["season"] or "").split(",")[0].strip()})
+                contact, {"company": company, "roles": roles, "season": season})
             cur = con.execute(
                 "INSERT OR IGNORE INTO outreach(job_key, contact_id, variant, "
                 "subject, body, step, status, campaign, created_at) "
@@ -107,6 +117,39 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = True) -> 
             stats["drafts"] += 1
     con.commit()
     return stats
+
+
+def _clean_roles(jobs, dry_run: bool) -> tuple[list[str], list[str], dict]:
+    """Titles fit to put in an email, plus what was left out and why.
+
+    A title the cleaner cannot rescue is dropped from the list rather than
+    printed as it stands -- unless it is the only one, in which case there is
+    no note to send and the whole draft waits for a human. Silently emailing
+    a title that reads as machine output is the outcome worth avoiding; doing
+    it because the alternative was awkward is not a reason.
+    """
+    from .templates import season_in
+
+    # Read the seasons off the ORIGINAL titles, before trimming removes them.
+    # Trimming is what makes two postings that disagree -- Tesla listed a
+    # Summer 2027 and a Spring 2027 side by side -- look like they agree, and
+    # the note then asserts one season and contradicts itself in the list.
+    carried = {season_in(job["title"]) for job in jobs}
+    carried.discard("")
+
+    roles, dropped, spent = [], [], 0.0
+    for job in jobs:
+        title = job["title"]
+        if dry_run:
+            roles.append(title)
+            continue
+        out = _titles.clean(title)
+        spent += out["cost"]
+        if out["rejected"]:
+            dropped.append(f"{title[:48]!r} left out -- {out['rejected'][:60]}")
+            continue
+        roles.append(out["title"])
+    return roles, dropped, {"cost": spent, "seasons": carried}
 
 
 def _pick_contacts(con, found: list[dict], company_id: int | None,
