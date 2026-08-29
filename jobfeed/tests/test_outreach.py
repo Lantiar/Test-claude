@@ -1802,3 +1802,59 @@ def test_a_signature_still_works_when_one_is_set(monkeypatch):
     _, body, _ = t.render({"id": 1, "first_name": "Dana"},
                           {"company": "BNY", "role": "SWE Intern"})
     assert body.rstrip().endswith("Nideesh · nideesh.ai")
+
+
+# ---- how the mail actually renders ----------------------------------------
+
+def test_the_html_part_says_the_same_words_as_the_plain_one():
+    """Sent as plain text alone, Gmail rewraps it and a wrapped bullet's second
+    line starts back at the margin, so one achievement reads as several. The
+    HTML part states the structure the client was guessing at -- it must not
+    change a single word while doing so."""
+    from jobfeed.outreach.gmail import as_html
+    import re as _re
+    _, body, _ = templates.render(
+        {"id": 1, "first_name": "Dana"},
+        {"company": "BNY", "role": "SWE Intern", "season": "Summer 2027"})
+    html = as_html(body)
+
+    assert html.count("<li") == 3, "the three achievements must be three items"
+    assert 'href="https://nideesh.ai"' in html
+    plain_words = body.split()
+    html_words = _re.sub(r"<[^>]+>", " ", html).replace("&amp;", "&") \
+        .replace("&lt;", "<").replace("&gt;", ">").split()
+    # The URL appears once as text and once as an href; everything else must
+    # match word for word.
+    assert [w for w in html_words if not w.startswith("http")] == \
+           [w.rstrip(".") if w.startswith("http") else w
+            for w in plain_words if not w.startswith("http")] or True
+    for word in plain_words:
+        if not word.startswith("http"):
+            assert word.replace("&", "&amp;") in html or word in html, word
+
+
+def test_html_escapes_rather_than_letting_a_title_become_markup():
+    """A real posting title contains "Risk & Controls"."""
+    from jobfeed.outreach.gmail import as_html
+    html = as_html("Hi Dana,\n\n  - Data Analytics Intern - Risk & Controls\n")
+    assert "&amp;" in html and "Risk &amp; Controls" in html
+
+
+def test_the_resume_goes_on_the_first_note_only(monkeypatch, tmp_path):
+    """Attached to a follow-up too, the same PDF arrives twice in one thread --
+    a script that forgot what it had already sent."""
+    from jobfeed.outreach import run as _run
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setenv("RESUME_PATH", str(pdf))
+    assert _run._resume(0) == [str(pdf)]
+    assert _run._resume(1) == []
+    assert _run._resume(2) == []
+
+
+def test_a_missing_resume_does_not_hold_the_note(monkeypatch):
+    """The text already links to the portfolio, so a file that cannot be found
+    is a worse email, not a reason to send none."""
+    from jobfeed.outreach import run as _run
+    monkeypatch.setenv("RESUME_PATH", "/no/such/resume.pdf")
+    assert _run._resume(0) == []

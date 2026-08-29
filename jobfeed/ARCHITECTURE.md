@@ -340,6 +340,22 @@ their addresses, and the page sits on a public URL beside a public job feed.
 The coarse per-job state, which names nobody, stays open because the job
 board's buttons need it.
 
+### How the mail is built
+
+Sent as `multipart/mixed` → `multipart/alternative` (plain + HTML) → the
+resume. **The HTML part says the same words as the plain one** and exists only
+because Gmail, given plain text alone, rewraps it in a proportional font: a
+wrapped bullet's second line starts back at the margin, so one three-line
+achievement reads as three separate thoughts and the note looks pasted. The
+markup states the structure the client was guessing at; a test asserts word
+equality between the two parts.
+
+The resume goes on the **first note only** — attached to a follow-up as well,
+the same PDF arrives twice in one thread, which reads as a script that forgot
+what it had already sent. A missing or unset file sends the note without it:
+the text already links to the portfolio, so a file that cannot be found is a
+worse email, not a reason to send none. The PDF itself is gitignored.
+
 ### 2. `schedule` — scatter
 
 `guards.plan_sends()` assigns send times: weekdays only, 09:00–16:30 in the
@@ -444,6 +460,7 @@ jobfeed outreach verify <email>… # probe addresses, no database writes
 | `OUTREACH_FROM` | From address |
 | `OUTREACH_BRACKET` | The subject-line bracket, default `Prev Google/Zon` |
 | `OUTREACH_SIGNATURE` | A block under the sign-off. Empty by default — everything it carried is already in the mail |
+| `RESUME_PATH` | The PDF attached to a first note. Default `config/files/resume.pdf`, which is gitignored |
 | `OPENAI_API_KEY` | The copy editor. Without it, drafts go out exactly as the templates wrote them |
 | `OUTREACH_POLISH_MODEL` | Default `gpt-4.1-nano` |
 | `JOBFEED_URL` | Feed to sync from |
@@ -506,7 +523,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 107 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 111 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

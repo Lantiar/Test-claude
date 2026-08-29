@@ -8,6 +8,7 @@ people who already answered.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import json
 import time
 
@@ -158,6 +159,20 @@ def _clean_roles(jobs, dry_run: bool) -> tuple[list[str], list[str], dict]:
             continue
         roles.append(out["title"])
     return roles, dropped, {"cost": spent, "seasons": carried}
+
+
+def _resume(step: int) -> list[str]:
+    """The resume, on the first note only.
+
+    Attached to a follow-up as well, the same PDF arrives twice in one thread
+    -- which reads as a script that forgot what it had already sent. Missing
+    or unset, the mail goes without it: an attachment that cannot be found is
+    not a reason to hold a note whose text already links to the portfolio.
+    """
+    if step:
+        return []
+    path = os.getenv("RESUME_PATH", "config/files/resume.pdf")
+    return [path] if path and os.path.exists(path) else []
 
 
 def _still_applied(con, row) -> bool:
@@ -422,7 +437,8 @@ def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
         try:
             res = gmail_send(row["email"], row["subject"], row["body"],
                              thread_id=row["thread_id"] or None,
-                             in_reply_to=row["message_id"] if row["step"] else None)
+                             in_reply_to=row["message_id"] if row["step"] else None,
+                             attachments=_resume(row["step"]))
         except Exception as exc:
             errors.append(f"{row['email']}: {type(exc).__name__}: {exc}")
             continue
