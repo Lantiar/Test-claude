@@ -68,7 +68,7 @@ a.title:hover{color:var(--accent);text-decoration:underline}
 .sub{color:var(--dim);font-size:12px;margin-top:2px}
 .tag{display:inline-block;border:1px solid var(--line);border-radius:4px;
   padding:0 5px;font-size:10.5px;color:var(--dim);margin-right:4px}
-select.stage{min-width:118px;font-size:12.5px}
+select.stage{min-width:108px;font-size:12.5px}
 select.stage[data-set="1"]{border-color:currentColor;font-weight:600}
 .s-interested{color:var(--s-interested)} .s-applied{color:var(--s-applied)}
 .s-oa{color:var(--s-oa)} .s-interview{color:var(--s-interview)}
@@ -78,14 +78,23 @@ select.stage[data-set="1"]{border-color:currentColor;font-weight:600}
 /* Outreach sits beside the stage, not inside it: a job is "applied" whether or
    not you have written to anyone, and folding the two into one control would
    lose the stage the moment outreach moved on. */
-.reach{display:inline-flex;align-items:center;gap:5px;margin-left:6px;
+/* The stage cell holds two controls. Laid out here rather than left to
+   inline-block: in a narrow column the button wrapped under the select with a
+   stray left margin, which is what made it look like it had fallen off. */
+td.stagecell{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.reach{display:inline-flex;align-items:center;gap:5px;
   font-size:11.5px;font-family:inherit;border:1px solid var(--line);
-  background:var(--card);color:var(--fg);border-radius:5px;padding:3px 8px;
-  cursor:pointer;white-space:nowrap;vertical-align:middle}
-.reach:hover:not(:disabled){border-color:var(--s-applied);color:var(--s-applied)}
-.reach:disabled{cursor:default;opacity:.85}
-.reach:focus-visible{outline:2px solid var(--s-applied);outline-offset:1px}
-.reach.queued{color:var(--s-oa);border-color:var(--s-oa)}
+  background:var(--panel);color:var(--ink);border-radius:5px;padding:4px 9px;
+  cursor:pointer;white-space:nowrap;line-height:1.3}
+.reach:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.reach:disabled{cursor:default}
+.reach:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* Green from the moment it is pressed: the click did something, and a colour
+   that only arrives once the runner has been round is a button that looks
+   broken for half an hour. Filled rather than outlined, so it still reads as
+   in-progress next to the solid green of a reply. */
+.reach.queued{color:var(--accent);border-color:var(--accent);
+  background:var(--accent-soft);font-weight:600}
 .reach.reached{color:var(--s-applied);border-color:var(--s-applied);font-weight:600}
 .reach.replied{color:var(--s-offer);border-color:var(--s-offer);font-weight:700}
 .reach.held,.reach.failed{color:var(--s-rejected);border-color:var(--s-rejected)}
@@ -104,15 +113,15 @@ a.reach{text-decoration:none}
 .tabs{display:flex;gap:2px;margin:14px 0 0}
 .tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--dim);
   font:inherit;font-size:13.5px;padding:7px 12px;cursor:pointer;border-radius:5px 5px 0 0}
-.tab:hover{color:var(--fg)}
-.tab[aria-selected="true"]{color:var(--fg);font-weight:600;border-bottom-color:var(--s-applied)}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink);font-weight:600;border-bottom-color:var(--s-applied)}
 .tab:focus-visible{outline:2px solid var(--s-applied);outline-offset:-2px}
 [hidden]{display:none!important}
 
 /* ---- outreach dashboard ---- */
 .tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));
   padding:16px 20px 4px}
-.tile{border:1px solid var(--line);border-radius:7px;padding:10px 12px;background:var(--card)}
+.tile{border:1px solid var(--line);border-radius:7px;padding:10px 12px;background:var(--panel)}
 .tile b{display:block;font-size:21px;line-height:1.2;font-variant-numeric:tabular-nums}
 .tile span{font-size:11px;color:var(--dim);letter-spacing:.02em}
 .tile.warn b{color:var(--s-rejected)} .tile.good b{color:var(--s-offer)}
@@ -123,7 +132,7 @@ a.reach{text-decoration:none}
 .p-cancelled{color:var(--dim)}
 .act{background:none;border:1px solid var(--line);border-radius:5px;color:var(--dim);
   font:inherit;font-size:11px;padding:2px 7px;cursor:pointer;margin-right:3px}
-.act:hover{color:var(--fg);border-color:var(--fg)}
+.act:hover{color:var(--ink);border-color:var(--ink)}
 .act.danger:hover{color:var(--s-rejected);border-color:var(--s-rejected)}
 .act:focus-visible{outline:2px solid var(--s-applied);outline-offset:1px}
 td.who{max-width:230px}
@@ -132,7 +141,7 @@ td.who .sub{font-size:11px}
 
 /* ---- settings ---- */
 details.settings{margin:14px 20px 0;border:1px solid var(--line);border-radius:8px;
-  background:var(--card)}
+  background:var(--panel)}
 details.settings summary{cursor:pointer;padding:11px 14px;font-size:13px;
   font-weight:600;list-style:none}
 details.settings summary::-webkit-details-marker{display:none}
@@ -143,7 +152,7 @@ details.settings[open] summary::before{content:"▾ "}
 .settings label{display:block;font-size:11px;color:var(--dim);
   letter-spacing:.03em;text-transform:uppercase;margin-bottom:4px}
 .settings input[type=text],.settings input[type=url],.settings textarea{
-  font:inherit;font-size:13px;width:100%;background:var(--bg);color:var(--fg);
+  font:inherit;font-size:13px;width:100%;background:var(--bg);color:var(--ink);
   border:1px solid var(--line);border-radius:6px;padding:7px 9px}
 .settings textarea{min-height:56px;resize:vertical;line-height:1.45}
 .settings input:focus,.settings textarea:focus{outline:2px solid var(--s-applied);
@@ -156,18 +165,18 @@ details.settings[open] summary::before{content:"▾ "}
   border:1px solid var(--s-applied);background:none;color:var(--s-applied);
   font-weight:600;cursor:pointer}
 .settings .file{font-size:12px;color:var(--dim)}
-.settings .check{display:flex;gap:7px;align-items:center;font-size:12.5px;color:var(--fg);
+.settings .check{display:flex;gap:7px;align-items:center;font-size:12.5px;color:var(--ink);
   text-transform:none;letter-spacing:0}
 
 /* ---- the editor ---- */
-dialog#editor{border:1px solid var(--line);border-radius:10px;background:var(--card);
-  color:var(--fg);padding:0;width:min(760px,92vw);max-height:88vh}
+dialog#editor{border:1px solid var(--line);border-radius:10px;background:var(--panel);
+  color:var(--ink);padding:0;width:min(760px,92vw);max-height:88vh}
 dialog#editor::backdrop{background:rgba(0,0,0,.45)}
 #editor form{display:flex;flex-direction:column;gap:10px;padding:18px 20px 16px}
 #editor h2{margin:0;font-size:15px;font-weight:600}
 #editor .to{font-size:12px;color:var(--dim)}
 #editor label{font-size:11px;color:var(--dim);letter-spacing:.03em;text-transform:uppercase}
-#editor input,#editor textarea{font:inherit;background:var(--bg);color:var(--fg);
+#editor input,#editor textarea{font:inherit;background:var(--bg);color:var(--ink);
   border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%}
 #editor textarea{min-height:340px;resize:vertical;line-height:1.5;font-size:13px}
 #editor input:focus,#editor textarea:focus{outline:2px solid var(--s-applied);
@@ -175,7 +184,7 @@ dialog#editor::backdrop{background:rgba(0,0,0,.45)}
 #editor .row{display:flex;gap:8px;justify-content:flex-end;align-items:center}
 #editor .row .sub{margin-right:auto}
 #editor button{font:inherit;font-size:12.5px;padding:6px 14px;border-radius:6px;
-  border:1px solid var(--line);background:none;color:var(--fg);cursor:pointer}
+  border:1px solid var(--line);background:none;color:var(--ink);cursor:pointer}
 #editor button[value="save"]{border-color:var(--s-applied);color:var(--s-applied);
   font-weight:600}
 footer{padding:0 20px 40px;color:var(--dim);font-size:12px}
@@ -207,7 +216,7 @@ footer{padding:0 20px 40px;color:var(--dim);font-size:12px}
   <table>
     <thead><tr>
       <th style="width:96px" id="datehead">Posted</th><th style="width:170px">Company</th>
-      <th>Role</th><th style="width:180px">Where</th><th style="width:130px">Stage</th>
+      <th>Role</th><th style="width:164px">Where</th><th style="width:184px">Stage</th>
     </tr></thead>
     <tbody id="body"></tbody>
   </table>
@@ -734,7 +743,7 @@ function render(){
           ${j.sources.map(s=>`<span class="tag">${esc(s)}</span>`).join("")}</div>
       </td>
       <td class="sub">${esc(j.locations.join(", ") || "—")}</td>
-      <td><select class="stage s-${j.stage||"interested"}" data-set="${j.stage?1:0}" data-key="${esc(j.key)}">
+      <td class="stagecell"><select class="stage s-${j.stage||"interested"}" data-set="${j.stage?1:0}" data-key="${esc(j.key)}">
         <option value="">—</option>
         ${STAGES.map(s=>`<option value="${s}" ${s===j.stage?"selected":""}>${s}</option>`).join("")}
       </select>${reachControl(j)}</td>
