@@ -13,15 +13,15 @@ import time
 
 from .. import apply as _apply
 from .. import db as _db
-from . import apify, guards, polish as _polish, titles as _titles
+from . import apify, board as _board, guards, polish as _polish, titles as _titles
 from .gmail import classify, inbound_since, send as gmail_send
 from .templates import render
 
 
 # ---- 1. prepare -----------------------------------------------------------
 
-def prepare(con, limit: int = 5, per_company: int = 3,
-            dry_run: bool = False) -> dict:
+def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = False,
+            only: list[str] | None = None) -> dict:
     """For each company with new applications, find a recruiter and write one draft.
 
     Grouped by company, not by posting. Three roles at one employer are one
@@ -44,6 +44,13 @@ def prepare(con, limit: int = 5, per_company: int = 3,
         WHERE a.stage != 'interested'
           AND NOT EXISTS (SELECT 1 FROM outreach_job oj WHERE oj.job_key = a.job_key)
         ORDER BY a.updated_at""").fetchall()
+
+    # Scoped when the caller names the jobs. A button press is consent for one
+    # job, and drafting for everything else marked applied would turn one
+    # click into mail nobody asked to send.
+    if only is not None:
+        wanted = set(only)
+        rows = [r for r in rows if r["job_key"] in wanted]
 
     by_company: dict[object, list] = {}
     for row in rows:
@@ -151,6 +158,25 @@ def _clean_roles(jobs, dry_run: bool) -> tuple[list[str], list[str], dict]:
             continue
         roles.append(out["title"])
     return roles, dropped, {"cost": spent, "seasons": carried}
+
+
+def _still_applied(con, row) -> bool:
+    """Is the application this note refers to still on record?
+
+    A draft can outlive its reason. Un-marking a job, or removing an
+    application added by mistake, leaves the outreach rows queued and pointing
+    at nothing -- and they still send, telling a recruiter you applied to
+    something the tracker no longer says you applied to. Nothing else in the
+    pipeline notices, because every other check is about the recipient.
+    """
+    keys = [r["job_key"] for r in con.execute(
+        "SELECT job_key FROM outreach_job WHERE outreach_id=?", (row["id"],))]
+    keys = keys or [row["job_key"]]        # rows written before outreach_job existed
+    placeholders = ",".join("?" * len(keys))
+    row = con.execute(
+        f"SELECT COUNT(*) c FROM application WHERE job_key IN ({placeholders}) "
+        f"AND stage != 'interested'", keys).fetchone()
+    return bool(row and row["c"])
 
 
 def _pick_contacts(con, found: list[dict], company_id: int | None,
@@ -384,6 +410,8 @@ def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
         # of which happened after the only check the first version made.
         why = _may_write(con, dict(row), row["company_id"], row["campaign"],
                          followup=bool(row["step"]))
+        if not why and not _still_applied(con, row):
+            why = "the application it refers to is no longer on record"
         if why:
             held.append(f"{row['email']}: {why}")
             con.execute("UPDATE outreach SET status='held' WHERE id=?", (row["id"],))
@@ -407,6 +435,97 @@ def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
     con.commit()
     return {"sent": sent, "dry_run": dry_run, "errors": errors, "held": held,
             "paused": False}
+
+
+# ---- the board -------------------------------------------------------------
+
+def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
+    """Act on what the web tracker has asked for, and report back what happened.
+
+    One pass: mirror the stages the tracker holds, draft for the jobs whose
+    button was pressed, polish, schedule, send what is due, read replies, and
+    write each job's state back so the page shows the outcome rather than the
+    intention.
+
+    Scoped to the pressed keys throughout. Everything else marked applied is
+    left alone -- the button is the consent, and one press must not become mail
+    to every company on the board.
+    """
+    out = {"queued": 0, "drafted": 0, "sent": 0, "replied": 0, "problems": []}
+    if not _board.available():
+        out["problems"].append("no Upstash credentials; the board is unreadable")
+        return out
+
+    # The tracker is the record of what has been applied to; the runner starts
+    # from a published snapshot and holds none of it.
+    for job_key, stage in _board.stages().items():
+        con.execute(
+            "INSERT INTO application(job_key, stage, updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(job_key) DO UPDATE SET stage=excluded.stage, "
+            "updated_at=excluded.updated_at",
+            (job_key, stage, time.time()))
+    con.commit()
+
+    asked = _board.queued()
+    out["queued"] = len(asked)
+    for job_key in asked:
+        try:
+            stats = prepare(con, limit=1, per_company=per_company, only=[job_key])
+            if stats["drafts"]:
+                out["drafted"] += stats["drafts"]
+            else:
+                why = "; ".join(stats["skipped"][:2]) or "nothing to draft"
+                _board.write(job_key, "held", note=why)
+                out["problems"].append(f"{job_key[:40]}: {why}")
+        except Exception as exc:
+            _board.write(job_key, "failed", note=f"{type(exc).__name__}: {exc}")
+            out["problems"].append(f"{job_key[:40]}: {exc}")
+
+    if out["drafted"]:
+        polish_drafts(con)
+        schedule(con)
+
+    result = dispatch(con, dry_run=not send, limit=10)
+    out["sent"] = result.get("sent", 0)
+    out["problems"] += result.get("errors", []) + result.get("held", [])
+
+    try:
+        out["replied"] = watch(con).get("human", 0)
+    except Exception as exc:
+        out["problems"].append(f"watch: {type(exc).__name__}: {exc}")
+
+    # Everything still in flight, not only what was asked for on this pass.
+    # Reporting on `asked` alone meant a job stopped being watched the moment
+    # it left the queue -- so it could reach "reached out" and never move to
+    # "replied", and the reply would exist in the database and nowhere the
+    # page could see it.
+    live = [key for key, record in _board.read().items()
+            if record.get("state") in ("queued", "reached")]
+    _report(con, sorted(set(asked) | set(live)))
+    return out
+
+
+def _report(con, keys: list[str]) -> None:
+    """Write each asked-for job's real state back to the board.
+
+    Reads the outreach rows rather than trusting what this pass did, so a job
+    whose mail went out on an earlier run is still reported correctly.
+    """
+    for job_key in keys:
+        rows = con.execute(
+            "SELECT o.status, o.thread_id, o.sent_at FROM outreach o "
+            "JOIN outreach_job oj ON oj.outreach_id = o.id "
+            "WHERE oj.job_key = ? AND o.step = 0", (job_key,)).fetchall()
+        if not rows:
+            continue
+        thread = next((r["thread_id"] for r in rows if r["thread_id"]), "")
+        sent = sum(1 for r in rows if r["sent_at"])
+        if any(r["status"] == "replied" for r in rows):
+            _board.write(job_key, "replied", thread=thread, sent=sent)
+        elif sent:
+            _board.write(job_key, "reached", thread=thread, sent=sent)
+        # still queued otherwise: drafted but not yet due, which the page
+        # already shows as queued.
 
 
 # ---- 4. watch -------------------------------------------------------------

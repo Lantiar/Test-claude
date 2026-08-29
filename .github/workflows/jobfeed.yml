@@ -102,6 +102,41 @@ jobs:
           # not recognise.
           touch site/.nojekyll
 
+      # Recruiter outreach, and only for jobs whose button was pressed on the
+      # tracker. Separate from the poll above so a failure here cannot cost a
+      # publish: the feed is the thing that must not miss a run, and the
+      # outreach board is asked again in half an hour either way.
+      #
+      # OUTREACH_SEND is the kill switch. Unset, this drafts and schedules but
+      # sends nothing, which is what a first deployment should do -- set it to
+      # 1 in the repository variables once you have read a batch and want the
+      # button to actually put mail out.
+      - name: Recruiter outreach
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          OUTREACH_FROM: ${{ vars.OUTREACH_FROM }}
+          OUTREACH_BRACKET: ${{ vars.OUTREACH_BRACKET }}
+          KV_REST_API_URL: ${{ secrets.KV_REST_API_URL }}
+          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
+          JOBFEED_DB: ${{ runner.temp }}/jobfeed.sqlite3
+        run: |
+          if [ -z "$KV_REST_API_URL" ]; then
+            echo "::notice::no Upstash credentials, so the outreach board was not read"
+            exit 0
+          fi
+          if [ "${{ vars.OUTREACH_SEND }}" = "1" ]; then
+            python3 -m jobfeed.cli outreach board --send
+          else
+            echo "OUTREACH_SEND is not 1: drafting and scheduling only, nothing sent"
+            python3 -m jobfeed.cli outreach board
+          fi
+
       # A fresh single-commit branch each time, rather than a growing history
       # of megabyte snapshots. Nothing is lost by that: every snapshot is
       # complete, including each job's original first_seen_at, so the newest

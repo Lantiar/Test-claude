@@ -271,6 +271,35 @@ Any failure — no key, an outage, a rate limit, an unparseable answer — retur
 the original unchanged. This runs on mail about to be sent, so the fallback is
 the text that was already tested, never nothing and never a guess.
 
+### 1c. The board — the tracker's button
+
+The dashboard shows a **▶ reach out** button beside any job marked applied or
+beyond. The page cannot do the work — sourcing is Apify, sending is Gmail, both
+Python elsewhere — so a click writes an intent to Upstash (`jobfeed:outreach`)
+and the scheduled runner acts on it, writing the outcome back.
+
+```
+▶ reach out  ->  queued…  ->  reached out ↗  ->  replied ↗
+   click        recorded      mail is out      a recruiter answered
+```
+
+The link opens the Gmail thread. `held ↻` and `failed ↻` say what stopped it
+and can be pressed again.
+
+- **The state is a report, not a hope.** A browser may only ask; declaring
+  `reached` is refused from the page, because a record saying mail went out
+  when none did is worse than no record.
+- **Scoped to the pressed key.** `prepare(only=[...])` — one click is consent
+  for one job, and everything else marked applied is left alone.
+- **The runner mirrors the tracker's stages first.** It starts from a published
+  snapshot with no `application` rows of its own, so without that it sees
+  nobody as having applied to anything.
+- **Everything in flight is reported on, not just this pass's requests.** Watch
+  only the newly-queued and a job reaches "reached out" and can never move to
+  "replied".
+- `OUTREACH_SEND=1` in the repository variables is the kill switch. Unset, the
+  button drafts and schedules but sends nothing.
+
 ### 2. `schedule` — scatter
 
 `guards.plan_sends()` assigns send times: weekdays only, 09:00–16:30 in the
@@ -436,7 +465,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 90 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 96 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

@@ -1340,3 +1340,165 @@ def test_bounces_from_every_common_mail_system_are_caught():
     kind, _ = classify({"from": "Dana <dana@acme.com>", "subject": "Re: your note"},
                        "Thanks -- we can deliver feedback next week.")
     assert kind == "human"
+
+
+def test_a_draft_whose_application_is_gone_does_not_send(con, monkeypatch):
+    """A draft can outlive its reason. Un-marking a job, or removing an
+    application added by mistake, left the queued notes pointing at nothing --
+    and they still sent, telling a recruiter he applied to something his own
+    tracker no longer says he applied to. Every other check is about the
+    recipient, so nothing else noticed."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    _run.prepare(con, limit=5, per_company=1)
+    _run.schedule(con)
+    con.execute("UPDATE outreach SET send_after=?", (time.time() - 60,))
+    con.commit()
+
+    assert _run.dispatch(con, dry_run=True)["sent"] == 1        # normally it goes
+
+    con.execute("UPDATE outreach SET status='queued'")
+    con.execute("DELETE FROM application")                      # the reason disappears
+    con.commit()
+    out = _run.dispatch(con, dry_run=True)
+    assert out["sent"] == 0
+    assert "no longer on record" in " ".join(out["held"]), out["held"]
+
+
+def test_moving_a_job_back_to_interested_also_stops_it(con, monkeypatch):
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    _run.prepare(con, limit=5, per_company=1)
+    _run.schedule(con)
+    con.execute("UPDATE outreach SET send_after=?", (time.time() - 60,))
+    con.execute("UPDATE application SET stage='interested'")
+    con.commit()
+    assert _run.dispatch(con, dry_run=True)["sent"] == 0
+
+
+# ---- the web tracker's button ---------------------------------------------
+#
+# The page can ask but cannot send. These cover the round trip: a request goes
+# in, the runner acts on exactly that job, and the state written back is what
+# actually happened rather than what was hoped for.
+
+class _Board:
+    """A stand-in for the Upstash hash, with the same shape."""
+
+    def __init__(self, stages=None, requests=()):
+        self._stages = stages or {}
+        self.records = {k: {"state": "queued"} for k in requests}
+
+    def available(self): return True
+    def stages(self): return dict(self._stages)
+    def read(self): return dict(self.records)
+    def queued(self): return [k for k, v in self.records.items()
+                              if v.get("state") == "queued"]
+
+    def write(self, key, state, note="", thread="", sent=0):
+        self.records[key] = {"state": state, "note": note, "thread": thread,
+                             "sent": sent}
+
+
+def _board(monkeypatch, con, cid, stages, requests):
+    from jobfeed.outreach import run as _run
+    b = _Board(stages, requests)
+    monkeypatch.setattr(_run, "_board", b)
+    return b
+
+
+def test_only_the_job_whose_button_was_pressed_is_written_to(con, monkeypatch):
+    """One press is consent for one job. Drafting for everything else marked
+    applied would turn a single click into mail to every company on the
+    board."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    other = _company(con, "Globex")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    _job(con, other, "https://globex/1", "SWE Intern")
+    con.execute("DELETE FROM application")           # the tracker is the record
+    con.commit()
+
+    b = _board(monkeypatch, con, cid,
+               stages={"https://acme/1": "applied", "https://globex/1": "applied"},
+               requests=["https://acme/1"])
+    out = _run.serve_board(con, send=False)
+
+    assert out["queued"] == 1 and out["drafted"] == 3, out
+    companies = {r["company_id"] for r in con.execute(
+        "SELECT c.company_id FROM outreach o JOIN contact c ON c.id=o.contact_id")}
+    assert companies == {cid}, "a job nobody pressed got drafted"
+
+
+def test_the_stage_tracker_is_mirrored_into_the_runner(con, monkeypatch):
+    """The runner starts from a published snapshot and holds no applications of
+    its own, so without this it sees nobody as having applied to anything."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+
+    _board(monkeypatch, con, cid, stages={"https://acme/1": "applied"},
+           requests=["https://acme/1"])
+    _run.serve_board(con, send=False)
+    row = con.execute("SELECT stage FROM application WHERE job_key=?",
+                      ("https://acme/1",)).fetchone()
+    assert row and row["stage"] == "applied"
+
+
+def test_the_board_reports_what_happened_not_what_was_asked(con, monkeypatch):
+    """queued -> reached only once mail is actually out, and -> replied only
+    once a reply is recorded. A page that showed "reached out" because a
+    button was pressed would be a tracker that lies."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    b = _board(monkeypatch, con, cid, stages={"https://acme/1": "applied"},
+               requests=["https://acme/1"])
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+
+    _run.serve_board(con, send=False)                       # drafted, nothing due
+    assert b.records["https://acme/1"]["state"] == "queued"
+
+    sent = []
+    monkeypatch.setattr(_run, "gmail_send", lambda to, s, bd, **k: (
+        sent.append(to), {"message_id": f"<{len(sent)}@x>", "thread_id": "T9"})[1])
+    con.execute("UPDATE outreach SET send_after=? WHERE status='queued'",
+                (time.time() - 60,))
+    con.commit()
+    _run.serve_board(con, send=True)
+    record = b.records["https://acme/1"]
+    assert record["state"] == "reached" and record["thread"] == "T9", record
+
+    con.execute("UPDATE outreach SET status='replied' WHERE step=0 AND sent_at")
+    con.commit()
+    _run.serve_board(con, send=True)
+    assert b.records["https://acme/1"]["state"] == "replied"
+
+
+def test_a_job_with_no_recruiters_is_reported_held_not_left_spinning(con, monkeypatch):
+    """Otherwise the page shows "queued…" forever and there is nothing to
+    tell you why."""
+    from jobfeed.outreach import run as _run, apify as _apify
+    cid = _company(con, "Acme")
+    monkeypatch.setattr(_apify, "find_recruiters", lambda co, n=3: [])
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    b = _board(monkeypatch, con, cid, stages={"https://acme/1": "applied"},
+               requests=["https://acme/1"])
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+
+    _run.serve_board(con, send=False)
+    record = b.records["https://acme/1"]
+    assert record["state"] == "held" and "recruiters" in record["note"], record

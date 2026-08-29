@@ -75,6 +75,22 @@ select.stage[data-set="1"]{border-color:currentColor;font-weight:600}
 .s-final{color:var(--s-final)} .s-offer{color:var(--s-offer)}
 .s-accepted{color:var(--s-accepted)} .s-rejected{color:var(--s-rejected)}
 
+/* Outreach sits beside the stage, not inside it: a job is "applied" whether or
+   not you have written to anyone, and folding the two into one control would
+   lose the stage the moment outreach moved on. */
+.reach{display:inline-flex;align-items:center;gap:5px;margin-left:6px;
+  font-size:11.5px;font-family:inherit;border:1px solid var(--line);
+  background:var(--card);color:var(--fg);border-radius:5px;padding:3px 8px;
+  cursor:pointer;white-space:nowrap;vertical-align:middle}
+.reach:hover:not(:disabled){border-color:var(--s-applied);color:var(--s-applied)}
+.reach:disabled{cursor:default;opacity:.85}
+.reach:focus-visible{outline:2px solid var(--s-applied);outline-offset:1px}
+.reach.queued{color:var(--s-oa);border-color:var(--s-oa)}
+.reach.reached{color:var(--s-applied);border-color:var(--s-applied);font-weight:600}
+.reach.replied{color:var(--s-offer);border-color:var(--s-offer);font-weight:700}
+.reach.held,.reach.failed{color:var(--s-rejected);border-color:var(--s-rejected)}
+a.reach{text-decoration:none}
+
 .tier{display:inline-flex;align-items:center;justify-content:center;
   width:17px;height:17px;border-radius:4px;font-size:10.5px;font-weight:700;
   letter-spacing:0;margin-right:6px;vertical-align:1px;
@@ -121,6 +137,8 @@ The job data refreshes hourly.</footer>
 <script>
 const $ = s => document.querySelector(s);
 let JOBS = [], STAGES = [], filter = {q:"", season:"", source:"", stage:"", tier:""};
+// key -> {state, at, note, thread, sent}. Written by the runner, read here.
+let REACH = {};
 let sortBy = "posted";
 
 // The published file already arrives newest-posted first, with first_seen and
@@ -210,6 +228,19 @@ async function saveStage(key, stage){
   return "";
 }
 
+// A run can finish minutes after the click, and a tracker that only updates on
+// reload is one you learn not to trust.
+async function pollOutreach(){
+  if(!CENTRAL) return;
+  try {
+    const r = await fetch("./api/outreach", {cache:"no-store"});
+    if(!r.ok) return;
+    const next = (await r.json()).outreach || {};
+    if(JSON.stringify(next) !== JSON.stringify(REACH)){ REACH = next; render(); }
+  } catch(e){}
+}
+setInterval(pollOutreach, 60000);
+
 async function load(){
   let jobs, meta;
   try {
@@ -226,6 +257,10 @@ async function load(){
   // The central store if this deployment has one, otherwise this browser's.
   let mine = localStages();
   try {
+    try {
+      const o = await fetch("./api/outreach", {cache:"no-store"});
+      if(o.ok) REACH = (await o.json()).outreach || {};
+    } catch(e){ REACH = {}; }        // no endpoint on GitHub Pages; fine
     const r = await fetch("./api/stages", {cache:"no-store"});
     if(r.ok){
       const d = await r.json();
@@ -336,7 +371,7 @@ function render(){
       <td><select class="stage s-${j.stage||"interested"}" data-set="${j.stage?1:0}" data-key="${esc(j.key)}">
         <option value="">—</option>
         ${STAGES.map(s=>`<option value="${s}" ${s===j.stage?"selected":""}>${s}</option>`).join("")}
-      </select></td>
+      </select>${reachControl(j)}</td>
     </tr>`).join("");
   if(shown.length > 600)
     $("#body").insertAdjacentHTML("beforeend",
@@ -344,8 +379,73 @@ function render(){
         Showing the first 600. Narrow the filters to see the rest.</td></tr>`);
 }
 
+// Only for jobs you have actually applied to: the mail says you applied, so
+// offering it before that is offering to send something untrue.
+const REACHABLE = ["applied","oa","interview","final","offer","accepted"];
+
+function reachControl(j){
+  if(!CENTRAL || !REACHABLE.includes(j.stage||"")) return "";
+  const r = REACH[j.key] || {};
+  const title = esc(r.note || "");
+  if(r.state === "replied")
+    return r.thread
+      ? `<a class="reach replied" target="_blank" rel="noopener" title="${title}"
+            href="https://mail.google.com/mail/u/0/#all/${esc(r.thread)}">replied ↗</a>`
+      : `<span class="reach replied" title="${title}">replied</span>`;
+  if(r.state === "reached")
+    return r.thread
+      ? `<a class="reach reached" target="_blank" rel="noopener"
+            title="${title || "opens the thread in Gmail"}"
+            href="https://mail.google.com/mail/u/0/#all/${esc(r.thread)}">reached out ↗</a>`
+      : `<span class="reach reached" title="${title}">reached out</span>`;
+  if(r.state === "queued")
+    return `<button class="reach queued" disabled title="waiting for the next run">queued…</button>`;
+  if(r.state === "held" || r.state === "failed")
+    return `<button class="reach ${r.state}" data-reach="${esc(j.key)}"
+              title="${title || "it did not go; press to ask again"}">${r.state} ↻</button>`;
+  return `<button class="reach" data-reach="${esc(j.key)}"
+            title="write to recruiters at ${esc(j.company)}">▶ reach out</button>`;
+}
+
 function esc(s){ return String(s??"").replace(/[&<>"']/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+document.addEventListener("click", async e => {
+  const btn = e.target.closest("button.reach[data-reach]"); if(!btn) return;
+  const key = btn.dataset.reach;
+  let pass = passphrase();
+  if(!pass){
+    pass = window.prompt("Passphrase for saving:") || "";
+    if(!pass) return;
+    rememberPassphrase(pass);
+  }
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = "asking…";
+  let r;
+  try {
+    r = await fetch("./api/outreach", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({key, passphrase: pass})});
+  } catch(err){
+    btn.disabled = false; btn.textContent = was;
+    return alert("Could not reach the store, so nothing was requested.");
+  }
+  if(r.status === 401){
+    try { localStorage.removeItem(PASS_KEY); } catch(err){}
+    btn.disabled = false; btn.textContent = was;
+    return alert("That passphrase was not right.");
+  }
+  if(!r.ok && r.status !== 409){
+    const d = await r.json().catch(() => ({}));
+    btn.disabled = false; btn.textContent = was;
+    return alert(d.detail || d.error || `The store refused that (${r.status}).`);
+  }
+  // Recorded, not sent. The runner does the work on its next pass, so the
+  // honest label is the one that says it is waiting.
+  REACH[key] = {state:"queued", at: Math.floor(Date.now()/1000)};
+  render();
+});
 
 document.addEventListener("change", async e => {
   const sel = e.target.closest("select.stage"); if(!sel) return;

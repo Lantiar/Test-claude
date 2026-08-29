@@ -220,6 +220,17 @@ def cmd_outreach_dispatch(args, con) -> int:
     return 1 if d.get("errors") else 0
 
 
+def cmd_outreach_board(args, con) -> int:
+    """One pass over what the web tracker has asked for."""
+    d = _outreach("serve_board")(con, send=args.send, per_company=args.per_company)
+    print(f"{d['queued']} requested, {d['drafted']} drafted, "
+          f"{'sent' if args.send else 'would send'} {d['sent']}, "
+          f"{d['replied']} reply(s)")
+    for p in d["problems"]:
+        print(f"  {p}", file=sys.stderr)
+    return 0
+
+
 def cmd_outreach_watch(args, con) -> int:
     d = _outreach("watch")(con)
     print(f"{d['seen']} new message(s): {d.get('human',0)} human, "
@@ -483,6 +494,11 @@ def main(argv=None) -> int:
     q = osub.add_parser("dispatch"); q.set_defaults(fn=cmd_outreach_dispatch)
     q.add_argument("--send", action="store_true", help="actually send")
     q.add_argument("--limit", type=int, default=10)
+
+    q = osub.add_parser("board", help="act on requests from the web tracker")
+    q.set_defaults(fn=cmd_outreach_board)
+    q.add_argument("--send", action="store_true", help="actually send")
+    q.add_argument("--per-company", type=int, default=3)
 
     q = osub.add_parser("watch"); q.set_defaults(fn=cmd_outreach_watch)
     q = osub.add_parser("followups"); q.set_defaults(fn=cmd_outreach_followups)
