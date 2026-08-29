@@ -452,3 +452,57 @@ def test_a_followup_reuses_the_subject_that_was_actually_sent(con):
                       "WHERE step=1").fetchone()
     assert row["subject"] == "the subject they saw"
     assert row["thread_id"] == "T1" and row["message_id"] == "<m1@x>"
+
+
+# ---- the subject line -----------------------------------------------------
+
+def test_a_subject_is_never_cut_mid_phrase():
+    """Blunt truncation removed exactly the load-bearing words, leaving
+    "Summer 2027 Software Development Engineer" with no "Intern" and no
+    "application" -- a subject that no longer says what the mail is."""
+    long_role = "Software Development Engineer Intern - Annapurna Labs"
+    for cid in range(3):
+        subject, _, _ = templates.render(
+            {"id": cid, "first_name": "Dana"},
+            {"company": "Amazon", "role": long_role, "season": "Summer 2027"})
+        assert len(subject) <= templates.SUBJECT_MAX, (len(subject), subject)
+        assert "Intern" in subject, subject
+        assert not subject.endswith(("-", ",", " ")), subject
+
+
+def test_the_team_suffix_is_dropped_from_the_subject_but_kept_in_the_body():
+    """The team is worth reading once the recruiter is already in the mail,
+    and worth losing where it pushes the rest of the line past the cut."""
+    subject, body, _ = templates.render(
+        {"id": 0, "first_name": "Dana"},
+        {"company": "Amazon", "season": "Summer 2027",
+         "role": "Software Development Engineer Intern - Annapurna Labs"})
+    assert "Annapurna" not in subject
+    assert "Annapurna" in body
+
+
+def test_the_ladder_only_drops_what_it_has_to():
+    """Otherwise every subject collapses to the barest rung. A short role
+    keeps the closing phrase; a long one gives it up and keeps the role."""
+    short, _, _ = templates.render(
+        {"id": 0, "first_name": "Dana"},
+        {"company": "Acme", "role": "SWE Intern", "season": "Summer 2027"})
+    assert "applied, would love to connect" in short, short
+
+    long, _, _ = templates.render(
+        {"id": 0, "first_name": "Dana"},
+        {"company": "Amazon", "season": "Summer 2027",
+         "role": "Software Development Engineer Intern - Annapurna Labs"})
+    assert "Software Development Engineer Intern" in long, long
+
+
+def test_the_bracket_degrades_when_a_role_is_unset(monkeypatch):
+    """Empty halves must not leave "Ex-, Incoming " or an empty [] in the
+    subject of every mail."""
+    from jobfeed.outreach import profile
+    monkeypatch.setitem(profile.ME, "incoming", "")
+    assert profile.bracket() == "Prev Google"
+    monkeypatch.setitem(profile.ME, "prev", "")
+    assert profile.bracket() == ""
+    monkeypatch.setitem(profile.ME, "incoming", "Amazon")
+    assert profile.bracket() == "Incoming Amazon"

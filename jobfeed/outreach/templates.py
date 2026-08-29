@@ -24,17 +24,38 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from .profile import ME, WINS, signature
+from .profile import ME, WINS, bracket, signature
 
 # ---- subjects -------------------------------------------------------------
 # The bracket does the work. A recruiter scanning an inbox decides in the
 # subject line whether this is a student who applied or a student worth
 # opening, and the previous employer is the only fact short enough to fit.
+# Each subject is a ladder, longest first. A posting title can be 52
+# characters on its own ("Software Development Engineer Intern - Annapurna
+# Labs"), so for some roles the full line will not fit however it is worded --
+# and blunt truncation cuts exactly the words that carry the meaning, leaving
+# "Summer 2027 Software Development Engineer" with no "Intern" and no
+# "application". Dropping a whole optional phrase loses less than cutting the
+# middle out of the one that matters.
 SUBJECTS = [
-    "[Prev {prev}] {season_role} - applied, would love to connect",
-    "[Prev {prev}] Rutgers '28 - {season_role} application",
-    "[Prev {prev}] {company} {season_role} - quick note from an applicant",
+    ["[{bracket}] {season_short_role} - applied, would love to connect",
+     "[{bracket}] {short_role} - applied, would love to connect",
+     "[{bracket}] {short_role} - applied",
+     "[{bracket}] {short_role}"],
+    ["[{bracket}] Rutgers '28 - {season_short_role} application",
+     "[{bracket}] Rutgers '28 - {short_role} application",
+     "[{bracket}] Rutgers '28 - {short_role}",
+     "[{bracket}] {short_role} - Rutgers '28"],
+    ["[{bracket}] {company} {season_short_role} - an applicant saying hello",
+     "[{bracket}] {company} {short_role} - hello from an applicant",
+     "[{bracket}] {company} {short_role} - hello",
+     "[{bracket}] {company} {short_role}"],
 ]
+
+# What a subject line has to fit in. Gmail shows roughly this much on a
+# desktop list and far less on a phone; past it the line is cut mid-word,
+# which reads as a mail merge that nobody checked.
+SUBJECT_MAX = 72
 
 # ---- openers --------------------------------------------------------------
 OPENERS = [
@@ -60,6 +81,32 @@ FOLLOWUPS = {
 def _pick(options, contact_id: int):
     """Deterministic per contact, so re-rendering does not rewrite history."""
     return options[contact_id % len(options)]
+
+
+_TEAM_SUFFIX = re.compile(r"\s*[-\u2013(].*$")
+
+
+def short_role(role: str) -> str:
+    """The role, minus the part a subject line has no room for.
+
+    Postings carry the team on the end -- "Software Development Engineer
+    Intern - Annapurna Labs" is 52 characters before anything else is said.
+    The team is worth keeping in the body, where the recruiter is already
+    reading, and worth dropping from the subject, where it pushes the rest of
+    the line past the cut.
+    """
+    short = _TEAM_SUFFIX.sub("", role or "").strip()
+    return short if 4 <= len(short) <= 46 else (role or "").strip()
+
+
+def _fit(ladder: list[str], fields: dict) -> str:
+    """The longest rung that fits, or a clean word-boundary cut of the last."""
+    rendered = [rung.format(**fields) for rung in ladder]
+    for subject in rendered:
+        if len(subject) <= SUBJECT_MAX:
+            return subject
+    shortest = rendered[-1]
+    return shortest[:SUBJECT_MAX].rsplit(" ", 1)[0].rstrip(" -,")
 
 
 def usable_season(season: str | None, now: dt.date | None = None) -> str:
@@ -91,13 +138,16 @@ def usable_season(season: str | None, now: dt.date | None = None) -> str:
 def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
     """(subject, body, variant name). `job` needs company, role, season."""
     role = job.get("role") or "Software Engineer Intern"
+    short = short_role(role)
     season = usable_season(job.get("season"))
     fields = {
-        "prev": ME["prev"],
+        "bracket": bracket(),
         "company": job.get("company") or "your team",
         "role": role,
         "season": season,
         "season_role": f"{season} {role}".strip(),
+        "short_role": short,
+        "season_short_role": f"{season} {short}".strip(),
         "for_season": f" for {season}" if season else "",
         # LinkedIn's firstName is whatever the person typed, and people put
         # more than one word in it: "Jeevan Lobo S." arrives as first name
@@ -106,7 +156,7 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         "first_name": (contact.get("first_name") or "there").split()[0],
     }
     cid = int(contact.get("id") or 0)
-    subject = _pick(SUBJECTS, cid).format(**fields)
+    subject = _fit(_pick(SUBJECTS, cid), fields)
     variant = f"s{cid % len(SUBJECTS)}o{cid % len(OPENERS)}"
 
     if step > 0:

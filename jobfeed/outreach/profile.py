@@ -22,13 +22,34 @@ ME = {
     "portfolio": "https://nideesh.ai",
     "linkedin": "https://linkedin.com/in/bknideesh",
     "github": "https://github.com/nb923",
-    # The bracket that opens the subject line. The strongest name on the
-    # resume, and the only reason a recruiter opens the mail at all.
-    # Configurable rather than hardcoded, because which name lands hardest
-    # depends on who is reading -- but never set it to a company that is not
-    # on the resume.
+    # The names that open the subject line -- the only reason a recruiter
+    # opens the mail at all. Configurable rather than hardcoded, because which
+    # name lands hardest depends on who is reading.
     "prev": os.getenv("OUTREACH_PREV", "Google"),
+    # A role that is signed but has not started. Kept separate from `prev`
+    # rather than folded into it: the Amazon internship is Fall 2026, so
+    # "Prev Amazon" in August is a claim a recruiter at Amazon can check
+    # against their own systems in one lookup, and finding it wrong costs more
+    # than the name was worth. "Incoming" is both accurate and the stronger
+    # read -- it says someone else already made this decision this cycle.
+    "incoming": os.getenv("OUTREACH_INCOMING", "Amazon"),
 }
+
+
+def bracket() -> str:
+    """The subject-line prefix, e.g. "Ex-Google, Incoming Amazon".
+
+    Composed rather than stored so that setting either half to empty gives a
+    sentence that still reads: with no incoming role it degrades to
+    "Prev Google", and with neither it disappears entirely rather than
+    leaving an empty pair of brackets in the subject.
+    """
+    prev, incoming = ME["prev"].strip(), ME["incoming"].strip()
+    if prev and incoming:
+        return f"Ex-{prev}, Incoming {incoming}"
+    if incoming:
+        return f"Incoming {incoming}"
+    return f"Prev {prev}" if prev else ""
 
 # Three achievements, ordered strongest first. Each is one line, each carries a
 # number, and each is verbatim from the resume rather than a paraphrase that
