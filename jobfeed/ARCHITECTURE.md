@@ -316,8 +316,13 @@ Summary tiles (queued, sent, replies, bounces, bounce rate against the 2%
 limit) and a row per note: company, recruiter, address and its verification
 class, the roles it names, its state, and when it goes or went.
 
-Per row, while it is still in flight: **send now**, **move** (pick a time),
-**cancel**. A cancelled note can be **restored**. A sent one offers only the
+Per row, while it is still in flight: **edit**, **send now**, **move** (pick a
+time), **cancel**. Editing opens the subject and body as written and saves
+them verbatim — the pipeline drafts the letter, the sender has the last word.
+A hand-edited note is marked polished on the runner so the copy editor leaves
+it alone; its job is tidying generated text, and "improving" a hand-written
+line would undo the edit on the next pass. A sent note cannot be edited: the
+dashboard would then disagree with the recruiter's inbox. A cancelled note can be **restored**. A sent one offers only the
 Gmail thread — nothing here can unsend, and offering it would be a control
 that lies.
 
@@ -500,7 +505,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 103 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 105 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

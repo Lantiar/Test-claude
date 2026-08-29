@@ -568,6 +568,15 @@ def _apply_commands(con) -> list[str]:
                     con.execute(
                         "UPDATE outreach SET status='queued', send_after=? WHERE id=?",
                         (time.time() - 60, row["id"]))
+                elif action == "edit" and row["status"] in ("draft", "queued", "held"):
+                    # Marked polished so the copy editor leaves it alone. Its
+                    # job is to tidy generated text; this text was written by
+                    # the person sending it, and "improving" that would undo
+                    # the edit on the next pass.
+                    con.execute(
+                        "UPDATE outreach SET subject=?, body=?, polished_at=?, "
+                        "polish_notes='edited by hand' WHERE id=?",
+                        (cmd["subject"], cmd["body"], time.time(), row["id"]))
                 elif action == "retry" and row["status"] in ("held", "cancelled", "failed"):
                     con.execute("UPDATE outreach SET status='queued' WHERE id=?",
                                 (row["id"],))

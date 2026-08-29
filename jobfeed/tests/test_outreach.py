@@ -1723,3 +1723,47 @@ def test_a_sent_email_cannot_be_cancelled(con, monkeypatch):
     row = con.execute("SELECT o.status FROM outreach o JOIN contact c ON c.id=o.contact_id "
                       "WHERE c.email='rec1@acme.com'").fetchone()
     assert row["status"] == "sent"
+
+
+def test_an_email_can_be_edited_before_it_goes(con, monkeypatch):
+    """It is his letter. The pipeline drafts it; the last word is his."""
+    b = _Board(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    _run = _queued_batch(con, monkeypatch, b)
+    b.cmds = [{"id": "c1", "action": "edit", "email": "rec1@acme.com", "step": 0,
+               "subject": "A subject I wrote", "body": "And a body I wrote.", "at": 1}]
+    b.commands = lambda: b.cmds
+    b.done = lambda i: b.cmds.clear()
+
+    _run.serve_board(con, send=False)
+    row = con.execute("SELECT o.subject, o.body, o.polished_at FROM outreach o "
+                      "JOIN contact c ON c.id=o.contact_id "
+                      "WHERE c.email='rec1@acme.com'").fetchone()
+    assert row["subject"] == "A subject I wrote"
+    assert row["body"] == "And a body I wrote."
+    # Marked polished, or the copy editor tidies a hand-written note on the
+    # next pass and quietly undoes the edit.
+    assert row["polished_at"]
+    assert _run.polish_drafts(con)["seen"] == 0
+
+
+def test_a_sent_email_cannot_be_edited(con, monkeypatch):
+    """Editing the record of something already delivered would make the
+    dashboard disagree with the recruiter's inbox."""
+    b = _Board(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    _run = _queued_batch(con, monkeypatch, b)
+    con.execute("UPDATE outreach SET status='sent', sent_at=? "
+                "WHERE contact_id=(SELECT id FROM contact WHERE email='rec1@acme.com')",
+                (time.time(),))
+    con.commit()
+    before = con.execute("SELECT o.subject FROM outreach o JOIN contact c "
+                         "ON c.id=o.contact_id WHERE c.email='rec1@acme.com'"
+                         ).fetchone()["subject"]
+    b.cmds = [{"id": "c1", "action": "edit", "email": "rec1@acme.com", "step": 0,
+               "subject": "changed", "body": "changed", "at": 1}]
+    b.commands = lambda: b.cmds
+    b.done = lambda i: b.cmds.clear()
+    _run.serve_board(con, send=False)
+    after = con.execute("SELECT o.subject FROM outreach o JOIN contact c "
+                        "ON c.id=o.contact_id WHERE c.email='rec1@acme.com'"
+                        ).fetchone()["subject"]
+    assert after == before

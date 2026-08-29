@@ -17,7 +17,7 @@ const CMD_KEY = "jobfeed:outreach:cmds";
 // What a browser may ask the runner to do. Everything here is a request that
 // the runner applies against its own database on the next pass -- the page
 // never edits outreach directly, because the page is not what sends.
-const ACTIONS = ["cancel", "reschedule", "send_now", "retry"];
+const ACTIONS = ["cancel", "reschedule", "send_now", "retry", "edit"];
 
 // Short on purpose -- these are read in a table cell.
 //   queued   you asked for it; the runner has not got to it yet
@@ -133,6 +133,21 @@ export default async function handler(req, res) {
                       at: Math.floor(Date.now() / 1000) };
         if (body.job_key) cmd.job_key = String(body.job_key).slice(0, 400);
         if (body.step !== undefined) cmd.step = Number(body.step) || 0;
+        if (body.action === "edit") {
+          const subject = String(body.subject ?? "").trim();
+          const text = String(body.body ?? "");
+          if (!subject || !text.trim()) {
+            return res.status(400).json({ error: "an edit needs a subject and a body" });
+          }
+          // Generous, but bounded: this ends up in a Redis value the runner
+          // reads on every pass, and an accidental paste of something huge
+          // should be refused here rather than wedging the store.
+          if (subject.length > 400 || text.length > 20000) {
+            return res.status(400).json({ error: "that is too long to send" });
+          }
+          cmd.subject = subject;
+          cmd.body = text;
+        }
         if (body.action === "reschedule") {
           const when = Number(body.when);
           if (!when || !isFinite(when)) {
