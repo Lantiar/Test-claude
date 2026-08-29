@@ -207,7 +207,7 @@ def _set_status(con, contact_id: int, status: str) -> None:
 
 
 def _may_write(con, contact: dict, company_id: int | None,
-               campaign: str | None = None) -> str:
+               campaign: str | None = None, followup: bool = False) -> str:
     email = contact.get("email")
     if not email:
         return "no email found"
@@ -219,7 +219,7 @@ def _may_write(con, contact: dict, company_id: int | None,
     if status == "accept_all" and company_id is not None \
             and not guards.accept_all_allowed(con, company_id):
         return "accept_all quota for this company is spent"
-    return guards.suppressed(con, email, company_id, campaign)
+    return guards.suppressed(con, email, company_id, campaign, followup)
 
 
 # ---- 1b. polish -----------------------------------------------------------
@@ -337,7 +337,8 @@ def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
         # for a week, and in that week the address may have bounced or the
         # company may have been written to for a different application -- both
         # of which happened after the only check the first version made.
-        why = _may_write(con, dict(row), row["company_id"], row["campaign"])
+        why = _may_write(con, dict(row), row["company_id"], row["campaign"],
+                         followup=bool(row["step"]))
         if why:
             held.append(f"{row['email']}: {why}")
             con.execute("UPDATE outreach SET status='held' WHERE id=?", (row["id"],))
@@ -444,17 +445,22 @@ def _match(con, message: dict):
 # ---- 5. follow-ups --------------------------------------------------------
 
 def followups(con) -> dict:
-    """Queue step 1 and 2 for anything sent, unanswered and old enough."""
-    import random
+    """Queue the next nudge for anything sent, unanswered and old enough.
+
+    Each step waits on the step before it, not on the original. Keyed off the
+    original, both queued in the same pass the moment it was nine days old --
+    so "following up again" was written before the first follow-up had been
+    sent, and the two would land together.
+    """
     made = 0
-    for step, days in ((1, 4), (2, 9)):
+    for step, days in ((1, 4), (2, 5)):
         rows = con.execute(
-            "SELECT o.* FROM outreach o WHERE o.step=0 AND o.status='sent' "
+            "SELECT o.* FROM outreach o WHERE o.step=? AND o.status='sent' "
             "AND o.sent_at < ? AND NOT EXISTS (SELECT 1 FROM outreach f "
             "  WHERE f.job_key=o.job_key AND f.contact_id=o.contact_id AND f.step=?) "
             "AND NOT EXISTS (SELECT 1 FROM outreach r WHERE r.job_key=o.job_key "
             "  AND r.contact_id=o.contact_id AND r.status IN ('replied','bounced'))",
-            (time.time() - days * 86400, step)).fetchall()
+            (step - 1, time.time() - days * 86400, step)).fetchall()
         for row in rows:
             c = con.execute("SELECT * FROM contact WHERE id=?",
                             (row["contact_id"],)).fetchone()
@@ -474,19 +480,18 @@ def followups(con) -> dict:
             # follow-up a different subject, and a different subject is a new
             # thread -- which is the one thing a follow-up must not be.
             subject = row["subject"]
-            # Scattered independently of when the first went out, and re-slotted
-            # into a working window rather than firing at the original hour.
-            # The wobble goes into plan_sends' start, not onto its result: added
-            # afterwards it would walk the send back out of the window it was
-            # just placed in, and onto a Saturday about two times in seven.
-            when = guards.plan_sends(1, start=dt.datetime.now(dt.timezone.utc)
-                                     + dt.timedelta(hours=random.uniform(2, 30)))[0]
+            # Left for schedule() to place, rather than given a time here.
+            # Scheduling each one on its own put five follow-ups on one day,
+            # three of them at the same company -- the very burst the first
+            # sends are spaced to avoid, arriving through the one path that
+            # was not going through the spacing.
             con.execute(
                 "INSERT OR IGNORE INTO outreach(job_key, contact_id, variant, "
-                "subject, body, step, status, send_after, message_id, thread_id, "
-                "created_at) VALUES(?,?,?,?,?,?,'queued',?,?,?,?)",
+                "subject, body, step, status, message_id, thread_id, "
+                "campaign, created_at) VALUES(?,?,?,?,?,?,'draft',?,?,?,?)",
                 (row["job_key"], row["contact_id"], variant, subject, body, step,
-                 when, row["message_id"], row["thread_id"], time.time()))
+                 row["message_id"], row["thread_id"], row["campaign"],
+                 time.time()))
             made += 1
     con.commit()
     return {"queued": made}

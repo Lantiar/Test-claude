@@ -43,7 +43,7 @@ BOUNCE_MIN_SENDS = 25
 
 
 def suppressed(con, email: str, company_id: int | None,
-               campaign: str | None = None) -> str:
+               campaign: str | None = None, followup: bool = False) -> str:
     """Why this may not be written to, or '' if it may.
 
     `campaign` is one prepare pass at one company -- up to three recruiters,
@@ -66,6 +66,14 @@ def suppressed(con, email: str, company_id: int | None,
         "AND (until IS NULL OR until>?)", (company_id, now)).fetchone()
     if row:
         return row["reason"]
+    # A follow-up continues a conversation this person is already in. The
+    # company cooldown exists to stop a stream of strangers, and applying it
+    # here holds a nudge on an open thread because someone *else* at the same
+    # employer was written to -- which reads as being dropped, not as restraint.
+    # Suppression of the address itself, and every reply and bounce rule, still
+    # apply above.
+    if followup:
+        return ""
     return _company_cooldown(con, company_id, campaign)
 
 

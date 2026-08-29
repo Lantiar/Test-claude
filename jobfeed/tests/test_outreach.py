@@ -932,3 +932,87 @@ def test_an_accepted_edit_is_written_back(con, monkeypatch):
     assert _run.polish_drafts(con)["rejected"] == 0
     assert con.execute("SELECT polished_at FROM outreach").fetchone()["polished_at"]
     assert _run.polish_drafts(con)["seen"] == 0 and len(calls) == 1
+
+
+# ---- the follow-up chain --------------------------------------------------
+
+def _sent_batch(con, cid, monkeypatch, key="https://acme/1"):
+    from jobfeed.outreach import run as _run
+    _roster(monkeypatch)
+    _job(con, cid, key, "SWE Intern")
+    _run.prepare(con, limit=5, per_company=3)
+    _run.schedule(con)
+    for row in con.execute("SELECT id FROM outreach").fetchall():
+        _sent(con, row["id"])
+    return _run
+
+
+def test_the_second_nudge_waits_on_the_first_being_sent(con, monkeypatch):
+    """Both steps keyed off the original, so the moment it was nine days old
+    they queued in the same pass -- "following up again" written before the
+    first follow-up had gone out, and the two landing together."""
+    cid = _company(con, "Acme")
+    _run = _sent_batch(con, cid, monkeypatch)
+    con.execute("UPDATE outreach SET sent_at=sent_at-?", (30 * 86400,))
+    con.commit()
+
+    _run.followups(con)
+    assert con.execute("SELECT COUNT(*) c FROM outreach WHERE step=1").fetchone()["c"] == 3
+    assert con.execute("SELECT COUNT(*) c FROM outreach WHERE step=2").fetchone()["c"] == 0
+
+    for row in con.execute("SELECT id FROM outreach WHERE step=1").fetchall():
+        _sent(con, row["id"])
+    con.execute("UPDATE outreach SET sent_at=sent_at-? WHERE step=1", (6 * 86400,))
+    con.commit()
+    _run.followups(con)
+    orphans = con.execute(
+        "SELECT COUNT(*) c FROM outreach f WHERE f.step=2 AND NOT EXISTS "
+        "(SELECT 1 FROM outreach p WHERE p.contact_id=f.contact_id AND p.step=1 "
+        " AND p.status='sent')").fetchone()["c"]
+    assert orphans == 0
+
+
+def test_followups_go_through_the_same_spacing_as_first_sends(con, monkeypatch):
+    """They scheduled themselves one at a time and skipped the company rule:
+    five landed on one day, three of them at the same employer. That is the
+    burst everything else here is built to avoid, arriving down the one path
+    that was not going through the spacing."""
+    cid = _company(con, "Acme")
+    _run = _sent_batch(con, cid, monkeypatch)
+    con.execute("UPDATE outreach SET sent_at=sent_at-?", (30 * 86400,))
+    con.commit()
+
+    _run.followups(con)
+    assert con.execute("SELECT COUNT(*) c FROM outreach WHERE step=1 AND "
+                       "send_after IS NOT NULL").fetchone()["c"] == 0, \
+        "a follow-up must not place itself"
+    _run.schedule(con)
+
+    per_day = {}
+    for r in con.execute("SELECT c.company_id, o.send_after FROM outreach o "
+                         "JOIN contact c ON c.id=o.contact_id "
+                         "WHERE o.step=1 AND o.send_after"):
+        local = dt.datetime.utcfromtimestamp(r["send_after"]) - dt.timedelta(hours=5)
+        key = (r["company_id"], local.date())
+        per_day[key] = per_day.get(key, 0) + 1
+        assert local.weekday() < 5, local
+    assert per_day and max(per_day.values()) == 1, per_day
+
+
+def test_a_followup_is_not_blocked_by_the_company_cooldown(con, monkeypatch):
+    """It continues a thread this person is already in. The cooldown exists to
+    stop a stream of strangers; holding a nudge because someone else at the
+    same employer was written to reads as being dropped, not as restraint."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _draft(con, cid, "dana@acme.com")
+    con.execute("UPDATE outreach SET status='sent', sent_at=?, step=1, "
+                "message_id='<m@x>'", (time.time(),))
+    con.commit()
+    # Someone else at this company was written to moments ago.
+    _draft(con, cid, "other@acme.com", key="https://acme/2")
+    row = con.execute("SELECT o.*, c.email, c.company_id, c.email_status "
+                      "FROM outreach o JOIN contact c ON c.id=o.contact_id "
+                      "WHERE c.email='dana@acme.com'").fetchone()
+    assert guards.suppressed(con, "dana@acme.com", cid), "a new contact is blocked"
+    assert _run._may_write(con, dict(row), cid, None, followup=True) == ""

@@ -249,7 +249,7 @@ IAM, a public webhook and a daily renewal — and the watch expires *silently*
 after seven days, so a missed renewal looks exactly like a quiet inbox. It buys
 seconds of latency on a workflow whose next action is four days away.
 
-### 5. `followups` — day 4 and day 9
+### 5. `followups` — day 4, then five days after that
 
 Re-uses the subject that was actually sent, and the original `Message-Id` and
 thread id. A re-rendered subject would drift if the posting were retitled, and
@@ -366,6 +366,9 @@ what it claims**. None of these raised an error.
 | Cooldown applied per send, not per campaign | A working guard | The first note of a batch blocked the other two, collapsing three recruiters to one |
 | Roster never topped up | A cache hit | The first application spent all three cached names; every later one found nobody new |
 | A new column added to an existing `CREATE TABLE IF NOT EXISTS` | A fresh checkout working | Invisible on any machine whose database already existed — hence `MIGRATIONS` in `db.py` |
+| Both follow-up steps keyed off the original send | A queued follow-up | "Following up again" written before the first follow-up was sent, both landing together |
+| Follow-ups scheduled themselves individually | A scattered send time | Five landed on one day, three at one company — the burst everything else prevents, down the one path that skipped the spacing |
+| Follow-ups subject to the company cooldown | A guard holding | A nudge on an open thread held because a *different* person at that employer was written to |
 | `cursor.lastrowid` trusted after `INSERT OR IGNORE` | A normal insert | Not zero for an ignored row — it is the connection's last rowid, so drafts pointed at contact ids that did not exist |
 
 The last one is the general lesson: **the verification probe only became
@@ -374,7 +377,15 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 72 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 75 tests, `python -m pytest jobfeed/tests -q`.
+
+`jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
+against the **real feed**: one posting, three at one company on one day, a
+later application, the copy editor, a human reply, a hard bounce, an
+out-of-office, follow-ups and the circuit breaker. Only the Apify search and
+the Gmail network hop are stubbed; everything between them is production code.
+It found both follow-up bugs above, neither of which any unit test was
+asking about.
 
 Fixtures in `jobfeed/tests/fixtures/` are captured live API responses.
 `people_probe.json` has had identities replaced — the shape is what the tests
