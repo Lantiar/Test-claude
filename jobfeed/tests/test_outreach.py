@@ -496,6 +496,34 @@ def test_the_ladder_only_drops_what_it_has_to():
     assert "Software Development Engineer Intern" in long, long
 
 
+def test_no_subject_has_a_gap_where_a_field_was_empty():
+    """An absent season left "Tesla  intern applications" -- two spaces, which
+    in a subject line reads as a bug in the sender. Swept across every rung
+    and every optional field rather than fixed in the one template that
+    showed it."""
+    for cid in range(3):
+        for season in ("Summer 2027", ""):
+            for roles in (["SWE Intern"], ["A Intern", "B Intern"],
+                          ["A Intern", "B Intern", "C Intern"]):
+                subject, _, _ = templates.render(
+                    {"id": cid, "first_name": "Dana"},
+                    {"company": "Tesla", "roles": roles, "season": season})
+                assert "  " not in subject, (cid, season, roles, subject)
+                assert subject == subject.strip()
+                assert not subject.endswith(("-", ",")), subject
+
+
+def test_a_subject_does_not_open_on_a_lowercase_word():
+    """"three applications at Tesla" after the bracket reads as a fragment."""
+    for cid in range(3):
+        subject, _, _ = templates.render(
+            {"id": cid, "first_name": "Dana"},
+            {"company": "Tesla", "season": "Summer 2027",
+             "roles": ["A Intern", "B Intern", "C Intern"]})
+        first = subject.split("] ", 1)[-1].split()[0]
+        assert first[0].isupper(), subject
+
+
 def test_an_empty_bracket_leaves_no_empty_brackets(monkeypatch):
     """Clearing it must drop the brackets with it, not send every subject out
     starting "[] "."""

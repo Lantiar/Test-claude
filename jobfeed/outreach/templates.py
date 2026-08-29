@@ -42,10 +42,10 @@ SUBJECTS = [
      "{prefix}{short_role} - applied, would love to connect",
      "{prefix}{short_role} - applied",
      "{prefix}{short_role}"],
-    ["{prefix}Rutgers '28 - {season_short_role} application",
-     "{prefix}Rutgers '28 - {short_role} application",
-     "{prefix}Rutgers '28 - {short_role}",
-     "{prefix}{short_role} - Rutgers '28"],
+    ["{prefix}Interested in the {season_short_role} role",
+     "{prefix}Interested in the {short_role} role",
+     "{prefix}Interested in {short_role}",
+     "{prefix}{short_role}"],
     ["{prefix}{company} {season_short_role} - an applicant saying hello",
      "{prefix}{company} {short_role} - hello from an applicant",
      "{prefix}{company} {short_role} - hello",
@@ -56,13 +56,13 @@ SUBJECTS = [
 # roles individually is what makes it read as a person who applied to three
 # things rather than a script that fired three times.
 MULTI_SUBJECTS = [
-    ["{prefix}{company} {season} intern applications - {n} roles",
+    ["{prefix}{company} {season_and}intern applications - {n} roles",
      "{prefix}{company} intern applications - {n} roles",
      "{prefix}{company} intern applications"],
-    ["{prefix}Rutgers '28 - {n} {company} intern applications",
-     "{prefix}Rutgers '28 - {company} intern applications",
-     "{prefix}{company} intern applications"],
-    ["{prefix}{n} applications at {company} - a quick hello",
+    ["{prefix}Interested in {n} {company} intern roles",
+     "{prefix}Interested in {n} roles at {company}",
+     "{prefix}Interested in {company} intern roles"],
+    ["{prefix}{N} applications at {company} - a quick hello",
      "{prefix}{company} applications - a quick hello",
      "{prefix}{company} intern applications"],
 ]
@@ -173,7 +173,11 @@ def _role_list(titles: list[str]) -> str:
 
 def _fit(ladder: list[str], fields: dict) -> str:
     """The longest rung that fits, or a clean word-boundary cut of the last."""
-    rendered = [rung.format(**fields) for rung in ladder]
+    # Collapsed, not just avoided in the templates above: a rung is one edit
+    # away from reintroducing a gap around an empty field, and "Tesla  intern
+    # applications" in a subject line reads as a bug in the sender.
+    rendered = [re.sub(r"\s{2,}", " ", rung.format(**fields)).strip()
+                for rung in ladder]
     for subject in rendered:
         if len(subject) <= SUBJECT_MAX:
             return subject
@@ -246,6 +250,11 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         # script wrote it.
         "first_name": (contact.get("first_name") or "there").split()[0],
         "n": _count(len(roles)),
+        "N": _count(len(roles)).capitalize(),
+        # Trailing space folded in, so an absent season leaves one gap and not
+        # two. Tesla's postings carry conflicting seasons, so this is empty
+        # exactly where a subject is most likely to be read.
+        "season_and": f"{season} " if season else "",
         # Full titles here, not shortened ones. The team suffix is the only
         # thing telling "Software Engineer Intern" from "Software Engineer
         # Intern - Azure Networking", and dropping it turns a list of three

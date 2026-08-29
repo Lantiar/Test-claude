@@ -339,7 +339,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 65 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 67 tests, `python -m pytest jobfeed/tests -q`.
 
 Fixtures in `jobfeed/tests/fixtures/` are captured live API responses.
 `people_probe.json` has had identities replaced — the shape is what the tests
