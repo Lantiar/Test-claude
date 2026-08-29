@@ -426,6 +426,8 @@ what it claims**. None of these raised an error.
 | Signature sent to the copy editor and reattached | An accepted edit | A reformatted signature made the reattach point unfindable, so the mail went out signed twice |
 | A test that corrupted a draft without checking the corruption applied | A passing check | `str.replace` matched nothing, so "unchanged" measured an unmodified draft |
 | Seasons read off titles *after* trimming | A clean title | Trimming removed the evidence that two postings disagreed, so the note asserted one season again |
+| Our own outbound read back as inbound | A reply arriving | `history.list` reports sent mail as `messageAdded`; the first email sent would match itself, mark the thread replied, cancel every follow-up and show a 100% reply rate |
+| `prepare` defaulting to dry-run | Drafts appearing | The default quietly skipped title cleaning, while still paying for the recruiter search |
 | `cursor.lastrowid` trusted after `INSERT OR IGNORE` | A normal insert | Not zero for an ignored row — it is the connection's last rowid, so drafts pointed at contact ids that did not exist |
 
 The last one is the general lesson: **the verification probe only became
@@ -434,7 +436,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 88 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 90 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a
@@ -449,6 +451,40 @@ Fixtures in `jobfeed/tests/fixtures/` are captured live API responses.
 depend on, and it is preserved exactly: the profiles at the wrong employer,
 the multi-word `firstName`, the `emails`-is-a-list structure with its empty
 and absent variants, and each address's verdict.
+
+## What is proven, and what is not
+
+Worth being exact about before this sends to anyone real.
+
+**Exercised against the live services:** the feed itself (running for weeks);
+the Apify recruiter search (real names and addresses, for Amazon); address
+verification (33 addresses with deliberate controls); title cleaning and the
+copy editor (real postings, real drafts); `schedule` and `dispatch --dry-run`;
+Gmail send (one self-addressed message, with the RFC `Message-Id` captured);
+and Gmail history polling at real volume — 46 real inbound messages, none
+falsely classified as a bounce, and our own outbound correctly filtered out.
+
+**Never exercised for real:**
+
+- **No email has been sent to a recruiter.** Zero.
+- **No real reply, bounce or auto-reply has been processed.** Every inbound
+  test constructs the message itself. The path from a genuine reply through
+  `In-Reply-To` matching to a status change has never run. This is the
+  largest gap and it cannot be closed without either a real reply or a second
+  mailbox to reply from.
+- **No follow-up has been sent.**
+- **Time is simulated by rewinding stored timestamps**, never by waiting.
+  Anything depending on real wall-clock behaviour across days is untested.
+- **The recruiter search is proven for one company.** Search quality varies by
+  employer; a company with few recruiters on LinkedIn may return nobody, or
+  the wrong people. The end-to-end walk stubs it.
+- **Deliverability is unknown.** Whether these land in an inbox or a spam
+  folder cannot be tested without sending.
+- **Nothing runs unattended.** Outreach is in no cron, by design.
+
+A staged first run would close most of this: send one batch to a single
+company, watch it, and only widen once a real reply or bounce has been seen
+travelling through `watch`.
 
 ## Known gaps
 

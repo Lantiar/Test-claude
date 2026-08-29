@@ -96,10 +96,24 @@ def classify(headers: dict, snippet: str) -> tuple[str, str]:
     subject = (headers.get("subject") or "").lower()
     # A bounce comes from the mail system, not a person: an empty envelope
     # sender, a daemon address, or a delivery-status content type.
+    # Widened deliberately. A bounce misread as a reply is the one
+    # misclassification that costs something: the address is never suppressed
+    # and the bounce rate never rises, so the breaker that protects the
+    # sending domain never trips. A reply misread as a bounce only pauses
+    # sending, which is recoverable. So this errs toward bounce.
     if (headers.get("return-path") in ("<>", "")
             or "mailer-daemon" in frm or "postmaster" in frm
             or "delivery-status" in (headers.get("content-type") or "").lower()
-            or "undeliverable" in subject or "delivery status notification" in subject):
+            or "multipart/report" in (headers.get("content-type") or "").lower()
+            or headers.get("x-failed-recipients")
+            or any(phrase in subject for phrase in (
+                "undeliverable", "delivery status notification",
+                "mail delivery failed", "delivery failure", "returned mail",
+                "failure notice", "message not delivered",
+                "address not found", "delivery incomplete"))):
+        # 5.x.x is permanent, 4.x.x is temporary. Unknown is treated as hard:
+        # a soft bounce only delays, so guessing soft on a dead address keeps
+        # writing to it.
         hard = re.search(r"\b5\.\d\.\d\b", snippet) or "permanent" in snippet.lower()
         soft = re.search(r"\b4\.\d\.\d\b", snippet) or "temporar" in snippet.lower()
         return "bounce", ("hard" if hard or not soft else "soft")
@@ -153,7 +167,16 @@ def inbound_since(history_id: str | None, token: str | None = None,
         m = _get(f"messages/{mid}", token, format="metadata",
                  metadataHeaders=["From", "To", "Subject", "Message-Id",
                                   "In-Reply-To", "References", "Return-Path",
-                                  "Auto-Submitted", "Content-Type"])
+                                  "Auto-Submitted", "Content-Type",
+                                  "X-Failed-Recipients"])
+        # Our own outbound lands in the mailbox too, and history.list reports
+        # it as a messageAdded exactly like a reply. Left in, the first mail
+        # sent matches itself on the next poll and the thread is marked
+        # replied -- every follow-up cancelled, and a reply rate of 100% that
+        # looks like the pipeline working perfectly. Sent mail carries SENT
+        # and never INBOX; a reply carries INBOX and never SENT.
+        if "SENT" in (m.get("labelIds") or []):
+            continue
         headers = {h["name"].lower(): h["value"]
                    for h in m.get("payload", {}).get("headers", [])}
         messages.append({

@@ -149,7 +149,7 @@ def _outreach(name):
 
 def cmd_outreach_prepare(args, con) -> int:
     d = _outreach("prepare")(con, limit=args.limit, per_company=args.per_company,
-                             dry_run=not args.verify)
+                             dry_run=args.dry_run)
     print(f"{d['jobs']} applied job(s), {d['contacts']} contact(s), "
           f"{d['drafts']} draft(s)")
     if d["verify"]:
@@ -467,8 +467,9 @@ def main(argv=None) -> int:
     q = osub.add_parser("prepare"); q.set_defaults(fn=cmd_outreach_prepare)
     q.add_argument("--limit", type=int, default=5, help="applied jobs to process")
     q.add_argument("--per-company", type=int, default=3)
-    q.add_argument("--verify", action="store_true",
-                   help="spend Apify credit verifying the addresses found")
+    q.add_argument("--dry-run", action="store_true",
+                   help="skip address verification and title cleaning "
+                        "(the recruiter search still runs, and still costs)")
 
     q = osub.add_parser("drafts"); q.set_defaults(fn=cmd_outreach_drafts)
     q.add_argument("--status", default="draft")

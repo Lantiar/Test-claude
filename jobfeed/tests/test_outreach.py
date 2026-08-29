@@ -1282,3 +1282,61 @@ def test_trimming_a_season_off_a_title_does_not_hide_a_conflict(monkeypatch):
     same = [{"title": "SWE Intern - A - Summer 2027"},
             {"title": "SWE Intern - B - Summer 2027"}]
     assert _run._clean_roles(same, dry_run=False)[2]["seasons"] == {"Summer 2027"}
+
+
+def test_our_own_outbound_is_not_read_as_a_reply(monkeypatch):
+    """history.list reports mail we sent as a messageAdded, exactly like a
+    reply. Left in, the first email sent matches itself on the next poll: the
+    thread is marked replied, every follow-up is cancelled, and the reply rate
+    reads 100% -- which looks like the pipeline working perfectly."""
+    from jobfeed.outreach import gmail
+
+    pages = {"history": {"historyId": "9",
+                         "history": [{"messagesAdded": [
+                             {"message": {"id": "ours"}},
+                             {"message": {"id": "theirs"}}]}]},
+             "messages/ours": {"id": "ours", "threadId": "T1",
+                               "labelIds": ["SENT"], "snippet": "our note",
+                               "internalDate": "1", "payload": {"headers": [
+                                   {"name": "From", "value": "me@example.com"}]}},
+             "messages/theirs": {"id": "theirs", "threadId": "T1",
+                                 "labelIds": ["INBOX", "UNREAD"],
+                                 "snippet": "thanks!", "internalDate": "2",
+                                 "payload": {"headers": [
+                                     {"name": "From", "value": "dana@acme.com"}]}}}
+    monkeypatch.setattr(gmail, "_get",
+                        lambda path, token, **kw: pages[path.split("?")[0]])
+    messages, _ = gmail.inbound_since("1", token="t")
+    assert [m["id"] for m in messages] == ["theirs"], messages
+
+
+def test_bounces_from_every_common_mail_system_are_caught():
+    """A bounce misread as a reply is the one misclassification that costs
+    something: the address is never suppressed and the bounce rate never
+    rises, so the breaker protecting the sending domain never trips."""
+    from jobfeed.outreach.gmail import classify
+    shapes = [
+        ({"from": "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+          "subject": "Delivery Status Notification (Failure)"}, "550 5.1.1"),
+        ({"from": "postmaster@corp.example",
+          "subject": "Undeliverable: Interested in the role"}, "550 5.4.1"),
+        ({"from": "Mail Delivery System <MAILER-DAEMON@mx.example>",
+          "subject": "Mail delivery failed: returning message to sender"}, "550"),
+        ({"from": "someone@example", "subject": "Returned mail: see transcript"},
+         "5.0.0 permanent"),
+        ({"from": "x@y", "subject": "Message not delivered"}, "550 5.1.1"),
+        ({"from": "x@y", "subject": "Address not found"}, "5.1.1"),
+        ({"from": "x@y", "subject": "note", "x-failed-recipients": "a@b.com"},
+         "550 5.1.1 user unknown"),
+        ({"from": "x@y", "subject": "report",
+          "content-type": 'multipart/report; report-type=delivery-status'}, "5.1.1"),
+        ({"from": "x@y", "subject": "note", "return-path": "<>"}, "550 5.1.1"),
+    ]
+    for headers, snippet in shapes:
+        kind, _ = classify(headers, snippet)
+        assert kind == "bounce", (headers.get("subject"), kind)
+
+    # A real reply that merely mentions delivery must still be a reply.
+    kind, _ = classify({"from": "Dana <dana@acme.com>", "subject": "Re: your note"},
+                       "Thanks -- we can deliver feedback next week.")
+    assert kind == "human"

@@ -20,7 +20,8 @@ from .templates import render
 
 # ---- 1. prepare -----------------------------------------------------------
 
-def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = True) -> dict:
+def prepare(con, limit: int = 5, per_company: int = 3,
+            dry_run: bool = False) -> dict:
     """For each company with new applications, find a recruiter and write one draft.
 
     Grouped by company, not by posting. Three roles at one employer are one
