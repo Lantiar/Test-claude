@@ -1934,3 +1934,42 @@ def test_only_a_real_pdf_is_accepted_from_the_store(monkeypatch, tmp_path):
         {"name": "cv.pdf", "data": base64.b64encode(b"%PDF-1.4 real").decode()}))
     path = _b.resume(str(tmp_path))
     assert path.endswith("cv.pdf") and pathlib.Path(path).read_bytes().startswith(b"%PDF")
+
+
+def test_a_thin_result_widens_the_search_rather_than_giving_up(monkeypatch):
+    """searchQuery is free text and LinkedIn matches it loosely. A search for
+    Philips returned eleven recruiters at other companies -- one matched on a
+    person's surname -- and a single genuine Philips employee with no address.
+    The employer filter is right to drop the rest, but reporting "no recruiters
+    found" when fifteen results simply were not enough is a wrong answer that
+    looks like a fact about the company."""
+    asked = []
+
+    def fake_call(actor, payload, timeout=300):
+        asked.append(payload["maxItems"])
+        # The first, narrow pass finds one usable person; the wider one finds
+        # the rest.
+        n = 1 if len(asked) == 1 else 3
+        return [{"firstName": f"R{i}", "lastName": "Person",
+                 "headline": "University Recruiter",
+                 "linkedinUrl": "", "emails": [{"email": f"r{i}@philips.com",
+                                                "status": "good"}],
+                 "currentPosition": [{"companyName": "Philips",
+                                      "position": "Recruiter"}]}
+                for i in range(n)]
+
+    monkeypatch.setattr(apify, "_call", fake_call)
+    found = apify.find_recruiters("Philips", 3)
+    assert len(asked) == 2, "the search was not widened"
+    assert asked[1] > asked[0], asked
+    assert len(found) == 3
+
+    # A first pass that already finds enough must not pay for a second.
+    asked.clear()
+    monkeypatch.setattr(apify, "_call", lambda a, p, timeout=300: (
+        asked.append(p["maxItems"]) or
+        [{"firstName": f"R{i}", "lastName": "P", "headline": "Recruiter",
+          "linkedinUrl": "", "emails": [{"email": f"r{i}@x.com", "status": "good"}],
+          "currentPosition": [{"companyName": "Philips"}]} for i in range(5)]))
+    apify.find_recruiters("Philips", 3)
+    assert len(asked) == 1, "it widened when it did not need to"

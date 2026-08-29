@@ -128,12 +128,25 @@ def find_recruiters(company: str, limit: int = 3) -> list[dict]:
     address at all, so the whole run would cost money and produce nothing that
     can be written to.
     """
-    items = _call(PEOPLE_ACTOR, {
-        "profileScraperMode": "Full + email search",
-        "searchQuery": f"{company} university recruiter early career",
-        "currentJobTitles": list(SEARCH_TITLES),
-        "maxItems": max(limit * 5, 15),
-    })
+    def search(want: int) -> list:
+        return _call(PEOPLE_ACTOR, {
+            "profileScraperMode": "Full + email search",
+            "searchQuery": f"{company} university recruiter early career",
+            "currentJobTitles": list(SEARCH_TITLES),
+            "maxItems": want,
+        })
+
+    # searchQuery is free text and LinkedIn matches it loosely -- a search for
+    # Philips returned eleven recruiters at other companies, one of them
+    # matched on a person's surname, and a single genuine Philips employee who
+    # had no address. The employer filter is right to drop the rest, but that
+    # leaves nothing to write. So when the pool yields too few, widen it once
+    # rather than reporting a company as having no recruiters when the truth is
+    # that fifteen results were not enough to find three of them.
+    items = search(max(limit * 5, 15))
+    if sum(1 for it in items if _at_company(it, company)) < limit:
+        items = search(max(limit * 15, 45))
+
     out = []
     for it in items:
         if not _at_company(it, company):

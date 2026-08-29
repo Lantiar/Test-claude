@@ -584,10 +584,36 @@ function renderReach(){
     (order[rowState(a,replies)] ?? 9) - (order[rowState(b,replies)] ?? 9)
     || (a.send_after||a.sent_at||0) - (b.send_after||b.sent_at||0));
 
-  none.hidden = list.length > 0;
-  if(!list.length) none.textContent = "Nothing yet. Press ▶ on an applied job to start.";
+  // Jobs asked for that produced no draft -- no recruiter found, nobody with
+  // an address, a run that failed. Rendered from the per-job records, because
+  // the state blob only holds emails that exist: without this, exactly the
+  // cases worth seeing are the ones the dashboard says nothing about, and the
+  // tab reads as empty when something has in fact gone wrong.
+  const drafted = new Set(rows.flatMap(o => (o.covers && o.covers.length ? o.covers : [o.job_key])));
+  const stuck = Object.entries(REACH)
+    .filter(([key, r]) => !drafted.has(key) && ["queued","held","failed"].includes(r.state))
+    .map(([key, r]) => ({key, ...r}));
 
-  body.innerHTML = list.map(o => {
+  none.hidden = list.length + stuck.length > 0;
+  if(!list.length && !stuck.length)
+    none.textContent = "Nothing yet. Press ▶ on an applied job to start.";
+
+  const stuckRows = stuck.map(s => {
+    const job = JOBS.find(j => j.key === s.key) || {};
+    const label = s.state === "queued" ? "waiting for the next run"
+                : s.state === "held" ? "nothing to send" : "the run failed";
+    return `<tr>
+      <td>${esc(job.company || "—")}</td>
+      <td class="who"><span class="sub">no recruiter to write to</span></td>
+      <td class="sub">${esc(job.title || s.key)}
+        ${s.note ? `<div class="sub">${esc(s.note)}</div>` : ""}</td>
+      <td><span class="pill p-${esc(s.state)}">${esc(s.state)}</span></td>
+      <td class="sub">${esc(when(s.at))}</td>
+      <td><span class="sub">${esc(label)}</span></td>
+    </tr>`;
+  }).join("");
+
+  body.innerHTML = stuckRows + list.map(o => {
     const c = byEmail[o.email] || {};
     const st = rowState(o, replies);
     const roles = (o.covers && o.covers.length ? o.covers : [o.job_key]).map(jobTitle);
