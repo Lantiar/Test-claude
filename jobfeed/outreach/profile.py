@@ -55,5 +55,12 @@ WINS = [
 
 
 def signature() -> str:
-    return (f"{ME['name']}\n{ME['school']} · {ME['degree']} · {ME['grad']}\n"
-            f"{ME['portfolio']} · {ME['linkedin']}")
+    """The block under the sign-off, or nothing.
+
+    Empty by default. Everything it carried is already in the mail -- the
+    school and degree in the opening paragraph, the portfolio in the closing
+    line -- so it was the same three facts a second time under a rule, which
+    is what made it read as a template rather than a note. Set
+    OUTREACH_SIGNATURE to bring one back.
+    """
+    return os.getenv("OUTREACH_SIGNATURE", "").strip()

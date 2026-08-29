@@ -212,8 +212,11 @@ def polish(subject: str, body: str, context: dict) -> dict:
     # length stayed inside the band, so nothing downstream objected. Withheld,
     # the block cannot be reformatted at all.
     sig = signature()
-    head, _, _ = body.partition(sig)
-    head = head.rstrip() if sig in body else body
+    # Guarded, because an empty signature is a real configuration -- and
+    # str.partition("") raises, while `"" in body` is always true, so the
+    # unguarded version would either crash or staple an empty block onto
+    # every mail.
+    head = body.partition(sig)[0].rstrip() if sig and sig in body else body
 
     last: tuple[str, list[str]] | None = None
     cost = 0.0
@@ -247,7 +250,7 @@ def polish(subject: str, body: str, context: dict) -> dict:
         # signature cannot pad the length band or supply a token the edit
         # dropped from the body above it.
         problems = verify(subject, head, new_subject, new_head, context)
-        new_body = (new_head + "\n\n" + sig + "\n") if sig in body else new_head
+        new_body = (new_head + "\n\n" + sig + "\n") if sig and sig in body else new_head
         if not problems:
             out.update(subject=new_subject, body=new_body,
                        notes=[str(n) for n in (answer.get("notes") or [])],

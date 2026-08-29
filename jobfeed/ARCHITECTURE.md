@@ -443,6 +443,7 @@ jobfeed outreach verify <email>… # probe addresses, no database writes
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Scopes: `gmail.send`, `gmail.readonly` |
 | `OUTREACH_FROM` | From address |
 | `OUTREACH_BRACKET` | The subject-line bracket, default `Prev Google/Zon` |
+| `OUTREACH_SIGNATURE` | A block under the sign-off. Empty by default — everything it carried is already in the mail |
 | `OPENAI_API_KEY` | The copy editor. Without it, drafts go out exactly as the templates wrote them |
 | `OUTREACH_POLISH_MODEL` | Default `gpt-4.1-nano` |
 | `JOBFEED_URL` | Feed to sync from |
@@ -505,7 +506,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 105 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 107 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

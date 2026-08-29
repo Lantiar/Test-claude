@@ -285,7 +285,7 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         f"{wins}\n\n"
         f"I would be glad to be considered and would appreciate any guidance "
         f"on the process. Resume and projects are at {ME['portfolio']}.\n\n"
-        f"Thanks,\n{ME['first_name']}\n\n"
-        f"{signature()}\n"
+        f"Thanks,\n{ME['first_name']}\n"
+        + (f"\n{signature()}\n" if signature() else "")
     )
     return subject, body, variant

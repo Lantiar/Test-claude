@@ -814,7 +814,8 @@ def test_the_same_title_twice_is_listed_once():
 def _head(body):
     """What the model is actually shown: the body without the signature."""
     from jobfeed.outreach.profile import signature
-    return body.partition(signature())[0].rstrip()
+    sig = signature()
+    return body.partition(sig)[0].rstrip() if sig else body.rstrip()
 
 
 def _draft_pair():
@@ -1136,9 +1137,15 @@ def test_the_signature_is_never_shown_to_the_editor(con, monkeypatch):
     """Sent and reattached, an edit that merely reformatted it made the
     reattach point unfindable, and the block was appended a second time -- a
     mail signed twice, with every required token present and the length still
-    inside the band, so nothing downstream objected."""
-    from jobfeed.outreach import polish as _p
-    from jobfeed.outreach.profile import signature
+    inside the band, so nothing downstream objected.
+
+    Only meaningful when a signature is configured; the default is none.
+    """
+    from jobfeed.outreach import polish as _p, profile, templates as _t
+    monkeypatch.setattr(profile, "signature", lambda: "Nideesh Bharath Kumar")
+    monkeypatch.setattr(_p, "signature", lambda: "Nideesh Bharath Kumar")
+    monkeypatch.setattr(_t, "signature", lambda: "Nideesh Bharath Kumar")
+    signature = profile.signature
     s, b, ctx = _draft_pair()
     shown = []
 
@@ -1767,3 +1774,31 @@ def test_a_sent_email_cannot_be_edited(con, monkeypatch):
                         "ON c.id=o.contact_id WHERE c.email='rec1@acme.com'"
                         ).fetchone()["subject"]
     assert after == before
+
+
+def test_no_signature_block_is_a_valid_configuration(monkeypatch):
+    """Everything it carried is already in the mail -- school and degree in the
+    opening, portfolio in the closing line -- so the default is none. The code
+    around it has to cope: str.partition("") raises, and `"" in body` is always
+    true, so an unguarded version either crashes or staples an empty block onto
+    every message."""
+    from jobfeed.outreach import polish as _p, profile
+    s, b, ctx = _draft_pair()
+    assert profile.signature() == ""
+    assert b.rstrip().endswith("Thanks,\nNideesh")
+    assert "linkedin.com/in/bknideesh" not in b
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(_p.urllib.request, "urlopen",
+                        lambda req, timeout=0: (_ for _ in ()).throw(OSError("down")))
+    out = _p.polish(s, b, ctx)          # must not raise
+    assert (out["subject"], out["body"]) == (s, b)
+
+
+def test_a_signature_still_works_when_one_is_set(monkeypatch):
+    from jobfeed.outreach import profile, templates as t
+    monkeypatch.setattr(profile, "signature", lambda: "Nideesh · nideesh.ai")
+    monkeypatch.setattr(t, "signature", lambda: "Nideesh · nideesh.ai")
+    _, body, _ = t.render({"id": 1, "first_name": "Dana"},
+                          {"company": "BNY", "role": "SWE Intern"})
+    assert body.rstrip().endswith("Nideesh · nideesh.ai")
