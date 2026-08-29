@@ -198,6 +198,15 @@ and a revision that touched anything else is **discarded whole** and the
 original sent instead. The model can subtract nothing and add nothing — it can
 only fail to change.
 
+The prompt is **built from the checker's own rules** — the allowed-word list
+is generated from `ADDABLE`, the length band from `LENGTH_BAND` — so the two
+cannot drift apart. Described in prose instead, revisions came back rejected
+for constraints the model was never told, which is a wasted call every time.
+A rejected revision is retried **once**, with the checker's actual complaint
+fed back; a second failure returns the original. Temperature is 0, and dropped
+automatically if the model refuses it, since some newer ones accept only the
+default and a model swap should not look like an outage.
+
 `verify` asks three questions:
 
 1. **Did anything immutable move?** Company, every role title, name, school,
@@ -377,7 +386,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 75 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 79 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

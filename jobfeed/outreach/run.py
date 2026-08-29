@@ -238,8 +238,8 @@ def polish_drafts(con, limit: int = 20) -> dict:
         "LEFT JOIN company cm ON cm.id=c.company_id "
         "WHERE o.status='draft' AND o.polished_at IS NULL "
         "ORDER BY o.created_at LIMIT ?", (limit,)).fetchall()
-    stats = {"seen": len(rows), "edited": 0, "unchanged": 0,
-             "rejected": 0, "cost": 0.0, "notes": [], "problems": []}
+    stats = {"seen": len(rows), "edited": 0, "unchanged": 0, "rejected": 0,
+             "retried": 0, "cost": 0.0, "notes": [], "problems": []}
     for row in rows:
         roles = [r["title"] for r in con.execute(
             "SELECT j.title FROM outreach_job oj JOIN job j ON "
@@ -249,6 +249,7 @@ def polish_drafts(con, limit: int = 20) -> dict:
                              {"company": row["company"], "roles": roles,
                               "first_name": row["first_name"]})
         stats["cost"] += out["cost"]
+        stats["retried"] += bool(out.get("retried"))
         if out["rejected"]:
             stats["rejected"] += 1
             stats["problems"].append(f"[{row['id']}] " + "; ".join(out["rejected"][:3]))

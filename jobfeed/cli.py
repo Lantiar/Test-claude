@@ -185,7 +185,9 @@ def cmd_outreach_drafts(args, con) -> int:
 def cmd_outreach_polish(args, con) -> int:
     d = _outreach("polish_drafts")(con, limit=args.limit)
     print(f"{d['seen']} draft(s): {d['edited']} edited, {d['unchanged']} left as "
-          f"written, {d['rejected']} revision(s) refused  (${d['cost']:.5f})")
+          f"written, {d['rejected']} revision(s) refused"
+          + (f", {d['retried']} after a retry" if d.get("retried") else "")
+          + f"  (${d['cost']:.5f})")
     for n in d["notes"]:
         print(f"  fixed {n}")
     # Named, not swallowed. A refused revision means the editor tried to change

@@ -1016,3 +1016,111 @@ def test_a_followup_is_not_blocked_by_the_company_cooldown(con, monkeypatch):
                       "WHERE c.email='dana@acme.com'").fetchone()
     assert guards.suppressed(con, "dana@acme.com", cid), "a new contact is blocked"
     assert _run._may_write(con, dict(row), cid, None, followup=True) == ""
+
+
+def test_a_rejected_revision_is_retried_with_the_reason(con, monkeypatch):
+    """Told only "stay in scope", a model returns the same edit again and the
+    call is wasted. Told which rule it broke, it usually returns a smaller,
+    valid one."""
+    from jobfeed.outreach import polish as _p
+    s, b, ctx = _draft_pair()
+    seen = []
+
+    class _R:
+        def __init__(self, p): self.p = p
+        def read(self): return json.dumps(self.p).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def two_tries(req, timeout=0):
+        payload = json.loads(req.data)
+        seen.append(payload["messages"])
+        # First answer strays; second, after being told why, is a real fix.
+        revision = (b.replace("Google", "Meta") if len(seen) == 1
+                    else b.replace("here is one:", "here is one —"))
+        return _R({"usage": {"prompt_tokens": 500, "completion_tokens": 400},
+                   "choices": [{"message": {"content": json.dumps(
+                       {"subject": s, "body": revision, "notes": ["em dash"]})}}]})
+
+    monkeypatch.setattr(_p.urllib.request, "urlopen", two_tries)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    out = _p.polish(s, b, ctx)
+
+    assert out["retried"] and out["changed"] and not out["rejected"]
+    assert "—" in out["body"] and "Meta" not in out["body"]
+    # The second call must carry the checker's actual complaint, not a generic
+    # scolding -- that is the whole reason the retry converts.
+    followup = seen[1][-1]["content"]
+    assert "rejected" in followup and "Meta" in followup, followup
+
+
+def test_two_bad_revisions_give_up_rather_than_looping(con, monkeypatch):
+    """A model that will not comply must cost two calls, not twenty."""
+    from jobfeed.outreach import polish as _p
+    s, b, ctx = _draft_pair()
+    calls = []
+
+    class _R:
+        def __init__(self, p): self.p = p
+        def read(self): return json.dumps(self.p).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def always_stray(req, timeout=0):
+        calls.append(1)
+        return _R({"usage": {"prompt_tokens": 500, "completion_tokens": 400},
+                   "choices": [{"message": {"content": json.dumps(
+                       {"subject": s, "body": b.replace("Google", "Meta"),
+                        "notes": []})}}]})
+
+    monkeypatch.setattr(_p.urllib.request, "urlopen", always_stray)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    out = _p.polish(s, b, ctx)
+    assert len(calls) == 2 and out["rejected"]
+    assert (out["subject"], out["body"]) == (s, b)
+
+
+def test_a_model_that_refuses_temperature_is_not_an_outage(monkeypatch):
+    """Newer models accept only the default and reject the request outright.
+    Reported as an error, a model swap would look exactly like an API being
+    down."""
+    from jobfeed.outreach import polish as _p
+    s, b, ctx = _draft_pair()
+    payloads = []
+
+    class _R:
+        def __init__(self, p): self.p = p
+        def read(self): return json.dumps(self.p).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def picky(req, timeout=0):
+        payload = json.loads(req.data)
+        payloads.append(payload)
+        if "temperature" in payload:
+            raise _p.urllib.error.HTTPError(
+                "u", 400, "Bad Request", {},
+                __import__("io").BytesIO(
+                    b'{"error":{"message":"Unsupported value: \'temperature\'"}}'))
+        return _R({"usage": {"prompt_tokens": 500, "completion_tokens": 400},
+                   "choices": [{"message": {"content": json.dumps(
+                       {"subject": s, "body": b, "notes": []})}}]})
+
+    monkeypatch.setattr(_p.urllib.request, "urlopen", picky)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    out = _p.polish(s, b, ctx)
+    assert not out["rejected"], out["rejected"]
+    assert "temperature" in payloads[0] and "temperature" not in payloads[1]
+
+
+def test_the_prompt_lists_the_words_the_checker_allows():
+    """Built from ADDABLE rather than describing it, so the prompt and the
+    check cannot drift apart."""
+    from jobfeed.outreach import polish as _p
+    prompt = _p._system()
+    for word in ("and", "the", "would"):
+        assert f" {word} " in prompt, word
+    assert "admirer" not in prompt
+    assert "20%" in prompt
+    assert "{" not in prompt.replace('{"subject"', "").replace('{"', ""), \
+        "an unformatted placeholder survived into the prompt"
