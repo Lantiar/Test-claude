@@ -182,8 +182,22 @@ and the profiles themselves carry that URL. So one cheap pass learns the
 company page, and the second filters on it exactly. Philips went from one
 uncontactable person to thirteen employees, ten with addresses.
 
-Two things widen the pool once more, because both are the same dead end: too
-few people at the company, or nobody with an address.
+**Only where you are.** A recruiter in Amsterdam or Bengaluru does not hire for
+a US internship, and a note to them is one nobody can act on — Philips returned
+a Dutch, a German and three Indian recruiters before this. `OUTREACH_COUNTRY`
+(default `US`) filters both the search and the results. A profile LinkedIn
+could not place counts as in-country: dropping everyone it left blank throws
+away good contacts to avoid a bad one, and those costs are not the same.
+
+The pool **widens up a ladder** — 15, 45, 100, 200 by default
+(`OUTREACH_SEARCH_LADDER`) — until there are enough reachable, in-country
+people including at least one whose job is early careers. It stops there rather
+than spending without limit. A company that yields nothing costs about $3; one
+that yields on the first rung costs about $0.27.
+
+`prepare` asks for **twice** the contacts it needs. `_pick_contacts` returns
+only people it may write to and takes no replacement for one it drops, so a
+single contact with no address quietly turned a batch of three into two.
 
 Contacts are ranked **reachable first, then whose job it is, then how good the
 address is**. Role fit alone put three American Express campus recruiters at
@@ -526,6 +540,8 @@ jobfeed outreach verify <email>… # probe addresses, no database writes
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Scopes: `gmail.send`, `gmail.readonly` |
 | `OUTREACH_FROM` | From address |
 | `OUTREACH_BRACKET` | The subject-line bracket, default `Prev Google/Zon` |
+| `OUTREACH_COUNTRY` | Where recruiters must be, default `US` |
+| `OUTREACH_SEARCH_LADDER` | How far to widen a thin search, default `15,45,100,200` |
 | `OUTREACH_SIGNATURE` | A block under the sign-off. Empty by default — everything it carried is already in the mail |
 | `RESUME_PATH` | The PDF attached to a first note. Default `config/files/resume.pdf`, which is gitignored |
 | `OPENAI_API_KEY` | The copy editor. Without it, drafts go out exactly as the templates wrote them |
@@ -590,7 +606,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 127 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 130 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

@@ -30,6 +30,35 @@ VERIFY_ACTOR = os.getenv("APIFY_VERIFY_ACTOR", "michael.g~email-verifier-validat
 FINDER_ACTOR = os.getenv("APIFY_FINDER_ACTOR",
                          "snipercoder~email-finder-by-name-and-domain")
 
+# Where you are. A recruiter in Amsterdam or Bengaluru does not hire for a US
+# internship, and writing to them is a note nobody can act on -- Philips
+# returned a Dutch, a German and three Indian recruiters before this.
+COUNTRY = os.getenv("OUTREACH_COUNTRY", "US").upper()
+COUNTRY_NAMES = {"US": "United States", "GB": "United Kingdom", "CA": "Canada",
+                 "IN": "India", "DE": "Germany", "NL": "Netherlands",
+                 "AU": "Australia", "SG": "Singapore", "IE": "Ireland"}
+
+# How far to keep widening when a company is not yielding anybody usable. Each
+# rung costs about a cent per profile, so this stops rather than spending
+# without limit -- but it goes far enough that a big employer whose campus
+# recruiter sits outside the first page is still found.
+LADDER = tuple(int(n) for n in
+               os.getenv("OUTREACH_SEARCH_LADDER", "15,45,100,200").split(","))
+
+
+def in_country(item: dict, code: str = "") -> bool:
+    """Is this person somewhere they could hire for a role where you are?
+
+    Unknown counts as yes. LinkedIn leaves the country off some profiles, and
+    dropping everybody it could not place would throw away good contacts to
+    avoid a bad one -- the cost of each is not the same.
+    """
+    code = (code or COUNTRY).upper()
+    location = item.get("location") or {}
+    found = (location.get("countryCode")
+             or (location.get("parsed") or {}).get("countryCode") or "")
+    return not found or found.upper() == code
+
 # What a recruiter's title looks like. Deliberately narrow: "recruiter" alone
 # pulls in agency recruiters and recruiting coordinators at other companies,
 # and a technical sourcer is a better target than a VP of Talent.
@@ -176,8 +205,16 @@ def find_recruiters(company: str, limit: int = 3) -> list[dict]:
     can be written to.
     """
     def search(payload: dict) -> list:
-        return _call(PEOPLE_ACTOR, {"currentJobTitles": list(SEARCH_TITLES),
-                                    **payload})
+        return _call(PEOPLE_ACTOR, {
+            "currentJobTitles": list(SEARCH_TITLES),
+            "locations": [COUNTRY_NAMES.get(COUNTRY, COUNTRY)],
+            **payload})
+
+    def usable(pool: list) -> list:
+        """Right company, right country, right sort of job, has an address."""
+        return [it for it in pool
+                if _at_company(it, company) and in_country(it)
+                and _best_email(it)[0]]
 
     # Two passes, because LinkedIn's free-text search is not a company filter.
     # Searching "Philips recruiter" returns recruiters at Anduril and Synopsys,
@@ -195,34 +232,27 @@ def find_recruiters(company: str, limit: int = 3) -> list[dict]:
         if url and "/company/" in url and _at_company(item, company):
             votes[url] = votes.get(url, 0) + 1
 
-    if votes:
-        page = {"profileScraperMode": "Full + email search",
-                "currentCompanies": [max(votes, key=votes.get)]}
-        items = search({**page, "maxItems": max(limit * 5, 15)})
-        # Three ways the first pass comes up short, all the same dead end: too
-        # few people we can write to, or nobody whose job is early careers. A
-        # pool of fifteen at a large employer is mostly whoever LinkedIn ranked
-        # highest, and the campus recruiter is often not in it -- Philips only
-        # turned one up on the second, wider pass.
-        reachable = [it for it in items if _best_email(it)[0]]
-        campus = [it for it in reachable
-                  if title_rank(it.get("headline") or "") <= 1]
-        if len(reachable) < limit or not campus:
-            items = search({**page, "maxItems": max(limit * 15, 45)})
-    else:
-        # No page found: fall back to text, widening once if too little of the
-        # pool turns out to work there.
-        items = search({"profileScraperMode": "Full + email search",
-                        "searchQuery": f"{company} university recruiter early career",
-                        "maxItems": max(limit * 5, 15)})
-        if sum(1 for it in items if _at_company(it, company)) < limit:
-            items = search({"profileScraperMode": "Full + email search",
-                            "searchQuery": f"{company} university recruiter early career",
-                            "maxItems": max(limit * 15, 45)})
+    page = ({"profileScraperMode": "Full + email search",
+             "currentCompanies": [max(votes, key=votes.get)]} if votes else
+            {"profileScraperMode": "Full + email search",
+             "searchQuery": f"{company} university recruiter early career"})
+
+    # Widen until there are enough people worth writing to, or the ladder runs
+    # out. A pool of fifteen at a large employer is mostly whoever LinkedIn
+    # ranked highest: the campus recruiter is often not in it, and after the
+    # country filter neither is anyone else. Each rung is a bigger bill, so it
+    # stops -- but it goes far enough to find them.
+    items: list = []
+    for want in LADDER:
+        items = search({**page, "maxItems": want})
+        good = usable(items)
+        if len(good) >= limit and any(title_rank(it.get("headline") or "") <= 1
+                                      for it in good):
+            break
 
     out = []
     for it in items:
-        if not _at_company(it, company):
+        if not _at_company(it, company) or not in_country(it):
             continue
         title = (it.get("headline") or _employer(it) and
                  (it.get("currentPosition") or [{}])[0].get("position") or "")

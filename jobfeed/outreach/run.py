@@ -66,7 +66,10 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = False,
         stats["jobs"] += len(jobs)
         company = jobs[0]["company"]
 
-        found = _recruiters(con, company, cid, per_company)
+        # Ask for spares. _pick_contacts only returns people it may write to,
+        # and takes no replacement when one is unusable -- so a single contact
+        # with no address quietly turned a batch of three into a batch of two.
+        found = _recruiters(con, company, cid, per_company * 2)
         stats["contacts"] += len(found)
         if not found:
             stats["skipped"].append(f"{company}: no recruiters found")

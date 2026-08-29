@@ -1978,29 +1978,56 @@ def test_a_search_results_url_is_not_an_employer(monkeypatch):
     apify.find_recruiters("Philips", 3)
 
 
-def test_nobody_contactable_widens_the_search_once(monkeypatch):
-    """American Express returned three genuine recruiters and not one with an
-    address, which is the same dead end as finding nobody."""
+def test_the_search_widens_until_it_finds_enough(monkeypatch):
+    """American Express returned three genuine recruiters and not one
+    contactable, which is the same dead end as finding nobody. A pool of
+    fifteen at a large employer is mostly whoever LinkedIn ranked highest --
+    the campus recruiter is often not in it, and after the country filter
+    neither is anyone else."""
     sizes = []
 
     def fake(actor, payload, timeout=300):
-        if "currentCompanies" not in payload and "searchQuery" in payload \
-                and payload.get("profileScraperMode") == "Full":
+        if "currentCompanies" not in payload:
             return [{"firstName": "S", "lastName": "O", "headline": "Recruiter",
+                     "location": {"countryCode": "US"},
                      "currentPosition": [{"companyName": "Amex", "companyLinkedinUrl":
                          "https://www.linkedin.com/company/amex/"}]}]
         sizes.append(payload["maxItems"])
-        has_mail = len(sizes) > 1
-        return [{"firstName": f"R{i}", "lastName": "P", "headline": "Recruiter",
-                 "linkedinUrl": "",
-                 "emails": ([{"email": f"r{i}@amex.com", "status": "good"}]
-                            if has_mail else []),
+        # Nobody usable until the third rung.
+        if len(sizes) < 3:
+            return [{"firstName": f"R{i}", "lastName": "P", "headline": "Recruiter",
+                     "linkedinUrl": "", "emails": [],
+                     "location": {"countryCode": "US"},
+                     "currentPosition": [{"companyName": "Amex"}]} for i in range(4)]
+        return [{"firstName": f"R{i}", "lastName": "P",
+                 "headline": "University Recruiter", "linkedinUrl": "",
+                 "emails": [{"email": f"r{i}@amex.com", "status": "good"}],
+                 "location": {"countryCode": "US"},
                  "currentPosition": [{"companyName": "Amex"}]} for i in range(4)]
 
     monkeypatch.setattr(apify, "_call", fake)
     found = apify.find_recruiters("Amex", 3)
-    assert len(sizes) == 2 and sizes[1] > sizes[0], sizes
+    assert sizes == sorted(sizes) and len(sizes) == 3, sizes
     assert all(c["email"] for c in found)
+
+
+def test_the_ladder_stops_rather_than_spending_without_limit(monkeypatch):
+    """Each rung is a bigger bill. A company with nobody findable must cost a
+    bounded amount, not everything."""
+    sizes = []
+
+    def fake(actor, payload, timeout=300):
+        if "currentCompanies" not in payload:
+            return [{"firstName": "S", "lastName": "O", "headline": "Recruiter",
+                     "location": {"countryCode": "US"},
+                     "currentPosition": [{"companyName": "Nowhere", "companyLinkedinUrl":
+                         "https://www.linkedin.com/company/nowhere/"}]}]
+        sizes.append(payload["maxItems"])
+        return []
+
+    monkeypatch.setattr(apify, "_call", fake)
+    assert apify.find_recruiters("Nowhere", 3) == []
+    assert sizes == list(apify.LADDER), sizes
 
 
 def test_an_employer_name_must_prefix_not_merely_appear(monkeypatch):
@@ -2151,3 +2178,40 @@ def test_the_finder_never_returns_a_personal_mailbox(monkeypatch):
         {"Name": "B Person", "Email": "b.person@acme.com", "Found": True}])
     got = apify.find_emails([("A Person", "acme.com"), ("B Person", "acme.com")])
     assert got == {"B Person": "b.person@acme.com"}
+
+
+def test_one_contact_without_an_address_does_not_shrink_the_batch(con, monkeypatch):
+    """Philips returned three people and one had no address, so two notes went
+    out instead of three -- _pick_contacts returns only writable people and
+    took no replacement for the one it dropped."""
+    from jobfeed.outreach import run as _run, apify as _apify
+    cid = _company(con, "Acme")
+
+    def roster(company, n=3):
+        people = [{"full_name": "No Address", "first_name": "No", "title": "Recruiter",
+                   "linkedin_url": "", "email": None, "email_status": "unknown"}]
+        people += [{"full_name": f"Reachable {i}", "first_name": f"R{i}",
+                    "title": "University Recruiter", "linkedin_url": "",
+                    "email": f"r{i}@acme.com", "email_status": "verified"}
+                   for i in range(1, 6)]
+        return people[:n]
+
+    monkeypatch.setattr(_apify, "find_recruiters", roster)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    stats = _run.prepare(con, limit=5, per_company=3)
+    assert stats["drafts"] == 3, stats
+
+
+def test_recruiters_outside_your_country_are_dropped():
+    """A recruiter in Amsterdam or Bengaluru does not hire for a US
+    internship, and a note to them is one nobody can act on. Philips returned
+    a Dutch, a German and three Indian recruiters before this."""
+    from jobfeed.outreach.apify import in_country
+    def at(cc): return in_country({"location": {"countryCode": cc}})
+    assert at("US")
+    assert not at("NL") and not at("DE") and not at("IN")
+    # Unknown counts as yes: LinkedIn leaves the country off some profiles,
+    # and dropping everyone it could not place throws away good contacts to
+    # avoid a bad one. Those costs are not the same.
+    assert in_country({}) and at("")
+    assert in_country({"location": {"parsed": {"countryCode": "US"}}})
