@@ -1,0 +1,1545 @@
+[
+ {
+  "email": "recruiting@janestreet.com",
+  "domain": "janestreet.com",
+  "status": "risky",
+  "technical_status": "unknown",
+  "score": 68,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "recruiting@janestreet.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "unknown",
+    "state": null,
+    "confidence_score": 68,
+    "primary_reason": "Unknown",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mxin1.mail.janestreet.com",
+     "mxin4.mail.janestreet.com",
+     "mxin3.mail.janestreet.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "zq7x-no-such-person-4f81@janestreet.com",
+  "domain": "janestreet.com",
+  "status": "risky",
+  "technical_status": "unknown",
+  "score": 68,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "zq7x-no-such-person-4f81@janestreet.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "unknown",
+    "state": null,
+    "confidence_score": 68,
+    "primary_reason": "Unknown",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mxin1.mail.janestreet.com",
+     "mxin4.mail.janestreet.com",
+     "mxin3.mail.janestreet.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "careers@janestreet.com",
+  "domain": "janestreet.com",
+  "status": "good",
+  "technical_status": "valid",
+  "score": 100,
+  "reason": "ok",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "careers@janestreet.com",
+   "verdict": {
+    "is_valid": true,
+    "status": "valid",
+    "state": null,
+    "confidence_score": 100,
+    "primary_reason": "Valid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mxin3.mail.janestreet.com",
+     "mxin4.mail.janestreet.com",
+     "mxin2.mail.janestreet.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "campus@janestreet.com",
+  "domain": "janestreet.com",
+  "status": "risky",
+  "technical_status": "unknown",
+  "score": 68,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "campus@janestreet.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "unknown",
+    "state": null,
+    "confidence_score": 68,
+    "primary_reason": "Unknown",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mxin3.mail.janestreet.com",
+     "mxin4.mail.janestreet.com",
+     "mxin2.mail.janestreet.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "careers@citadel.com",
+  "domain": "citadel.com",
+  "status": "risky",
+  "technical_status": "catch_all",
+  "score": 69,
+  "reason": "catch_all_domain",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": true,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "careers@citadel.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 69,
+    "primary_reason": "Risky",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": true,
+    "mx_hosts": [
+     "mxb-001f6701.gslb.pphosted.com",
+     "mxa-001f6701.gslb.pphosted.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "zq7x-no-such-person-4f81-2@janestreet.com",
+  "domain": "janestreet.com",
+  "status": "risky",
+  "technical_status": "unknown",
+  "score": 68,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "zq7x-no-such-person-4f81-2@janestreet.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "unknown",
+    "state": null,
+    "confidence_score": 68,
+    "primary_reason": "Unknown",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mxin3.mail.janestreet.com",
+     "mxin4.mail.janestreet.com",
+     "mxin2.mail.janestreet.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "sarah.chen@janestreet.com",
+  "domain": "janestreet.com",
+  "status": "risky",
+  "technical_status": "unknown",
+  "score": 68,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "sarah.chen@janestreet.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "unknown",
+    "state": null,
+    "confidence_score": 68,
+    "primary_reason": "Unknown",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mxin1.mail.janestreet.com",
+     "mxin4.mail.janestreet.com",
+     "mxin3.mail.janestreet.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "university.recruiting@janestreet.com",
+  "domain": "janestreet.com",
+  "status": "risky",
+  "technical_status": "unknown",
+  "score": 68,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "university.recruiting@janestreet.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "unknown",
+    "state": null,
+    "confidence_score": 68,
+    "primary_reason": "Unknown",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mxin3.mail.janestreet.com",
+     "mxin4.mail.janestreet.com",
+     "mxin2.mail.janestreet.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "jane.doe@janestreet.com",
+  "domain": "janestreet.com",
+  "status": "risky",
+  "technical_status": "unknown",
+  "score": 68,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "jane.doe@janestreet.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "unknown",
+    "state": null,
+    "confidence_score": 68,
+    "primary_reason": "Unknown",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mxin1.mail.janestreet.com",
+     "mxin4.mail.janestreet.com",
+     "mxin3.mail.janestreet.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "campus@citadel.com",
+  "domain": "citadel.com",
+  "status": "risky",
+  "technical_status": "catch_all",
+  "score": 69,
+  "reason": "catch_all_domain",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": true,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "campus@citadel.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 69,
+    "primary_reason": "Risky",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": true,
+    "mx_hosts": [
+     "mxb-001f6701.gslb.pphosted.com",
+     "mxa-001f6701.gslb.pphosted.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "recruiting@citadel.com",
+  "domain": "citadel.com",
+  "status": "risky",
+  "technical_status": "catch_all",
+  "score": 69,
+  "reason": "catch_all_domain",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": true,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "recruiting@citadel.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 69,
+    "primary_reason": "Risky",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": true,
+    "mx_hosts": [
+     "mxb-001f6701.gslb.pphosted.com",
+     "mxa-001f6701.gslb.pphosted.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "sarah.chen@citadel.com",
+  "domain": "citadel.com",
+  "status": "risky",
+  "technical_status": "catch_all",
+  "score": 69,
+  "reason": "catch_all_domain",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": true,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "sarah.chen@citadel.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 69,
+    "primary_reason": "Risky",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": true,
+    "mx_hosts": [
+     "mxb-001f6701.gslb.pphosted.com",
+     "mxa-001f6701.gslb.pphosted.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "recruiting@apple.com",
+  "domain": "apple.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "recruiting@apple.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mx-in.g.apple.com",
+     "mx-in-rn.apple.com",
+     "mx-in-hfd.apple.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "university.recruiting@citadel.com",
+  "domain": "citadel.com",
+  "status": "risky",
+  "technical_status": "catch_all",
+  "score": 69,
+  "reason": "catch_all_domain",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": true,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "university.recruiting@citadel.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 69,
+    "primary_reason": "Risky",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": true,
+    "mx_hosts": [
+     "mxb-001f6701.gslb.pphosted.com",
+     "mxa-001f6701.gslb.pphosted.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "campus@apple.com",
+  "domain": "apple.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "campus@apple.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mx-in.g.apple.com",
+     "mx-in-ma.apple.com",
+     "mx-in-hfd.apple.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "careers@apple.com",
+  "domain": "apple.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "careers@apple.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mx-in.g.apple.com",
+     "mx-in-ma.apple.com",
+     "mx-in-hfd.apple.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "university.recruiting@apple.com",
+  "domain": "apple.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "university.recruiting@apple.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mx-in.g.apple.com",
+     "mx-in-ma.apple.com",
+     "mx-in-hfd.apple.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "jane.doe@citadel.com",
+  "domain": "citadel.com",
+  "status": "risky",
+  "technical_status": "catch_all",
+  "score": 69,
+  "reason": "catch_all_domain",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": true,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "jane.doe@citadel.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 69,
+    "primary_reason": "Risky",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": true,
+    "mx_hosts": [
+     "mxb-001f6701.gslb.pphosted.com",
+     "mxa-001f6701.gslb.pphosted.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "zq7x-no-such-person-4f81@citadel.com",
+  "domain": "citadel.com",
+  "status": "risky",
+  "technical_status": "catch_all",
+  "score": 69,
+  "reason": "catch_all_domain",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": true,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "zq7x-no-such-person-4f81@citadel.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 69,
+    "primary_reason": "Risky",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": true,
+    "mx_hosts": [
+     "mxb-001f6701.gslb.pphosted.com",
+     "mxa-001f6701.gslb.pphosted.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "zq7x-no-such-person-4f81@apple.com",
+  "domain": "apple.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "zq7x-no-such-person-4f81@apple.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mx-in.g.apple.com",
+     "mx-in-ma.apple.com",
+     "mx-in-hfd.apple.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "sarah.chen@apple.com",
+  "domain": "apple.com",
+  "status": "good",
+  "technical_status": "valid",
+  "score": 100,
+  "reason": "ok",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "sarah.chen@apple.com",
+   "verdict": {
+    "is_valid": true,
+    "status": "valid",
+    "state": null,
+    "confidence_score": 100,
+    "primary_reason": "Valid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mx-in.g.apple.com",
+     "mx-in-rn.apple.com",
+     "mx-in-hfd.apple.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "jane.doe@apple.com",
+  "domain": "apple.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "jane.doe@apple.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mx-in.g.apple.com",
+     "mx-in-rn.apple.com",
+     "mx-in-hfd.apple.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "zq7x-no-such-person-4f81-2@apple.com",
+  "domain": "apple.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "zq7x-no-such-person-4f81-2@apple.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "mx-in.g.apple.com",
+     "mx-in-ma.apple.com",
+     "mx-in-hfd.apple.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "zq7x-no-such-person-4f81-2@citadel.com",
+  "domain": "citadel.com",
+  "status": "risky",
+  "technical_status": "catch_all",
+  "score": 69,
+  "reason": "catch_all_domain",
+  "free": false,
+  "role": false,
+  "disposable": false,
+  "catch_all": true,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "zq7x-no-such-person-4f81-2@citadel.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 69,
+    "primary_reason": "Risky",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": false,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": true,
+    "mx_hosts": [
+     "mxb-001f6701.gslb.pphosted.com",
+     "mxa-001f6701.gslb.pphosted.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "recruiting@gmail.com",
+  "domain": "gmail.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "recruiting@gmail.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "careers@gmail.com",
+  "domain": "gmail.com",
+  "status": "risky",
+  "technical_status": "unknown",
+  "score": 68,
+  "reason": "smtp_unreachable",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "careers@gmail.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "unknown",
+    "state": null,
+    "confidence_score": 68,
+    "primary_reason": "Unknown",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "campus@gmail.com",
+  "domain": "gmail.com",
+  "status": "good",
+  "technical_status": "valid",
+  "score": 97,
+  "reason": "ok",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "campus@gmail.com",
+   "verdict": {
+    "is_valid": true,
+    "status": "valid",
+    "state": null,
+    "confidence_score": 97,
+    "primary_reason": "Valid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "university.recruiting@gmail.com",
+  "domain": "gmail.com",
+  "status": "good",
+  "technical_status": "valid",
+  "score": 97,
+  "reason": "ok",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "university.recruiting@gmail.com",
+   "verdict": {
+    "is_valid": true,
+    "status": "valid",
+    "state": null,
+    "confidence_score": 97,
+    "primary_reason": "Valid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "jane.doe@gmail.com",
+  "domain": "gmail.com",
+  "status": "good",
+  "technical_status": "valid",
+  "score": 97,
+  "reason": "ok",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "jane.doe@gmail.com",
+   "verdict": {
+    "is_valid": true,
+    "status": "valid",
+    "state": null,
+    "confidence_score": 97,
+    "primary_reason": "Valid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "zq7x-no-such-person-4f81@gmail.com",
+  "domain": "gmail.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "zq7x-no-such-person-4f81@gmail.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "sarah.chen@gmail.com",
+  "domain": "gmail.com",
+  "status": "good",
+  "technical_status": "valid",
+  "score": 97,
+  "reason": "ok",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "sarah.chen@gmail.com",
+   "verdict": {
+    "is_valid": true,
+    "status": "valid",
+    "state": null,
+    "confidence_score": 97,
+    "primary_reason": "Valid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "zq7x-no-such-person-4f81-2@gmail.com",
+  "domain": "gmail.com",
+  "status": "bad",
+  "technical_status": "invalid",
+  "score": 39,
+  "reason": "smtp_unreachable",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "zq7x-no-such-person-4f81-2@gmail.com",
+   "verdict": {
+    "is_valid": false,
+    "status": "invalid",
+    "state": null,
+    "confidence_score": 39,
+    "primary_reason": "Invalid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": false,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ },
+ {
+  "email": "bknideesh@gmail.com",
+  "domain": "gmail.com",
+  "status": "good",
+  "technical_status": "valid",
+  "score": 97,
+  "reason": "ok",
+  "free": true,
+  "role": false,
+  "disposable": false,
+  "catch_all": false,
+  "has_tag": false,
+  "error": "none",
+  "verification_details": {
+   "normalized_email": "bknideesh@gmail.com",
+   "verdict": {
+    "is_valid": true,
+    "status": "valid",
+    "state": null,
+    "confidence_score": 97,
+    "primary_reason": "Valid",
+    "reasons": [
+     "syntax_ok",
+     "mx_ok",
+     "a_ok"
+    ]
+   },
+   "classification": {
+    "is_free_provider": true,
+    "is_role_based": false,
+    "is_disposable": false,
+    "has_tag": false
+   },
+   "checks": {
+    "smtp_reachable": true,
+    "syntax_valid": true,
+    "mx_records_valid": true,
+    "a_record_valid": true,
+    "catch_all_domain": false,
+    "mx_hosts": [
+     "gmail-smtp-in.l.google.com",
+     "alt1.gmail-smtp-in.l.google.com",
+     "alt2.gmail-smtp-in.l.google.com"
+    ]
+   }
+  }
+ }
+]

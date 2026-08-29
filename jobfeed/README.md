@@ -219,3 +219,49 @@ the listed one -- Susquehanna appears as both "Susquehanna International Group"
 and "Susquehanna International Group (SIG)".
 
 486 of 2,244 live postings currently carry a badge: 145 S, 67 A, 274 B.
+
+## Recruiter outreach
+
+Marking a job past `interested` makes it eligible for outreach: the pipeline
+finds early-career recruiters at that company, writes a draft each, scatters
+them over working days, sends from your own Gmail, and reads the replies.
+
+```
+jobfeed outreach prepare          # find recruiters, write drafts (no sending)
+jobfeed outreach drafts           # read what would go out
+jobfeed outreach schedule         # give each draft a send time
+jobfeed outreach dispatch         # dry run; --send to actually send
+jobfeed outreach watch            # read replies and bounces
+jobfeed outreach followups        # queue day-4 and day-9 nudges
+jobfeed outreach status           # counts, and the bounce breaker
+```
+
+`dispatch` is the only command that can put mail in front of a stranger and it
+will not do so without `--send`.
+
+### What stops it embarrassing you
+
+- **One note per company per day**, and one company per week across
+  applications. Three near-identical emails to one recruiting team in an
+  afternoon is the failure this is built around.
+- **Weekday sends only**, inside 9:00-16:30 in the recipient's day, with
+  randomised daily volume, start minute, gaps and per-send jitter.
+- **A bounce circuit breaker**: a rolling 7-day hard-bounce rate over 2% (with
+  at least 25 sends) pauses everything rather than throttling it.
+- **`accept_all` is not `verified`.** Most large employers accept mail for any
+  local part, so the probe cannot confirm a mailbox: those get one speculative
+  send per company per week, not three.
+- **Any reply stops the sequence**, including an out-of-office. A follow-up
+  landing after someone has already answered is what turns a polite note into
+  a complaint.
+- **Drafts are re-checked at send time**, not only when written -- a queued
+  draft can sit for a week, and the address may have bounced in between.
+
+### Configuration
+
+`APIFY_TOKEN` for sourcing and verification; `GMAIL_CLIENT_ID`,
+`GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` (scopes: `gmail.send` and
+`gmail.readonly`) for sending and reading. `OUTREACH_FROM` sets the From
+address, `OUTREACH_PREV` the employer named in the subject bracket.
+`APIFY_PEOPLE_ACTOR` and `APIFY_VERIFY_ACTOR` override the actors, since the
+Apify store churns.

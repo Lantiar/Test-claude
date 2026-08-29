@@ -1,0 +1,177 @@
+[
+ {
+  "firstName": "Robin",
+  "lastName": "Vale",
+  "linkedinUrl": "https://www.linkedin.com/in/robin-vale",
+  "headline": "In-House Talent Partner | Boolean Search Specialist | Connecting Your Company with Elite Talent",
+  "currentPosition": [
+   {
+    "position": "Senior Technical Recruiter",
+    "companyName": "Intuit"
+   }
+  ],
+  "emails": []
+ },
+ {
+  "firstName": "Alex Marin",
+  "lastName": "T.",
+  "linkedinUrl": "https://www.linkedin.com/in/alex-t",
+  "headline": "Executive Recruiter | Applied Science and Engineering",
+  "currentPosition": [
+   {
+    "position": "Executive Recruiter",
+    "companyName": "Amazon"
+   }
+  ]
+ },
+ {
+  "firstName": "Sam",
+  "lastName": "Okoro",
+  "linkedinUrl": "https://www.linkedin.com/in/sam-okoro",
+  "headline": "Resilient Sr Technical / AI Recruiter at Roku - No.1 TV OS in the US                                                                                     \nHumans Above the Loop",
+  "currentPosition": [
+   {
+    "position": "Senior Recruiter, Devices Product and Technology@Roku",
+    "companyName": "Roku"
+   }
+  ],
+  "emails": []
+ },
+ {
+  "firstName": "Jordan",
+  "lastName": "Pike",
+  "linkedinUrl": "https://www.linkedin.com/in/jordan-pike",
+  "headline": "Talent Acquisition | Early Career & Technical Recruiting",
+  "currentPosition": [
+   {
+    "position": "Full Life Cycle Recruiter - Amazon University",
+    "companyName": "Amazon"
+   }
+  ]
+ },
+ {
+  "firstName": "Riley",
+  "lastName": "Nash",
+  "linkedinUrl": "https://www.linkedin.com/in/riley-nash",
+  "headline": "Head of Talent & People | Scaled Series A-D Startups Across AI, Fintech & Consumer Tech | 3x Founding Recruiter | Executive Hiring, Org Design & Workforce Strategy | Ex-Revolut, JUUL, Google",
+  "currentPosition": [
+   {
+    "position": "Founding Recruiter",
+    "companyName": "Modo Energy"
+   }
+  ],
+  "emails": [
+   {
+    "email": "riley@modoenergy.example",
+    "deliverable": true,
+    "catchAllDomain": false,
+    "validEmailServer": true,
+    "free": false,
+    "status": "valid",
+    "qualityScore": 80
+   }
+  ]
+ },
+ {
+  "firstName": "Devin Lobo",
+  "lastName": "S.",
+  "linkedinUrl": "https://www.linkedin.com/in/devin-s",
+  "headline": "Senior Technical Recruiter",
+  "currentPosition": [
+   {
+    "position": "Technical Sourcing Recruiter",
+    "companyName": "Amazon Web Services (AWS)"
+   }
+  ],
+  "emails": [
+   {
+    "email": "devin@amazon.example",
+    "catchAllDomain": true,
+    "validEmailServer": true,
+    "free": false,
+    "status": "risky",
+    "qualityScore": 60
+   }
+  ]
+ },
+ {
+  "firstName": "Casey",
+  "lastName": "Reyes",
+  "linkedinUrl": "https://www.linkedin.com/in/casey-reyes",
+  "headline": "Talent Intelligence | Hiring and Sourcing Strategy | Data-Driven Talent Acquisition | Mentoring Sourcers | GenAI for Recruiting",
+  "currentPosition": [
+   {
+    "position": "Sourcing Recruiter ",
+    "companyName": "Amazon"
+   }
+  ]
+ },
+ {
+  "firstName": "Morgan",
+  "lastName": "Idris",
+  "linkedinUrl": "https://www.linkedin.com/in/morgan-idris",
+  "headline": "\ud83d\udc68\u200d\ud83d\udcbb Amazon \ud83c\udf93 University Talent Recruiter \ud83d\udce3 Hiring Class of \u201926-\u201927 for ASIC FULL TIME ROLES",
+  "currentPosition": [
+   {
+    "position": "Full Lifeycle Recruiter II",
+    "companyName": "Amazon Web Services (AWS)"
+   }
+  ],
+  "emails": [
+   {
+    "email": "morgan.idris@amazon.example",
+    "catchAllDomain": true,
+    "validEmailServer": true,
+    "free": false,
+    "status": "risky",
+    "qualityScore": 60
+   }
+  ]
+ },
+ {
+  "firstName": "Harper",
+  "lastName": "Quinn",
+  "linkedinUrl": "https://www.linkedin.com/in/harper-quinn",
+  "headline": "Sr. FLC Recruiter - Early Career Talent at Amazon",
+  "currentPosition": [
+   {
+    "position": "Sr. FLC Recruiter - Early Career Talent",
+    "companyName": "Amazon Web Services (AWS)"
+   }
+  ],
+  "emails": [
+   {
+    "email": "harper.quinn@amazon.example",
+    "deliverable": true,
+    "catchAllDomain": false,
+    "validEmailServer": true,
+    "free": false,
+    "status": "valid",
+    "qualityScore": 90
+   }
+  ]
+ },
+ {
+  "firstName": "Ellis",
+  "lastName": "Bloom",
+  "linkedinUrl": "https://www.linkedin.com/in/ellis-bloom",
+  "headline": "Senior Technical Recruiter & Talent Research Partner Org Mapping, Market Research, High-Signal Sourcing | Ex-AWS | $20M+ Negotiated",
+  "currentPosition": [
+   {
+    "position": "Founder & Principal Talent Advisor",
+    "companyName": "Uflo"
+   }
+  ],
+  "emails": [
+   {
+    "email": "ellis.bloom@uflo.example",
+    "deliverable": true,
+    "catchAllDomain": false,
+    "validEmailServer": true,
+    "free": false,
+    "status": "valid",
+    "qualityScore": 90
+   }
+  ]
+ }
+]

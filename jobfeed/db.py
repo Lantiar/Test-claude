@@ -106,6 +106,85 @@ CREATE TABLE IF NOT EXISTS application (
 );
 CREATE INDEX IF NOT EXISTS application_stage ON application(stage);
 
+-- ---- recruiter outreach -------------------------------------------------
+-- Everything below fires when a job is marked applied. Kept in the same
+-- database as the job list because the trigger is a stage change on a job,
+-- and a second store would mean two answers to "have I contacted this
+-- company" -- which is the question the suppression rules exist to answer.
+
+CREATE TABLE IF NOT EXISTS contact (
+  id            INTEGER PRIMARY KEY,
+  company_id    INTEGER REFERENCES company(id),
+  full_name     TEXT NOT NULL,
+  first_name    TEXT,
+  title         TEXT,
+  linkedin_url  TEXT,
+  email         TEXT,
+  -- verified: the mailbox answered. accept_all: the domain accepts anything,
+  -- so the verifier cannot tell -- which is what Google Workspace and
+  -- Microsoft 365 do, meaning most large employers land here rather than in
+  -- verified. Treated as its own class rather than folded into either.
+  email_status  TEXT NOT NULL DEFAULT 'unknown',
+  verified_at   REAL,
+  source        TEXT,
+  found_at      REAL NOT NULL,
+  UNIQUE(company_id, full_name)
+);
+CREATE INDEX IF NOT EXISTS contact_email ON contact(email);
+
+CREATE TABLE IF NOT EXISTS outreach (
+  id          INTEGER PRIMARY KEY,
+  job_key     TEXT NOT NULL,
+  contact_id  INTEGER NOT NULL REFERENCES contact(id),
+  variant     TEXT,
+  subject     TEXT,
+  body        TEXT,
+  step        INTEGER NOT NULL DEFAULT 0,
+  status      TEXT NOT NULL DEFAULT 'draft',
+  message_id  TEXT,
+  thread_id   TEXT,
+  send_after  REAL,
+  sent_at     REAL,
+  created_at  REAL NOT NULL,
+  UNIQUE(job_key, contact_id, step)
+);
+CREATE INDEX IF NOT EXISTS outreach_due ON outreach(status, send_after);
+
+CREATE TABLE IF NOT EXISTS reply (
+  id           INTEGER PRIMARY KEY,
+  outreach_id  INTEGER REFERENCES outreach(id),
+  received_at  REAL NOT NULL,
+  from_email   TEXT,
+  kind         TEXT NOT NULL,          -- human | auto | bounce
+  bounce_type  TEXT,                   -- hard | soft
+  snippet      TEXT
+);
+
+-- Why an address or a company may not be written to. Checked before anything
+-- is queued rather than before it is sent: a draft that should never have
+-- existed is easier to reason about than one that is skipped at the last
+-- moment for reasons nobody recorded.
+CREATE TABLE IF NOT EXISTS suppression (
+  id         INTEGER PRIMARY KEY,
+  email      TEXT,
+  company_id INTEGER,
+  reason     TEXT NOT NULL,
+  until      REAL,
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS suppression_email ON suppression(email);
+CREATE INDEX IF NOT EXISTS suppression_company ON suppression(company_id, until);
+
+CREATE TABLE IF NOT EXISTS send_health (
+  day           TEXT PRIMARY KEY,      -- YYYY-MM-DD
+  sent          INTEGER NOT NULL DEFAULT 0,
+  hard_bounced  INTEGER NOT NULL DEFAULT 0,
+  soft_bounced  INTEGER NOT NULL DEFAULT 0,
+  replied       INTEGER NOT NULL DEFAULT 0,
+  paused        INTEGER NOT NULL DEFAULT 0,
+  paused_reason TEXT
+);
+
 CREATE TABLE IF NOT EXISTS merge_log (
   id        INTEGER PRIMARY KEY,
   kept_job  INTEGER NOT NULL,

@@ -136,6 +136,124 @@ def cmd_notify(args, con) -> int:
     return 0 if d["sent"] else 1
 
 
+# ---- outreach -------------------------------------------------------------
+#
+# Every one of these defaults to a dry run. `dispatch` is the only one that can
+# put mail in front of a stranger, and it needs --send spelled out: the failure
+# mode of this whole pipeline is a batch going out before anyone has read it.
+
+def _outreach(name):
+    from .outreach import run as _run
+    return getattr(_run, name)
+
+
+def cmd_outreach_prepare(args, con) -> int:
+    d = _outreach("prepare")(con, limit=args.limit, per_company=args.per_company,
+                             dry_run=not args.verify)
+    print(f"{d['jobs']} applied job(s), {d['contacts']} contact(s), "
+          f"{d['drafts']} draft(s)")
+    if d["verify"]:
+        print("  addresses: " + ", ".join(f"{k} {v}" for k, v in
+                                          sorted(d["verify"].items())))
+    for why in d["skipped"]:
+        print(f"  skipped {why}")
+    return 0
+
+
+def cmd_outreach_drafts(args, con) -> int:
+    """Read what would go out. The review step, before anything is queued."""
+    rows = con.execute(
+        "SELECT o.*, c.full_name, c.title, c.email, c.email_status, cm.name company "
+        "FROM outreach o JOIN contact c ON c.id=o.contact_id "
+        "LEFT JOIN company cm ON cm.id=c.company_id "
+        "WHERE o.status=? ORDER BY o.created_at LIMIT ?",
+        (args.status, args.limit)).fetchall()
+    for r in rows:
+        when = (f"  send_after {dt.datetime.fromtimestamp(r['send_after']):%a %d %b %H:%M}"
+                if r["send_after"] else "")
+        print("=" * 78)
+        print(f"[{r['id']}] {r['company'] or '?'} / step {r['step']} / "
+              f"variant {r['variant']} / {r['email_status']}{when}")
+        print(f"To: {r['full_name']} <{r['email']}> -- {r['title'] or '?'}")
+        print(f"Subject: {r['subject']}\n")
+        print(r["body"])
+    print("=" * 78)
+    print(f"{len(rows)} {args.status}")
+    return 0
+
+
+def cmd_outreach_schedule(args, con) -> int:
+    d = _outreach("schedule")(con)
+    if not d["scheduled"]:
+        print("no drafts waiting")
+        return 0
+    print(f"queued {d['scheduled']}: {d['first']} -> {d['last']}")
+    return 0
+
+
+def cmd_outreach_dispatch(args, con) -> int:
+    d = _outreach("dispatch")(con, dry_run=not args.send, limit=args.limit)
+    if d.get("paused"):
+        print(f"PAUSED -- {d['health']}", file=sys.stderr)
+        return 1
+    verb = "sent" if args.send else "would send"
+    print(f"{verb} {d['sent']}")
+    for h in d.get("held", []):
+        print(f"  held {h}")
+    for e in d.get("errors", []):
+        print(f"  FAILED {e}", file=sys.stderr)
+    return 1 if d.get("errors") else 0
+
+
+def cmd_outreach_watch(args, con) -> int:
+    d = _outreach("watch")(con)
+    print(f"{d['seen']} new message(s): {d.get('human',0)} human, "
+          f"{d.get('auto',0)} auto, {d.get('bounce',0)} bounce")
+    if d.get("paused"):
+        print("breaker tripped -- sending is paused", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_outreach_followups(args, con) -> int:
+    print(f"queued {_outreach('followups')(con)['queued']} follow-up(s)")
+    return 0
+
+
+def cmd_outreach_status(args, con) -> int:
+    from .outreach import guards
+    rows = con.execute("SELECT status, COUNT(*) n FROM outreach GROUP BY status")
+    print("outreach: " + (", ".join(f"{r['status']} {r['n']}" for r in rows) or "empty"))
+    rows = con.execute("SELECT email_status, COUNT(*) n FROM contact "
+                       "GROUP BY email_status")
+    print("contacts: " + (", ".join(f"{r['email_status']} {r['n']}" for r in rows)
+                          or "empty"))
+    h = guards.health(con)
+    print(f"health:   {h['sent']} sent / {h['hard_bounced']} hard bounce "
+          f"({h['bounce_rate']:.1%}) over {guards.BOUNCE_WINDOW_DAYS}d"
+          + ("  PAUSED" if h["paused"] else ""))
+    return 0
+
+
+def cmd_outreach_verify(args, con) -> int:
+    """Probe addresses through Apify without touching the database.
+
+    Standalone because the split it reports -- how many of a firm's addresses
+    come back deliverable rather than accept_all -- is the thing that decides
+    whether guessing addresses at that firm is worth doing at all.
+    """
+    from .outreach import apify
+
+    statuses = apify.verify(args.emails)
+    tally = {}
+    for email in args.emails:
+        st = statuses.get(email, "no answer")
+        tally[st] = tally.get(st, 0) + 1
+        print(f"  {st:<12} {email}")
+    print("  " + ", ".join(f"{k} {v}" for k, v in sorted(tally.items())))
+    return 0
+
+
 def cmd_render(args, con) -> int:
     from .server import render
 
@@ -327,6 +445,32 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("export"); p.set_defaults(fn=cmd_export)
     p.add_argument("--out", default="data/jobs.jsonl")
+
+    p = sub.add_parser("outreach", help="recruiter email pipeline")
+    osub = p.add_subparsers(dest="ocmd", required=True)
+
+    q = osub.add_parser("prepare"); q.set_defaults(fn=cmd_outreach_prepare)
+    q.add_argument("--limit", type=int, default=5, help="applied jobs to process")
+    q.add_argument("--per-company", type=int, default=3)
+    q.add_argument("--verify", action="store_true",
+                   help="spend Apify credit verifying the addresses found")
+
+    q = osub.add_parser("drafts"); q.set_defaults(fn=cmd_outreach_drafts)
+    q.add_argument("--status", default="draft")
+    q.add_argument("--limit", type=int, default=20)
+
+    q = osub.add_parser("schedule"); q.set_defaults(fn=cmd_outreach_schedule)
+
+    q = osub.add_parser("dispatch"); q.set_defaults(fn=cmd_outreach_dispatch)
+    q.add_argument("--send", action="store_true", help="actually send")
+    q.add_argument("--limit", type=int, default=10)
+
+    q = osub.add_parser("watch"); q.set_defaults(fn=cmd_outreach_watch)
+    q = osub.add_parser("followups"); q.set_defaults(fn=cmd_outreach_followups)
+    q = osub.add_parser("status"); q.set_defaults(fn=cmd_outreach_status)
+
+    q = osub.add_parser("verify"); q.set_defaults(fn=cmd_outreach_verify)
+    q.add_argument("emails", nargs="+")
 
     p = sub.add_parser("stats"); p.set_defaults(fn=cmd_stats)
 
