@@ -249,7 +249,9 @@ def connect(path: str | None = None) -> sqlite3.Connection:
 # does nothing to a table that is already there, so a new column is invisible
 # until it is added explicitly -- and the symptom is an OperationalError on a
 # machine that has been running the feed, while a fresh checkout works fine.
-MIGRATIONS = [("outreach", "campaign", "TEXT")]
+MIGRATIONS = [("outreach", "campaign", "TEXT"),
+              ("outreach", "polished_at", "REAL"),
+              ("outreach", "polish_notes", "TEXT")]
 
 
 def _migrate(con) -> None:

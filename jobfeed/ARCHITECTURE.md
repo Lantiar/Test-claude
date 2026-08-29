@@ -184,6 +184,39 @@ to a different set of strangers at a company you have already contacted.
 
 Writes drafts. Nothing leaves.
 
+### 1b. `polish` — a cheap model fixes grammar, and only grammar
+
+Template copy fails mechanically: a doubled space where a field was empty, a
+comma splice, a sentence that reads as assembled. A small model
+(`gpt-4.1-nano` by default, roughly $0.0002 an email) is good at those.
+
+Unsupervised it is also good at *helping* — rounding out a claim, adding a
+number that was not there, warming a sentence with a conversation that never
+happened. So the model is never trusted on its own. It proposes a revision;
+`polish.verify()` decides whether it stayed inside grammar and readability,
+and a revision that touched anything else is **discarded whole** and the
+original sent instead. The model can subtract nothing and add nothing — it can
+only fail to change.
+
+`verify` asks three questions:
+
+1. **Did anything immutable move?** Company, every role title, name, school,
+   degree, graduation, both URLs, the greeting, the subject bracket — checked
+   per field, since a company surviving in the subject says nothing about the
+   body.
+2. **Did anything appear that was not there before?** Any URL, number, proper
+   noun or *word* in the output that is absent from the input did not come
+   from the email. Only a closed list of function words may be introduced —
+   fixing a run-on needs "and", it never needs "admirer".
+3. **Did the text grow?** More than 20% is an addition whatever it claims.
+
+The signature block is rebuilt from `profile.py` rather than accepted back, so
+no edit can reach the one block carrying every link and the graduation year.
+
+Any failure — no key, an outage, a rate limit, an unparseable answer — returns
+the original unchanged. This runs on mail about to be sent, so the fallback is
+the text that was already tested, never nothing and never a guess.
+
 ### 2. `schedule` — scatter
 
 `guards.plan_sends()` assigns send times: weekdays only, 09:00–16:30 in the
@@ -287,6 +320,8 @@ jobfeed outreach verify <email>… # probe addresses, no database writes
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Scopes: `gmail.send`, `gmail.readonly` |
 | `OUTREACH_FROM` | From address |
 | `OUTREACH_BRACKET` | The subject-line bracket, default `Prev Google/Zon` |
+| `OPENAI_API_KEY` | The copy editor. Without it, drafts go out exactly as the templates wrote them |
+| `OUTREACH_POLISH_MODEL` | Default `gpt-4.1-nano` |
 | `JOBFEED_URL` | Feed to sync from |
 | `JOBFEED_MIN_MINUTES` | Minimum interval guard on the runner |
 
@@ -339,7 +374,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 67 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 72 tests, `python -m pytest jobfeed/tests -q`.
 
 Fixtures in `jobfeed/tests/fixtures/` are captured live API responses.
 `people_probe.json` has had identities replaced — the shape is what the tests
@@ -349,6 +384,10 @@ and absent variants, and each address's verdict.
 
 ## Known gaps
 
+- **The copy editor has never reached the model.** The verifier half is fully
+  exercised — nine out-of-scope revisions rejected, legitimate grammar fixes
+  accepted — but the OpenAI account had no credits, so no real revision has
+  been produced. Add credits and run `jobfeed outreach polish`.
 - **The email notification channel has never run.** SMTP is blocked in the
   sandbox this was built in; it will first execute on the GitHub runner.
 - **No outreach send has happened yet.** `dispatch --send` is unexercised

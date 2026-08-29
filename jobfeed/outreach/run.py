@@ -13,7 +13,7 @@ import time
 
 from .. import apply as _apply
 from .. import db as _db
-from . import apify, guards
+from . import apify, guards, polish as _polish
 from .gmail import classify, inbound_since, send as gmail_send
 from .templates import render
 
@@ -220,6 +220,51 @@ def _may_write(con, contact: dict, company_id: int | None,
             and not guards.accept_all_allowed(con, company_id):
         return "accept_all quota for this company is spent"
     return guards.suppressed(con, email, company_id, campaign)
+
+
+# ---- 1b. polish -----------------------------------------------------------
+
+def polish_drafts(con, limit: int = 20) -> dict:
+    """Run the copy editor over unpolished drafts.
+
+    Between drafting and reading, so what you review is what would be sent.
+    A rejected revision is not a failure of the draft -- the original is
+    already tested and reviewable -- so it is recorded and the draft stays
+    exactly as the templates wrote it.
+    """
+    rows = con.execute(
+        "SELECT o.*, c.first_name, cm.name company FROM outreach o "
+        "JOIN contact c ON c.id=o.contact_id "
+        "LEFT JOIN company cm ON cm.id=c.company_id "
+        "WHERE o.status='draft' AND o.polished_at IS NULL "
+        "ORDER BY o.created_at LIMIT ?", (limit,)).fetchall()
+    stats = {"seen": len(rows), "edited": 0, "unchanged": 0,
+             "rejected": 0, "cost": 0.0, "notes": [], "problems": []}
+    for row in rows:
+        roles = [r["title"] for r in con.execute(
+            "SELECT j.title FROM outreach_job oj JOIN job j ON "
+            "COALESCE(j.ats_key,j.url_key,j.canonical_url)=oj.job_key "
+            "WHERE oj.outreach_id=?", (row["id"],))]
+        out = _polish.polish(row["subject"], row["body"],
+                             {"company": row["company"], "roles": roles,
+                              "first_name": row["first_name"]})
+        stats["cost"] += out["cost"]
+        if out["rejected"]:
+            stats["rejected"] += 1
+            stats["problems"].append(f"[{row['id']}] " + "; ".join(out["rejected"][:3]))
+            continue
+        con.execute(
+            "UPDATE outreach SET subject=?, body=?, polished_at=?, polish_notes=? "
+            "WHERE id=?",
+            (out["subject"], out["body"], time.time(),
+             json.dumps(out["notes"]) if out["notes"] else None, row["id"]))
+        if out["changed"]:
+            stats["edited"] += 1
+            stats["notes"] += [f"[{row['id']}] {n}" for n in out["notes"]]
+        else:
+            stats["unchanged"] += 1
+    con.commit()
+    return stats
 
 
 # ---- 2. schedule ----------------------------------------------------------

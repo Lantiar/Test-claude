@@ -182,6 +182,19 @@ def cmd_outreach_drafts(args, con) -> int:
     return 0
 
 
+def cmd_outreach_polish(args, con) -> int:
+    d = _outreach("polish_drafts")(con, limit=args.limit)
+    print(f"{d['seen']} draft(s): {d['edited']} edited, {d['unchanged']} left as "
+          f"written, {d['rejected']} revision(s) refused  (${d['cost']:.5f})")
+    for n in d["notes"]:
+        print(f"  fixed {n}")
+    # Named, not swallowed. A refused revision means the editor tried to change
+    # something it may not, and that is worth seeing rather than counting.
+    for p in d["problems"]:
+        print(f"  REFUSED {p}", file=sys.stderr)
+    return 0
+
+
 def cmd_outreach_schedule(args, con) -> int:
     d = _outreach("schedule")(con)
     if not d["scheduled"]:
@@ -457,6 +470,9 @@ def main(argv=None) -> int:
 
     q = osub.add_parser("drafts"); q.set_defaults(fn=cmd_outreach_drafts)
     q.add_argument("--status", default="draft")
+    q.add_argument("--limit", type=int, default=20)
+
+    q = osub.add_parser("polish"); q.set_defaults(fn=cmd_outreach_polish)
     q.add_argument("--limit", type=int, default=20)
 
     q = osub.add_parser("schedule"); q.set_defaults(fn=cmd_outreach_schedule)

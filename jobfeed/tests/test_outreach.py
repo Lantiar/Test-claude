@@ -803,3 +803,132 @@ def test_the_same_title_twice_is_listed_once():
         {"id": 1, "first_name": "Noor"},
         {"company": "American Express", "roles": [dupe, dupe, "AI Engineer Intern"]})
     assert body.count(dupe) == 1 and "two roles" in body, body
+
+
+# ---- the copy editor ------------------------------------------------------
+#
+# A cheap model may fix grammar and readability. It may not touch anything
+# else, and it is not trusted to have obeyed that: verify() decides, and a
+# revision that strayed is discarded whole.
+
+def _draft_pair():
+    roles = ["Software Engineer Intern - Vehicle Software",
+             "Software Engineer Intern - Information Security",
+             "Product Support Engineer Intern - Service Engineering"]
+    subject, body, _ = templates.render(
+        {"id": 1, "first_name": "Dana"},
+        {"company": "Tesla", "roles": roles, "season": "Summer 2027"})
+    return subject, body, {"company": "Tesla", "first_name": "Dana", "roles": roles}
+
+
+def test_a_grammar_fix_is_allowed():
+    """If nothing passes, the editor is decoration."""
+    from jobfeed.outreach.polish import verify
+    s, b, ctx = _draft_pair()
+    assert verify(s, b, s, b.replace("here is one:", "here is one —"), ctx) == []
+    assert verify(s, b, s, b.replace("applied to three roles",
+                                     "applied to the three roles"), ctx) == []
+
+
+def test_nothing_factual_may_move():
+    """Each of these is a revision a helpful model actually tends to produce,
+    and each would go out under his name to someone who can check it."""
+    from jobfeed.outreach.polish import verify
+    s, b, ctx = _draft_pair()
+    strays = {
+        "swaps an employer": b.replace("Google SWE", "Meta SWE"),
+        "inflates a metric": b.replace("33% to 2%", "43% to 1%"),
+        "invents prior contact": b.replace(
+            "Hi Dana,", "Hi Dana,\n\nGreat speaking last week."),
+        "changes the greeting": b.replace("Hi Dana,", "Hi Daniel,"),
+        "rewords a bullet": b.replace("Software Engineer Intern - Vehicle Software",
+                                      "SWE Intern, Vehicle Software"),
+        "swaps a link": b.replace("https://nideesh.ai", "https://nideesh.dev"),
+        # Passed the first version of this check: the company survived in the
+        # subject, so joining the two fields together hid its loss from the body.
+        "drops the company": b.replace("Tesla", "the company"),
+        # And this one adds no name, no number and no URL, and is short enough
+        # to stay inside the length band.
+        "adds flattery": b.replace(
+            "Thanks,", "I am a huge admirer of your work here.\n\nThanks,"),
+    }
+    for label, revision in strays.items():
+        assert verify(s, b, s, revision, ctx), label
+    assert verify(s, b, "[Prev Google/Zon] AMAZING candidate!!", b, ctx)
+
+
+def test_a_rejected_revision_leaves_the_original_untouched(monkeypatch):
+    """The fallback has to be the text that was already tested, never nothing
+    and never a guess -- this runs on mail about to be sent."""
+    from jobfeed.outreach import polish as _p
+    s, b, ctx = _draft_pair()
+
+    class _R:
+        def __init__(self, payload): self.payload = payload
+        def read(self): return json.dumps(self.payload).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def stray(req, timeout=0):
+        return _R({"usage": {"prompt_tokens": 400, "completion_tokens": 300},
+                   "choices": [{"message": {"content": json.dumps(
+                       {"subject": s, "body": b.replace("Google", "Meta"),
+                        "notes": ["tightened"]})}}]})
+
+    monkeypatch.setattr(_p.urllib.request, "urlopen", stray)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    out = _p.polish(s, b, ctx)
+    assert out["subject"] == s and out["body"] == b
+    assert out["rejected"] and not out["changed"]
+
+
+def test_the_api_being_down_is_not_an_edit(monkeypatch):
+    """No key, an outage or a rate limit must leave the draft as written --
+    the live account was out of credit the day this was built, and that is
+    exactly when a silent empty body would have shipped."""
+    from jobfeed.outreach import polish as _p
+    s, b, ctx = _draft_pair()
+
+    def boom(req, timeout=0):
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(_p.urllib.request, "urlopen", boom)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    out = _p.polish(s, b, ctx)
+    assert (out["subject"], out["body"]) == (s, b) and out["rejected"]
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    out = _p.polish(s, b, ctx)
+    assert (out["subject"], out["body"]) == (s, b) and out["rejected"]
+
+
+def test_an_accepted_edit_is_written_back(con, monkeypatch):
+    """And the draft is marked polished, so a second run is not a second bill."""
+    from jobfeed.outreach import run as _run, polish as _p
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    _run.prepare(con, limit=5, per_company=1)
+    before = con.execute("SELECT subject, body FROM outreach").fetchone()
+
+    class _R:
+        def __init__(self, p): self.p = p
+        def read(self): return json.dumps(self.p).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    calls = []
+
+    def fixed(req, timeout=0):
+        calls.append(1)
+        return _R({"usage": {"prompt_tokens": 400, "completion_tokens": 300},
+                   "choices": [{"message": {"content": json.dumps(
+                       {"subject": before["subject"],
+                        "body": before["body"].replace("Hi RA,", "Hi RA,"),
+                        "notes": ["no change needed"]})}}]})
+
+    monkeypatch.setattr(_p.urllib.request, "urlopen", fixed)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert _run.polish_drafts(con)["rejected"] == 0
+    assert con.execute("SELECT polished_at FROM outreach").fetchone()["polished_at"]
+    assert _run.polish_drafts(con)["seen"] == 0 and len(calls) == 1
