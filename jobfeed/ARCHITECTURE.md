@@ -128,20 +128,43 @@ already answered.
 
 ### 1. `prepare` — find people, write drafts
 
-**One note per person, not per posting.** Applications are grouped by company:
-three roles at one employer become a single email naming all three. Drafting
-per posting produced three near-identical emails to the same three recruiters,
-and the company cooldown then held eight of the nine permanently — so two of
-the three applications got no outreach at all.
+**One note per person, and every role named in it.** Applications are grouped
+by company: three roles at one employer become three notes — one to each of
+three recruiters — and each names all three roles. Drafting per posting instead
+produced *nine* near-identical emails, and the cooldown then held eight of them
+permanently, so two of the three applications got no outreach at all.
 
-A later application at the same company goes to the **next recruiter who has
-not heard from you**, which is what the cached roster is for. Once everyone on
-it has been written to, `prepare` stops rather than repeating: a second note to
-the same person is only defensible after `RECONTACT_DAYS` (90).
+`outreach_job` records every application a note covers. Without it the roles a
+note did not name as primary look undrafted and get written again the next day.
 
-`outreach_job` records every application a note covers. Without it the roles
-the note did not name as primary look undrafted and get written again the next
-day.
+A later application at the same company goes to the **next recruiters who have
+not heard from you**. `_recruiters` tops the roster up from Apify when the
+untouched ones run short — without that, the first application spends all three
+cached names and every later one finds nobody new. Once the roster is genuinely
+exhausted, `prepare` stops rather than repeating: a second note to the same
+person is only defensible after `RECONTACT_DAYS` (90).
+
+### Campaigns
+
+A **campaign** is one `prepare` pass at one company — up to `per_company` (3)
+recruiters, scheduled one per day. Sends inside a campaign do not count toward
+that company's cooldown, or the first note out would block the other two; the
+cooldown measures from the most recent send, so it starts when the batch
+*finishes*. `campaign_allowed()` gates a new batch: a company still working
+through one does not accumulate a second, and one whose last batch is inside
+the cooldown simply waits — the application is deferred, never dropped.
+
+A sixty-day walk over six applications at one employer (three on day 0, then
+days 3, 14 and 45):
+
+```
+day  0  three applications  -> one batch of 3, sent days 3/4/5   (recruiters 1-3)
+day  3  application         -> deferred by cooldown, sent 15/16/17 (recruiters 4-6)
+day 14  application         -> deferred, sent 27/28/29            (recruiters 7-9)
+day 45  application         -> company free, sent 48/49/50        (recruiters 10-12)
+
+12 emails, 12 distinct recipients, nothing held, no application without outreach
+```
 
 Sources recruiters from Apify (`harvestapi~linkedin-profile-search`, cookie-free
 so it never drives your own LinkedIn session), then keeps the addresses the
@@ -196,7 +219,7 @@ a changed subject is a new thread rather than a nudge on the old one.
 
 | Guard | Rule | Why |
 |---|---|---|
-| Company cooldown | 7 days across applications | Three notes from one stranger is what a team forwards to each other |
+| Company cooldown | 7 days between campaigns | Three notes from one stranger is what a team forwards to each other |
 | One per company per day | Enforced in `schedule` | Three near-identical emails compared over one lunch |
 | Window | Weekdays, 09:00–16:30 recipient-local | A Sunday 3am send is the most legible bot signal there is |
 | Randomization | Volume, start minute, gaps, jitter | A fixed value in any one of them is the tell |
@@ -294,6 +317,9 @@ what it claims**. None of these raised an error.
 | `plan_sends` clamped past slots to "now" | Scheduled sends | A queue built at 2am sent at 2am, undoing every other guard |
 | Verifier probed without controls | A confident split | Nonsense addresses scoring `verified` were invisible |
 | Drafts written per posting, not per person | Nine tidy drafts | Three applications at one company sent **one** email; the cooldown held the other eight forever |
+| Cooldown applied per send, not per campaign | A working guard | The first note of a batch blocked the other two, collapsing three recruiters to one |
+| Roster never topped up | A cache hit | The first application spent all three cached names; every later one found nobody new |
+| A new column added to an existing `CREATE TABLE IF NOT EXISTS` | A fresh checkout working | Invisible on any machine whose database already existed — hence `MIGRATIONS` in `db.py` |
 | `cursor.lastrowid` trusted after `INSERT OR IGNORE` | A normal insert | Not zero for an ignored row — it is the connection's last rowid, so drafts pointed at contact ids that did not exist |
 
 The last one is the general lesson: **the verification probe only became
@@ -302,7 +328,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 56 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 58 tests, `python -m pytest jobfeed/tests -q`.
 
 Fixtures in `jobfeed/tests/fixtures/` are captured live API responses.
 `people_probe.json` has had identities replaced — the shape is what the tests

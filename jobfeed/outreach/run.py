@@ -24,10 +24,11 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = True) -> 
     """For each company with new applications, find a recruiter and write one draft.
 
     Grouped by company, not by posting. Three roles at one employer are one
-    note naming all three: drafting per posting produced three near-identical
-    emails to the same three people, and the company cooldown then held eight
-    of the nine forever, so two of the three applications got no outreach at
-    all. One person, one note, every role named.
+    note naming all three -- drafting per posting produced three near-identical
+    emails to the same three people. But a company still gets up to
+    `per_company` recruiters, written one per day: contacting three people
+    about one application was the point, and the failure was only ever three
+    people hearing about three postings separately.
 
     Drafts, not sends. Nothing leaves until `dispatch` runs, so the whole
     research half can be watched working before anything is irreversible.
@@ -71,46 +72,58 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = True) -> 
             key = c.get("email_status", "unknown")
             stats["verify"][key] = stats["verify"].get(key, 0) + 1
 
-        contact, why = _next_contact(con, found, cid)
-        if contact is None:
+        why = guards.campaign_allowed(con, cid)
+        if why:
             stats["skipped"].append(f"{company}: {why}")
             continue
 
-        subject, body, variant = render(
-            contact, {"company": company,
-                      "roles": [j["title"] for j in jobs],
-                      "season": (jobs[0]["season"] or "").split(",")[0].strip()})
-        cur = con.execute(
-            "INSERT OR IGNORE INTO outreach(job_key, contact_id, variant, "
-            "subject, body, step, status, created_at) "
-            "VALUES(?,?,?,?,?,0,'draft',?)",
-            (jobs[0]["job_key"], contact["id"], variant, subject, body, time.time()))
-        if not cur.lastrowid:
+        # One batch at one company: the sends inside it do not count against
+        # each other's cooldown, and the next batch waits on the last of them.
+        campaign = f"{cid}-{int(time.time())}"
+        contacts, why = _pick_contacts(con, found, cid, per_company, campaign)
+        if not contacts:
+            stats["skipped"].append(f"{company}: {why}")
             continue
-        # Record every application this note covers, or the ones it did not
-        # name as primary look undrafted and get written again tomorrow.
-        for job in jobs:
-            con.execute("INSERT OR IGNORE INTO outreach_job(outreach_id, job_key) "
-                        "VALUES(?,?)", (cur.lastrowid, job["job_key"]))
-        stats["drafts"] += 1
+
+        for contact in contacts:
+            subject, body, variant = render(
+                contact, {"company": company,
+                          "roles": [j["title"] for j in jobs],
+                          "season": (jobs[0]["season"] or "").split(",")[0].strip()})
+            cur = con.execute(
+                "INSERT OR IGNORE INTO outreach(job_key, contact_id, variant, "
+                "subject, body, step, status, campaign, created_at) "
+                "VALUES(?,?,?,?,?,0,'draft',?,?)",
+                (jobs[0]["job_key"], contact["id"], variant, subject, body,
+                 campaign, time.time()))
+            if not cur.rowcount:
+                continue
+            # Record every application this note covers, or the ones it did
+            # not name as primary look undrafted and get written again
+            # tomorrow.
+            for job in jobs:
+                con.execute("INSERT OR IGNORE INTO outreach_job(outreach_id, "
+                            "job_key) VALUES(?,?)", (cur.lastrowid, job["job_key"]))
+            stats["drafts"] += 1
     con.commit()
     return stats
 
 
-def _next_contact(con, found: list[dict], company_id: int | None):
-    """Who to write to at this company, or (None, why not).
+def _pick_contacts(con, found: list[dict], company_id: int | None,
+                   want: int, campaign: str) -> tuple[list[dict], str]:
+    """Up to `want` recruiters at this company, or ([], why not).
 
-    Someone nobody has written to yet, in preference to anyone who has already
-    heard from us. This is what makes a second application to the same employer
-    weeks later reach a different recruiter instead of writing to the first one
-    twice -- and what stops the roster being spent on one application.
+    People nobody has written to first. This is what makes a second
+    application to the same employer weeks later reach different recruiters
+    instead of writing to the first ones twice -- and what stops one
+    application spending the whole roster.
     """
     writable, blocked = [], []
-    for c in found:
-        why = _may_write(con, c, company_id)
-        (blocked if why else writable).append((c, why))
+    for contact in found:
+        why = _may_write(con, contact, company_id, campaign)
+        (blocked if why else writable).append((contact, why))
     if not writable:
-        return None, "; ".join(f"{c['full_name']}: {why}" for c, why in blocked) \
+        return [], "; ".join(f"{c['full_name']}: {why}" for c, why in blocked) \
             or "no writable contact"
 
     def contacted_at(contact):
@@ -120,38 +133,55 @@ def _next_contact(con, found: list[dict], company_id: int | None):
         return row["t"] if row and row["t"] else 0.0
 
     fresh = [c for c, _ in writable if not contacted_at(c)]
-    if fresh:
-        return fresh[0], ""
+    if len(fresh) >= want:
+        return fresh[:want], ""
 
-    # Everyone here has already had a note. Writing again is defensible for a
+    # Topping up with people who have already had a note is defensible for a
     # genuinely new application months later, and is not for a second one the
     # same month.
-    oldest = min((c for c, _ in writable), key=contacted_at)
-    if time.time() - contacted_at(oldest) < guards.RECONTACT_DAYS * 86400:
-        return None, ("every recruiter found has been contacted within "
-                      f"{guards.RECONTACT_DAYS}d")
-    return oldest, ""
+    cutoff = time.time() - guards.RECONTACT_DAYS * 86400
+    stale = sorted((c for c, _ in writable
+                    if 0 < contacted_at(c) <= cutoff), key=contacted_at)
+    picked = fresh + stale[:want - len(fresh)]
+    if not picked:
+        return [], ("every recruiter found has been contacted within "
+                    f"{guards.RECONTACT_DAYS}d")
+    return picked, ""
 
 
 def _recruiters(con, company: str, company_id: int | None, limit: int) -> list[dict]:
-    """From cache when we have it, from Apify when we do not.
+    """Recruiters at this company who have not heard from us, cache first.
 
-    Cached ninety days: you apply to the same firm more than once, and paying
-    twice for the same three names is the least of it -- re-scraping also
-    re-rolls which three you get, so the second application would contact
-    different people at a company you have already written to.
+    Cached ninety days: applying to the same firm twice and paying twice for
+    the same names is the least of it -- re-scraping also re-rolls *which*
+    people you get, so the second application would contact a different set of
+    strangers at a company you have already written to.
+
+    Ordered by who has been written to least, and topped up from Apify when
+    the untouched ones run short. Without the top-up a roster of three is
+    spent by the first application and every later one finds nobody new; the
+    ask is deliberately larger than the shortfall, since the search returns
+    the same faces first and only a wider pool contains different ones.
     """
-    have = con.execute(
-        "SELECT * FROM contact WHERE company_id=? AND found_at > ? LIMIT ?",
-        (company_id, time.time() - 90 * 86400, limit)).fetchall()
-    if len(have) >= limit:
-        return [dict(r) for r in have]
+    def roster():
+        return [dict(r) for r in con.execute(
+            "SELECT c.* FROM contact c WHERE c.company_id=? AND c.found_at > ? "
+            "ORDER BY (SELECT COUNT(*) FROM outreach o WHERE o.contact_id=c.id "
+            "          AND o.sent_at IS NOT NULL) ASC, c.id",
+            (company_id, time.time() - 90 * 86400)).fetchall()]
+
+    have = roster()
+    untouched = [c for c in have if not con.execute(
+        "SELECT 1 FROM outreach WHERE contact_id=? AND sent_at IS NOT NULL",
+        (c["id"],)).fetchone()]
+    if len(untouched) >= limit:
+        return untouched[:limit]
 
     try:
-        people = apify.find_recruiters(company, limit)
+        people = apify.find_recruiters(company, len(have) + limit)
     except Exception as exc:
         print(f"  apify: {company}: {exc}")
-        return [dict(r) for r in have]
+        return (untouched or have)[:limit]
 
     for person in people:
         con.execute(
@@ -168,11 +198,7 @@ def _recruiters(con, company: str, company_id: int | None, limit: int) -> list[d
     # whatever this connection inserted last, which for an already-known
     # recruiter is some other table's rowid. Trusting it attached drafts to
     # contact ids that did not exist.
-    rows = con.execute(
-        "SELECT * FROM contact WHERE company_id=? AND found_at > ? "
-        "ORDER BY id LIMIT ?",
-        (company_id, time.time() - 90 * 86400, limit)).fetchall()
-    return [dict(r) for r in rows]
+    return roster()[:limit]
 
 
 def _set_status(con, contact_id: int, status: str) -> None:
@@ -180,7 +206,8 @@ def _set_status(con, contact_id: int, status: str) -> None:
                 (status, time.time(), contact_id))
 
 
-def _may_write(con, contact: dict, company_id: int | None) -> str:
+def _may_write(con, contact: dict, company_id: int | None,
+               campaign: str | None = None) -> str:
     email = contact.get("email")
     if not email:
         return "no email found"
@@ -192,7 +219,7 @@ def _may_write(con, contact: dict, company_id: int | None) -> str:
     if status == "accept_all" and company_id is not None \
             and not guards.accept_all_allowed(con, company_id):
         return "accept_all quota for this company is spent"
-    return guards.suppressed(con, email, company_id)
+    return guards.suppressed(con, email, company_id, campaign)
 
 
 # ---- 2. schedule ----------------------------------------------------------
@@ -265,7 +292,7 @@ def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
         # for a week, and in that week the address may have bounced or the
         # company may have been written to for a different application -- both
         # of which happened after the only check the first version made.
-        why = _may_write(con, dict(row), row["company_id"])
+        why = _may_write(con, dict(row), row["company_id"], row["campaign"])
         if why:
             held.append(f"{row['email']}: {why}")
             con.execute("UPDATE outreach SET status='held' WHERE id=?", (row["id"],))

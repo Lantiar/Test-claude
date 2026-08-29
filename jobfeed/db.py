@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS outreach (
   send_after  REAL,
   sent_at     REAL,
   created_at  REAL NOT NULL,
+  campaign    TEXT,      -- one prepare pass at one company; see MIGRATIONS
   UNIQUE(job_key, contact_id, step)
 );
 CREATE INDEX IF NOT EXISTS outreach_due ON outreach(status, send_after);
@@ -240,7 +241,23 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
+    _migrate(con)
     return con
+
+
+# Columns added after a database already existed. CREATE TABLE IF NOT EXISTS
+# does nothing to a table that is already there, so a new column is invisible
+# until it is added explicitly -- and the symptom is an OperationalError on a
+# machine that has been running the feed, while a fresh checkout works fine.
+MIGRATIONS = [("outreach", "campaign", "TEXT")]
+
+
+def _migrate(con) -> None:
+    for table, column, decl in MIGRATIONS:
+        have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    con.commit()
 
 
 def get_state(con, source: str, key: str) -> str | None:

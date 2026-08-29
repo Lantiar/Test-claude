@@ -42,26 +42,67 @@ BOUNCE_WINDOW_DAYS = 7
 BOUNCE_MIN_SENDS = 25
 
 
-def suppressed(con, email: str, company_id: int | None) -> str:
-    """Why this may not be written to, or '' if it may."""
+def suppressed(con, email: str, company_id: int | None,
+               campaign: str | None = None) -> str:
+    """Why this may not be written to, or '' if it may.
+
+    `campaign` is one prepare pass at one company -- up to three recruiters,
+    one per day. Sends belonging to it do not count toward that company's
+    cooldown, or the second and third notes of a batch would each be blocked
+    by the first. The cooldown is a gap between campaigns, not between sends;
+    since it measures from the most recent send, it starts when the batch
+    finishes rather than when it began.
+    """
     now = time.time()
     row = con.execute(
         "SELECT reason FROM suppression WHERE email=? AND (until IS NULL OR until>?)",
         ((email or "").lower(), now)).fetchone()
     if row:
         return row["reason"]
-    if company_id is not None:
-        row = con.execute(
-            "SELECT reason FROM suppression WHERE company_id=? AND email IS NULL "
-            "AND (until IS NULL OR until>?)", (company_id, now)).fetchone()
-        if row:
-            return row["reason"]
-        row = con.execute(
-            "SELECT MAX(o.sent_at) t FROM outreach o JOIN contact c ON c.id=o.contact_id "
-            "WHERE c.company_id=? AND o.sent_at IS NOT NULL", (company_id,)).fetchone()
-        if row and row["t"] and now - row["t"] < COMPANY_COOLDOWN_DAYS * DAY:
-            return f"this company was contacted {int((now-row['t'])//DAY)}d ago"
+    if company_id is None:
+        return ""
+    row = con.execute(
+        "SELECT reason FROM suppression WHERE company_id=? AND email IS NULL "
+        "AND (until IS NULL OR until>?)", (company_id, now)).fetchone()
+    if row:
+        return row["reason"]
+    return _company_cooldown(con, company_id, campaign)
+
+
+def _company_cooldown(con, company_id: int, campaign: str | None = None) -> str:
+    sql = ("SELECT MAX(o.sent_at) t FROM outreach o "
+           "JOIN contact c ON c.id=o.contact_id "
+           "WHERE c.company_id=? AND o.sent_at IS NOT NULL")
+    params: list = [company_id]
+    if campaign:
+        sql += " AND (o.campaign IS NULL OR o.campaign != ?)"
+        params.append(campaign)
+    row = con.execute(sql, params).fetchone()
+    if row and row["t"] and time.time() - row["t"] < COMPANY_COOLDOWN_DAYS * DAY:
+        return f"this company was contacted {int((time.time()-row['t'])//DAY)}d ago"
     return ""
+
+
+def campaign_allowed(con, company_id: int | None) -> str:
+    """Whether a NEW batch may start at this company, or why not.
+
+    Checked when drafts are written rather than when they are sent, so that a
+    company still working through one batch does not accumulate a second.
+    """
+    if company_id is None:
+        return ""
+    row = con.execute(
+        "SELECT reason FROM suppression WHERE company_id=? AND email IS NULL "
+        "AND (until IS NULL OR until>?)", (company_id, time.time())).fetchone()
+    if row:
+        return row["reason"]
+    pending = con.execute(
+        "SELECT COUNT(*) n FROM outreach o JOIN contact c ON c.id=o.contact_id "
+        "WHERE c.company_id=? AND o.status IN ('draft','queued')",
+        (company_id,)).fetchone()
+    if pending and pending["n"]:
+        return f"a batch of {pending['n']} is still going out here"
+    return _company_cooldown(con, company_id)
 
 
 def accept_all_allowed(con, company_id: int) -> bool:

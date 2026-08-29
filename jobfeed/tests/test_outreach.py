@@ -520,12 +520,19 @@ def _job(con, cid, key, title):
     con.commit()
 
 
-def _roster(monkeypatch, names="ABC"):
-    monkeypatch.setattr(apify, "find_recruiters", lambda co, n=3: [
-        {"full_name": f"Rec {c}", "first_name": f"R{c}",
-         "title": "University Recruiter", "linkedin_url": "",
-         "email": f"rec{c.lower()}@acme.com", "email_status": "verified"}
-        for c in names][:n])
+def _roster(monkeypatch, size=99):
+    """A company with `size` findable recruiters, named Rec 1, Rec 2, ...
+
+    Returns as many as asked for, like the real search: the top-up path in
+    _recruiters asks for more than it needs, and a stub with a fixed list
+    would make that look like it worked when it had nothing new to give.
+    """
+    def find(company, n=3):
+        return [{"full_name": f"Rec {i}", "first_name": f"R{i}",
+                 "title": "University Recruiter", "linkedin_url": "",
+                 "email": f"rec{i}@acme.com", "email_status": "verified"}
+                for i in range(1, min(n, size) + 1)]
+    monkeypatch.setattr(apify, "find_recruiters", find)
 
 
 def _sent(con, oid):
@@ -535,70 +542,132 @@ def _sent(con, oid):
     con.commit()
 
 
-def test_three_roles_at_one_company_on_one_day_are_one_note(con, monkeypatch):
-    """Drafting per posting produced three near-identical emails to the same
-    three people; the company cooldown then held eight of the nine forever, so
-    two of the three applications got no outreach at all."""
+def test_three_roles_at_one_company_become_one_note_each_to_three_people(con, monkeypatch):
+    """Three recruiters, three notes -- but each note names all three roles.
+    Drafting per posting instead produced nine near-identical emails to the
+    same three people, and the cooldown then held eight of them forever."""
     from jobfeed.outreach import run as _run
     cid = _company(con, "Acme")
     _roster(monkeypatch)
-    for i, title in enumerate(["SWE Intern", "SWE Intern - Networking",
-                               "Data Scientist Intern"], 1):
+    titles = ["SWE Intern", "SWE Intern - Networking", "Data Scientist Intern"]
+    for i, title in enumerate(titles, 1):
         _job(con, cid, f"https://acme/{i}", title)
 
-    stats = _run.prepare(con, limit=10)
-    assert stats["jobs"] == 3 and stats["drafts"] == 1, stats
+    stats = _run.prepare(con, limit=10, per_company=3)
+    assert stats["jobs"] == 3 and stats["drafts"] == 3, stats
 
-    row = con.execute("SELECT * FROM outreach").fetchone()
-    for title in ("SWE Intern", "SWE Intern - Networking", "Data Scientist Intern"):
-        assert title in row["body"], title
-    # Every application is recorded as covered, or the two the note did not
-    # name as primary look undrafted and get written again tomorrow.
-    assert con.execute("SELECT COUNT(*) c FROM outreach_job").fetchone()["c"] == 3
+    rows = con.execute("SELECT * FROM outreach").fetchall()
+    assert len({r["contact_id"] for r in rows}) == 3
+    assert len({r["campaign"] for r in rows}) == 1, "one batch, one campaign"
+    for row in rows:
+        for title in titles:
+            assert title in row["body"], (row["id"], title)
+    # Every application is recorded against every note, or the roles a note
+    # did not name as primary look undrafted and get written again tomorrow.
+    assert con.execute("SELECT COUNT(*) c FROM outreach_job").fetchone()["c"] == 9
     assert _run.prepare(con, limit=10)["drafts"] == 0
 
 
-def test_a_later_application_reaches_a_different_recruiter(con, monkeypatch):
-    """Otherwise the roster is spent on the first application and the same
-    person hears from you every fortnight."""
+def test_a_later_application_reaches_different_recruiters(con, monkeypatch):
+    """A fortnight later, a fresh batch goes to people who have not heard from
+    you. Without the top-up in _recruiters the first application spends the
+    whole cached roster and every later one finds nobody new."""
     from jobfeed.outreach import run as _run
     cid = _company(con, "Acme")
     _roster(monkeypatch)
 
-    written = []
+    batches = []
     for i in range(1, 4):
         _job(con, cid, f"https://acme/{i}", f"SWE Intern {i}")
-        assert _run.prepare(con, limit=10)["drafts"] == 1, i
-        row = con.execute("SELECT o.id, c.email FROM outreach o "
-                          "JOIN contact c ON c.id=o.contact_id "
-                          "WHERE o.status='draft'").fetchone()
-        written.append(row["email"])
-        _sent(con, row["id"])
+        assert _run.prepare(con, limit=10, per_company=3)["drafts"] == 3, i
+        rows = con.execute("SELECT o.id, c.email FROM outreach o "
+                           "JOIN contact c ON c.id=o.contact_id "
+                           "WHERE o.status='draft'").fetchall()
+        batches.append({r["email"] for r in rows})
+        for row in rows:
+            _sent(con, row["id"])
         # a fortnight passes before the next application
         con.execute("UPDATE outreach SET sent_at=sent_at-? WHERE sent_at IS NOT NULL",
                     (14 * 86400,))
         con.commit()
 
-    assert len(set(written)) == 3, written
+    assert all(len(b) == 3 for b in batches), batches
+    assert not (batches[0] & batches[1]) and not (batches[1] & batches[2]), batches
+    assert len(batches[0] | batches[1] | batches[2]) == 9
+
+
+def test_a_second_application_too_soon_waits_rather_than_writing(con, monkeypatch):
+    """Three days after a batch, the cooldown has not expired. The drafts are
+    not written now and thrown away -- they are simply not written yet, and a
+    later run picks the application up once the company is free."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern 1")
+    _run.prepare(con, limit=10, per_company=3)
+    for row in con.execute("SELECT id FROM outreach").fetchall():
+        _sent(con, row["id"])
+    con.execute("UPDATE outreach SET sent_at=sent_at-?", (3 * 86400,))
+    con.commit()
+
+    _job(con, cid, "https://acme/2", "SWE Intern 2")
+    stats = _run.prepare(con, limit=10, per_company=3)
+    assert stats["drafts"] == 0
+    assert "contacted 3d ago" in " ".join(stats["skipped"]), stats["skipped"]
+
+    # ... and once the cooldown lapses, the same application goes out.
+    con.execute("UPDATE outreach SET sent_at=sent_at-? WHERE sent_at IS NOT NULL",
+                (6 * 86400,))
+    con.commit()
+    assert _run.prepare(con, limit=10, per_company=3)["drafts"] == 3
+
+
+def test_a_batch_does_not_block_itself(con, monkeypatch):
+    """The three notes in one batch are days apart, so the first one sent
+    would otherwise put the company in cooldown and hold the other two --
+    which is exactly what happened before campaigns existed."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern 1")
+    _run.prepare(con, limit=10, per_company=3)
+    _run.schedule(con)
+
+    sent = []
+
+    def fake(to, subject, body, **kw):
+        sent.append(to)
+        return {"message_id": f"<{len(sent)}@x>", "thread_id": f"T{len(sent)}"}
+
+    monkeypatch.setattr(_run, "gmail_send", fake)
+    # Eight, not three: the batch starts on the next weekday and skips a
+    # weekend, so three sends can span more calendar days than there are notes.
+    for _ in range(8):
+        con.execute("UPDATE outreach SET send_after=send_after-86400 "
+                    "WHERE status='queued'")
+        con.commit()
+        out = _run.dispatch(con, dry_run=False, limit=10)
+        assert not out.get("held"), out["held"]
+    assert len(sent) == 3, sent
 
 
 def test_the_roster_running_out_stops_rather_than_repeats(con, monkeypatch):
-    """A fourth application inside the recontact window has nobody new left.
-    Writing to someone a second time that soon is the same note twice."""
+    """A company with only three findable recruiters has nobody new after the
+    first batch. Writing to the same people again that soon is the same note
+    twice, so prepare stops."""
     from jobfeed.outreach import run as _run
     cid = _company(con, "Acme")
-    _roster(monkeypatch, "AB")
-    for i in range(1, 3):
-        _job(con, cid, f"https://acme/{i}", f"SWE Intern {i}")
-        _run.prepare(con, limit=10)
-        row = con.execute("SELECT id FROM outreach WHERE status='draft'").fetchone()
+    _roster(monkeypatch, size=3)
+    _job(con, cid, "https://acme/1", "SWE Intern 1")
+    assert _run.prepare(con, limit=10, per_company=3)["drafts"] == 3
+    for row in con.execute("SELECT id FROM outreach").fetchall():
         _sent(con, row["id"])
-        con.execute("UPDATE outreach SET sent_at=sent_at-? WHERE sent_at IS NOT NULL",
-                    (14 * 86400,))
-        con.commit()
+    con.execute("UPDATE outreach SET sent_at=sent_at-? WHERE sent_at IS NOT NULL",
+                (30 * 86400,))
+    con.commit()
 
-    _job(con, cid, "https://acme/3", "SWE Intern 3")
-    stats = _run.prepare(con, limit=10)
+    _job(con, cid, "https://acme/2", "SWE Intern 2")
+    stats = _run.prepare(con, limit=10, per_company=3)
     assert stats["drafts"] == 0
     assert "contacted within" in " ".join(stats["skipped"]), stats["skipped"]
 
