@@ -150,6 +150,17 @@ CREATE TABLE IF NOT EXISTS outreach (
 );
 CREATE INDEX IF NOT EXISTS outreach_due ON outreach(status, send_after);
 
+-- Which applications one note covers. A note is per person, not per posting:
+-- three roles at one company are one email naming all three, and without this
+-- table the other two jobs look undrafted and get written again tomorrow.
+-- The outreach row keeps its own job_key as the primary, for threading.
+CREATE TABLE IF NOT EXISTS outreach_job (
+  outreach_id INTEGER NOT NULL REFERENCES outreach(id) ON DELETE CASCADE,
+  job_key     TEXT NOT NULL,
+  PRIMARY KEY (outreach_id, job_key)
+);
+CREATE INDEX IF NOT EXISTS outreach_job_key ON outreach_job(job_key);
+
 CREATE TABLE IF NOT EXISTS reply (
   id           INTEGER PRIMARY KEY,
   outreach_id  INTEGER REFERENCES outreach(id),

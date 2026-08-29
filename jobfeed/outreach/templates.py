@@ -52,6 +52,30 @@ SUBJECTS = [
      "[{bracket}] {company} {short_role}"],
 ]
 
+# When one note covers several applications at the same company. Naming the
+# roles individually is what makes it read as a person who applied to three
+# things rather than a script that fired three times.
+MULTI_SUBJECTS = [
+    ["[{bracket}] {company} {season} intern applications - {n} roles",
+     "[{bracket}] {company} intern applications - {n} roles",
+     "[{bracket}] {company} intern applications"],
+    ["[{bracket}] Rutgers '28 - {n} {company} intern applications",
+     "[{bracket}] Rutgers '28 - {company} intern applications",
+     "[{bracket}] {company} intern applications"],
+    ["[{bracket}] {n} applications at {company} - a quick hello",
+     "[{bracket}] {company} applications - a quick hello",
+     "[{bracket}] {company} intern applications"],
+]
+
+MULTI_OPENERS = [
+    "I applied to {n} openings at {company}{for_season} -- {roles} -- and "
+    "wanted to put a name to the applications.",
+    "I have just applied to {n} roles at {company}{for_season}: {roles}. "
+    "Rather than send you three notes, here is one.",
+    "I submitted applications for {n} {company} openings{for_season} -- "
+    "{roles} -- and thought it was worth reaching out once.",
+]
+
 # What a subject line has to fit in. Gmail shows roughly this much on a
 # desktop list and far less on a phone; past it the line is cut mid-word,
 # which reads as a mail merge that nobody checked.
@@ -99,6 +123,21 @@ def short_role(role: str) -> str:
     return short if 4 <= len(short) <= 46 else (role or "").strip()
 
 
+_WORDS = {2: "two", 3: "three", 4: "four", 5: "five"}
+
+
+def _count(n: int) -> str:
+    """Spelled out up to five. "3 roles" in a sentence reads like a report."""
+    return _WORDS.get(n, str(n))
+
+
+def _join(items: list[str]) -> str:
+    """a, b and c -- no Oxford comma, to match the rest of the copy."""
+    if len(items) <= 1:
+        return items[0] if items else ""
+    return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 def _fit(ladder: list[str], fields: dict) -> str:
     """The longest rung that fits, or a clean word-boundary cut of the last."""
     rendered = [rung.format(**fields) for rung in ladder]
@@ -136,8 +175,14 @@ def usable_season(season: str | None, now: dt.date | None = None) -> str:
 
 
 def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
-    """(subject, body, variant name). `job` needs company, role, season."""
-    role = job.get("role") or "Software Engineer Intern"
+    """(subject, body, variant name). `job` needs company, role, season.
+
+    `roles` may carry more than one title, for the case where several
+    applications at one company are covered by a single note.
+    """
+    roles = list(dict.fromkeys(r for r in (job.get("roles") or []) if r)) \
+        or [job.get("role") or "Software Engineer Intern"]
+    role = roles[0]
     short = short_role(role)
     season = usable_season(job.get("season"))
     fields = {
@@ -154,9 +199,16 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         # "Jeevan Lobo". Greeting someone by two names is the tell that a
         # script wrote it.
         "first_name": (contact.get("first_name") or "there").split()[0],
+        "n": _count(len(roles)),
+        # Full titles here, not shortened ones. The team suffix is the only
+        # thing telling "Software Engineer Intern" from "Software Engineer
+        # Intern - Azure Networking", and dropping it turns a list of three
+        # roles into the same role written twice.
+        "roles": _join(roles),
     }
     cid = int(contact.get("id") or 0)
-    subject = _fit(_pick(SUBJECTS, cid), fields)
+    multi = len(roles) > 1
+    subject = _fit(_pick(MULTI_SUBJECTS if multi else SUBJECTS, cid), fields)
     variant = f"s{cid % len(SUBJECTS)}o{cid % len(OPENERS)}"
 
     if step > 0:
@@ -170,7 +222,7 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
     wins = "\n".join(f"  - {label}: {text}" for label, text in WINS[:3])
     body = (
         f"Hi {fields['first_name']},\n\n"
-        f"{_pick(OPENERS, cid).format(**fields)}\n\n"
+        f"{_pick(MULTI_OPENERS if multi else OPENERS, cid).format(**fields)}\n\n"
         f"I am a {ME['degree']} student at {ME['school']} "
         f"({ME['honors']}, {ME['gpa']} GPA), graduating {ME['grad']}. "
         f"A few things I have worked on:\n\n"

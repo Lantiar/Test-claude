@@ -128,6 +128,21 @@ already answered.
 
 ### 1. `prepare` — find people, write drafts
 
+**One note per person, not per posting.** Applications are grouped by company:
+three roles at one employer become a single email naming all three. Drafting
+per posting produced three near-identical emails to the same three recruiters,
+and the company cooldown then held eight of the nine permanently — so two of
+the three applications got no outreach at all.
+
+A later application at the same company goes to the **next recruiter who has
+not heard from you**, which is what the cached roster is for. Once everyone on
+it has been written to, `prepare` stops rather than repeating: a second note to
+the same person is only defensible after `RECONTACT_DAYS` (90).
+
+`outreach_job` records every application a note covers. Without it the roles
+the note did not name as primary look undrafted and get written again the next
+day.
+
 Sources recruiters from Apify (`harvestapi~linkedin-profile-search`, cookie-free
 so it never drives your own LinkedIn session), then keeps the addresses the
 actor already verified and probes only the rest
@@ -199,12 +214,13 @@ to write to.
 
 ## Data model
 
-`db.py`, SQLite, 13 tables.
+`db.py`, SQLite, 14 tables.
 
 **Feed:** `company`, `job`, `sighting` (append-only), `link`, `source_run`,
 `adapter_state`, `merge_log`, `application`.
 
-**Outreach:** `contact`, `outreach`, `reply`, `suppression`, `send_health`.
+**Outreach:** `contact`, `outreach`, `outreach_job`, `reply`, `suppression`,
+`send_health`.
 
 `application.job_key` is `COALESCE(ats_key, url_key, canonical_url)` — the
 strongest identity a job has, so a stage survives the job row being re-derived.
@@ -277,6 +293,8 @@ what it claims**. None of these raised an error.
 | `emails` (list) read as `email` (string) | No addresses found | Full-price run, zero drafts |
 | `plan_sends` clamped past slots to "now" | Scheduled sends | A queue built at 2am sent at 2am, undoing every other guard |
 | Verifier probed without controls | A confident split | Nonsense addresses scoring `verified` were invisible |
+| Drafts written per posting, not per person | Nine tidy drafts | Three applications at one company sent **one** email; the cooldown held the other eight forever |
+| `cursor.lastrowid` trusted after `INSERT OR IGNORE` | A normal insert | Not zero for an ignored row — it is the connection's last rowid, so drafts pointed at contact ids that did not exist |
 
 The last one is the general lesson: **the verification probe only became
 trustworthy once it included addresses that could not possibly exist.** When
@@ -284,7 +302,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 52 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 56 tests, `python -m pytest jobfeed/tests -q`.
 
 Fixtures in `jobfeed/tests/fixtures/` are captured live API responses.
 `people_probe.json` has had identities replaced — the shape is what the tests

@@ -22,6 +22,11 @@ COMPANY_COOLDOWN_DAYS = 7
 # ration rather than a ban: one speculative send per company per week.
 ACCEPT_ALL_PER_COMPANY_DAYS = 7
 
+# How long before the same recruiter may hear from us a second time. A new
+# application months later is a real reason to write again; a second one the
+# same month is the same note twice.
+RECONTACT_DAYS = 90
+
 # Sending shape. Volume is sampled rather than fixed, because a flat number
 # every weekday is itself a pattern.
 DAILY_MIN, DAILY_MAX = 4, 8

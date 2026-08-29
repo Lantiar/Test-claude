@@ -506,3 +506,109 @@ def test_the_bracket_degrades_when_a_role_is_unset(monkeypatch):
     assert profile.bracket() == ""
     monkeypatch.setitem(profile.ME, "incoming", "Amazon")
     assert profile.bracket() == "Incoming Amazon"
+
+
+# ---- several applications at one company ----------------------------------
+
+def _job(con, cid, key, title):
+    con.execute("INSERT INTO job(company_id,title,season,canonical_url,"
+                "first_seen_at,last_seen_at,status) "
+                "VALUES(?,?,'Summer 2027',?,?,?,'open')",
+                (cid, title, key, time.time(), time.time()))
+    con.execute("INSERT INTO application(job_key,stage,updated_at) "
+                "VALUES(?,'applied',?)", (key, time.time()))
+    con.commit()
+
+
+def _roster(monkeypatch, names="ABC"):
+    monkeypatch.setattr(apify, "find_recruiters", lambda co, n=3: [
+        {"full_name": f"Rec {c}", "first_name": f"R{c}",
+         "title": "University Recruiter", "linkedin_url": "",
+         "email": f"rec{c.lower()}@acme.com", "email_status": "verified"}
+        for c in names][:n])
+
+
+def _sent(con, oid):
+    """Mark one outreach row sent, as dispatch would."""
+    con.execute("UPDATE outreach SET status='sent', sent_at=?, message_id='<m@x>' "
+                "WHERE id=?", (time.time(), oid))
+    con.commit()
+
+
+def test_three_roles_at_one_company_on_one_day_are_one_note(con, monkeypatch):
+    """Drafting per posting produced three near-identical emails to the same
+    three people; the company cooldown then held eight of the nine forever, so
+    two of the three applications got no outreach at all."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    for i, title in enumerate(["SWE Intern", "SWE Intern - Networking",
+                               "Data Scientist Intern"], 1):
+        _job(con, cid, f"https://acme/{i}", title)
+
+    stats = _run.prepare(con, limit=10)
+    assert stats["jobs"] == 3 and stats["drafts"] == 1, stats
+
+    row = con.execute("SELECT * FROM outreach").fetchone()
+    for title in ("SWE Intern", "SWE Intern - Networking", "Data Scientist Intern"):
+        assert title in row["body"], title
+    # Every application is recorded as covered, or the two the note did not
+    # name as primary look undrafted and get written again tomorrow.
+    assert con.execute("SELECT COUNT(*) c FROM outreach_job").fetchone()["c"] == 3
+    assert _run.prepare(con, limit=10)["drafts"] == 0
+
+
+def test_a_later_application_reaches_a_different_recruiter(con, monkeypatch):
+    """Otherwise the roster is spent on the first application and the same
+    person hears from you every fortnight."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+
+    written = []
+    for i in range(1, 4):
+        _job(con, cid, f"https://acme/{i}", f"SWE Intern {i}")
+        assert _run.prepare(con, limit=10)["drafts"] == 1, i
+        row = con.execute("SELECT o.id, c.email FROM outreach o "
+                          "JOIN contact c ON c.id=o.contact_id "
+                          "WHERE o.status='draft'").fetchone()
+        written.append(row["email"])
+        _sent(con, row["id"])
+        # a fortnight passes before the next application
+        con.execute("UPDATE outreach SET sent_at=sent_at-? WHERE sent_at IS NOT NULL",
+                    (14 * 86400,))
+        con.commit()
+
+    assert len(set(written)) == 3, written
+
+
+def test_the_roster_running_out_stops_rather_than_repeats(con, monkeypatch):
+    """A fourth application inside the recontact window has nobody new left.
+    Writing to someone a second time that soon is the same note twice."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch, "AB")
+    for i in range(1, 3):
+        _job(con, cid, f"https://acme/{i}", f"SWE Intern {i}")
+        _run.prepare(con, limit=10)
+        row = con.execute("SELECT id FROM outreach WHERE status='draft'").fetchone()
+        _sent(con, row["id"])
+        con.execute("UPDATE outreach SET sent_at=sent_at-? WHERE sent_at IS NOT NULL",
+                    (14 * 86400,))
+        con.commit()
+
+    _job(con, cid, "https://acme/3", "SWE Intern 3")
+    stats = _run.prepare(con, limit=10)
+    assert stats["drafts"] == 0
+    assert "contacted within" in " ".join(stats["skipped"]), stats["skipped"]
+
+
+def test_roles_are_named_individually_in_a_grouped_note():
+    """The team suffix is the only thing telling two postings apart, so
+    shortening the list turns three roles into the same role written twice."""
+    _, body, _ = templates.render(
+        {"id": 1, "first_name": "Dana"},
+        {"company": "Acme", "season": "Summer 2027",
+         "roles": ["SWE Intern", "SWE Intern - Networking"]})
+    assert "SWE Intern and SWE Intern - Networking" in body, body
+    assert "two roles" in body
