@@ -1936,40 +1936,102 @@ def test_only_a_real_pdf_is_accepted_from_the_store(monkeypatch, tmp_path):
     assert path.endswith("cv.pdf") and pathlib.Path(path).read_bytes().startswith(b"%PDF")
 
 
-def test_a_thin_result_widens_the_search_rather_than_giving_up(monkeypatch):
-    """searchQuery is free text and LinkedIn matches it loosely. A search for
-    Philips returned eleven recruiters at other companies -- one matched on a
-    person's surname -- and a single genuine Philips employee with no address.
-    The employer filter is right to drop the rest, but reporting "no recruiters
-    found" when fifteen results simply were not enough is a wrong answer that
-    looks like a fact about the company."""
-    asked = []
+def test_the_company_page_is_used_as_the_filter_when_one_can_be_found(monkeypatch):
+    """LinkedIn's free-text search is not a company filter. "Philips recruiter"
+    returned recruiters at Anduril and Synopsys, a woman whose surname is
+    Philips, and two agencies with Philips in their name -- one genuine
+    employee in fifteen results. The actor has an exact company filter but it
+    wants a LinkedIn company URL, and the profiles themselves carry it."""
+    calls = []
 
-    def fake_call(actor, payload, timeout=300):
-        asked.append(payload["maxItems"])
-        # The first, narrow pass finds one usable person; the wider one finds
-        # the rest.
-        n = 1 if len(asked) == 1 else 3
-        return [{"firstName": f"R{i}", "lastName": "Person",
-                 "headline": "University Recruiter",
-                 "linkedinUrl": "", "emails": [{"email": f"r{i}@philips.com",
-                                                "status": "good"}],
+    def fake(actor, payload, timeout=300):
+        calls.append(payload)
+        if "currentCompanies" in payload:                 # the exact pass
+            return [{"firstName": f"R{i}", "lastName": "P", "headline": "Recruiter",
+                     "linkedinUrl": "", "emails": [{"email": f"r{i}@philips.com",
+                                                    "status": "good"}],
+                     "currentPosition": [{"companyName": "Philips"}]}
+                    for i in range(4)]
+        return [{"firstName": "Seed", "lastName": "One", "headline": "Recruiter",
                  "currentPosition": [{"companyName": "Philips",
-                                      "position": "Recruiter"}]}
-                for i in range(n)]
+                     "companyLinkedinUrl": "https://www.linkedin.com/company/philips/"}]}]
 
-    monkeypatch.setattr(apify, "_call", fake_call)
+    monkeypatch.setattr(apify, "_call", fake)
     found = apify.find_recruiters("Philips", 3)
-    assert len(asked) == 2, "the search was not widened"
-    assert asked[1] > asked[0], asked
-    assert len(found) == 3
+    assert len(calls) == 2, [c.get("searchQuery") for c in calls]
+    assert calls[1]["currentCompanies"] == ["https://www.linkedin.com/company/philips/"]
+    assert len(found) == 3 and all("@philips.com" in c["email"] for c in found)
 
-    # A first pass that already finds enough must not pay for a second.
-    asked.clear()
+
+def test_a_search_results_url_is_not_an_employer(monkeypatch):
+    """One profile's companyLinkedinUrl was a /search/results/ link. Voted for,
+    it becomes a filter that matches nobody."""
     monkeypatch.setattr(apify, "_call", lambda a, p, timeout=300: (
-        asked.append(p["maxItems"]) or
-        [{"firstName": f"R{i}", "lastName": "P", "headline": "Recruiter",
-          "linkedinUrl": "", "emails": [{"email": f"r{i}@x.com", "status": "good"}],
-          "currentPosition": [{"companyName": "Philips"}]} for i in range(5)]))
+        [] if "currentCompanies" in p else
+        [{"firstName": "S", "lastName": "One", "headline": "Recruiter",
+          "currentPosition": [{"companyName": "Philips", "companyLinkedinUrl":
+              "https://www.linkedin.com/search/results/all/?keywords=Philips"}]}]))
+    # No usable page, so it falls back to text rather than filtering on nonsense.
     apify.find_recruiters("Philips", 3)
-    assert len(asked) == 1, "it widened when it did not need to"
+
+
+def test_nobody_contactable_widens_the_search_once(monkeypatch):
+    """American Express returned three genuine recruiters and not one with an
+    address, which is the same dead end as finding nobody."""
+    sizes = []
+
+    def fake(actor, payload, timeout=300):
+        if "currentCompanies" not in payload and "searchQuery" in payload \
+                and payload.get("profileScraperMode") == "Full":
+            return [{"firstName": "S", "lastName": "O", "headline": "Recruiter",
+                     "currentPosition": [{"companyName": "Amex", "companyLinkedinUrl":
+                         "https://www.linkedin.com/company/amex/"}]}]
+        sizes.append(payload["maxItems"])
+        has_mail = len(sizes) > 1
+        return [{"firstName": f"R{i}", "lastName": "P", "headline": "Recruiter",
+                 "linkedinUrl": "",
+                 "emails": ([{"email": f"r{i}@amex.com", "status": "good"}]
+                            if has_mail else []),
+                 "currentPosition": [{"companyName": "Amex"}]} for i in range(4)]
+
+    monkeypatch.setattr(apify, "_call", fake)
+    found = apify.find_recruiters("Amex", 3)
+    assert len(sizes) == 2 and sizes[1] > sizes[0], sizes
+    assert all(c["email"] for c in found)
+
+
+def test_an_employer_name_must_prefix_not_merely_appear(monkeypatch):
+    """Containment accepted "Morgan Philips Group" -- a recruitment agency --
+    as Philips, and the note would have gone to an agency recruiter claiming
+    to have applied at their client. A subsidiary carries the parent's name at
+    the front; an unrelated firm that merely contains it does not."""
+    def at(employer, wanted):
+        return apify._at_company(
+            {"currentPosition": [{"companyName": employer}]}, wanted)
+    assert at("Philips", "Philips")
+    assert at("Philips Healthcare", "Philips")
+    assert at("Amazon Web Services (AWS)", "Amazon")
+    assert at("Amazon", "Amazon Web Services (AWS)")
+    assert not at("Morgan Philips Group", "Philips")
+    assert not at("Morgan Philips Outsourcing", "Philips")
+    assert not at("Nikola Tesla Institute", "Tesla")
+    assert not at("Signify", "Philips")
+
+
+def test_a_personal_mailbox_is_not_used():
+    """A recruiter's work address is a professional contact. Their private
+    Outlook is not, and a cold email there is visibly scraped whatever it
+    says -- the widened American Express search turned up exactly one
+    address and it was somebody's outlook.com."""
+    assert apify.is_personal("musrat.mou@outlook.com")
+    assert apify.is_personal("someone@gmail.com")
+    assert not apify.is_personal("sissi.ni@philips.com")
+
+    addr, status = apify._best_email({"emails": [
+        {"email": "someone@outlook.com", "status": "good"}]})
+    assert addr is None, "a personal address was accepted"
+
+    addr, _ = apify._best_email({"emails": [
+        {"email": "someone@gmail.com", "status": "good"},
+        {"email": "real.person@philips.com", "status": "good"}]})
+    assert addr == "real.person@philips.com"

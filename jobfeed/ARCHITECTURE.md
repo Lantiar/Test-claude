@@ -173,6 +173,22 @@ day 45  application         -> company free, sent 48/49/50        (recruiters 10
 12 emails, 12 distinct recipients, nothing held, no application without outreach
 ```
 
+**Finding recruiters is two passes, not one.** LinkedIn's free-text search is
+not a company filter: "Philips recruiter" returned recruiters at Anduril and
+Synopsys, a woman whose *surname* is Philips, and two agencies with Philips in
+their name — one genuine employee in fifteen results. The actor does have an
+exact company filter, but it wants a LinkedIn company URL rather than a name —
+and the profiles themselves carry that URL. So one cheap pass learns the
+company page, and the second filters on it exactly. Philips went from one
+uncontactable person to thirteen employees, ten with addresses.
+
+Two things widen the pool once more, because both are the same dead end: too
+few people at the company, or nobody with an address.
+
+A **personal mailbox is never used**. A recruiter's work address is a
+professional contact; their private Outlook is not, and a cold email there is
+visibly scraped whatever it says.
+
 Sources recruiters from Apify (`harvestapi~linkedin-profile-search`, cookie-free
 so it never drives your own LinkedIn session), then keeps the addresses the
 actor already verified and probes only the rest
@@ -556,7 +572,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 117 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 122 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

@@ -80,12 +80,15 @@ def _at_company(item: dict, company: str) -> bool:
     want, got = _norm.company(company), _norm.company(_employer(item))
     if not want or not got:
         return False
-    # Subsidiaries read differently on LinkedIn than in a job posting:
-    # "Amazon Web Services (AWS)" against "Amazon". Containment either way,
-    # but only for names long enough that it means something -- "IBM" inside
-    # "IBMC" would otherwise pass.
-    return want == got or (len(want) >= 4 and want in got) \
-        or (len(got) >= 4 and got in want)
+    # Subsidiaries read differently on LinkedIn than in a job posting --
+    # "Amazon Web Services (AWS)" against "Amazon" -- so one may extend the
+    # other. But only as a PREFIX, never as a substring anywhere: containment
+    # accepted "Morgan Philips Group", a recruitment agency, as Philips, and
+    # the note would have gone to an agency recruiter claiming to have applied
+    # at the client. A subsidiary carries the parent's name at the front;
+    # an unrelated firm that merely contains it does not.
+    return want == got or (len(want) >= 4 and got.startswith(want)) \
+        or (len(got) >= 4 and want.startswith(got))
 
 
 def _best_email(item: dict) -> tuple[str | None, str]:
@@ -105,7 +108,7 @@ def _best_email(item: dict) -> tuple[str | None, str]:
         if isinstance(e, str):
             e = {"email": e}
         addr = (e.get("email") or "").strip().lower()
-        if not addr:
+        if not addr or is_personal(addr):
             continue
         status = _status({**e, "catch_all": e.get("catchAllDomain"),
                           "status": e.get("status")})
@@ -120,6 +123,21 @@ def _best_email(item: dict) -> tuple[str | None, str]:
 
 _RANK = {"verified": 0, "accept_all": 1, "unknown": 2, "risky": 3, "invalid": 4}
 
+# Somebody's personal mailbox. A recruiter's work address is a professional
+# contact and writing to it is ordinary; their private Outlook is not, and a
+# cold email there is visibly scraped whatever it says. A recruiter reachable
+# only this way is, for this purpose, not reachable.
+FREE_MAIL = frozenset("""
+gmail.com googlemail.com outlook.com hotmail.com live.com msn.com
+yahoo.com yahoo.co.uk ymail.com aol.com icloud.com me.com mac.com
+proton.me protonmail.com gmx.com gmx.de mail.com zoho.com yandex.com
+qq.com 163.com 126.com naver.com rediffmail.com
+""".split())
+
+
+def is_personal(address: str) -> bool:
+    return (address or "").rsplit("@", 1)[-1].lower() in FREE_MAIL
+
 
 def find_recruiters(company: str, limit: int = 3) -> list[dict]:
     """Recruiters at one company, best guess first.
@@ -128,24 +146,45 @@ def find_recruiters(company: str, limit: int = 3) -> list[dict]:
     address at all, so the whole run would cost money and produce nothing that
     can be written to.
     """
-    def search(want: int) -> list:
-        return _call(PEOPLE_ACTOR, {
-            "profileScraperMode": "Full + email search",
-            "searchQuery": f"{company} university recruiter early career",
-            "currentJobTitles": list(SEARCH_TITLES),
-            "maxItems": want,
-        })
+    def search(payload: dict) -> list:
+        return _call(PEOPLE_ACTOR, {"currentJobTitles": list(SEARCH_TITLES),
+                                    **payload})
 
-    # searchQuery is free text and LinkedIn matches it loosely -- a search for
-    # Philips returned eleven recruiters at other companies, one of them
-    # matched on a person's surname, and a single genuine Philips employee who
-    # had no address. The employer filter is right to drop the rest, but that
-    # leaves nothing to write. So when the pool yields too few, widen it once
-    # rather than reporting a company as having no recruiters when the truth is
-    # that fifteen results were not enough to find three of them.
-    items = search(max(limit * 5, 15))
-    if sum(1 for it in items if _at_company(it, company)) < limit:
-        items = search(max(limit * 15, 45))
+    # Two passes, because LinkedIn's free-text search is not a company filter.
+    # Searching "Philips recruiter" returns recruiters at Anduril and Synopsys,
+    # people whose surname is Philips, and agencies with Philips in their name;
+    # of the first fifteen results exactly one worked at Philips, and she had
+    # no address. The actor does have an exact company filter, but it wants a
+    # LinkedIn company URL rather than a name -- and the profiles themselves
+    # carry that URL. So: one cheap pass to learn the URL, then an exact one.
+    votes: dict[str, int] = {}
+    for item in search({"profileScraperMode": "Full",
+                        "searchQuery": f"{company} recruiter", "maxItems": 10}):
+        url = ((item.get("currentPosition") or [{}])[0]).get("companyLinkedinUrl")
+        # Only a real company page, and only from somebody who actually works
+        # there -- a search-results URL is not an employer.
+        if url and "/company/" in url and _at_company(item, company):
+            votes[url] = votes.get(url, 0) + 1
+
+    if votes:
+        page = {"profileScraperMode": "Full + email search",
+                "currentCompanies": [max(votes, key=votes.get)]}
+        items = search({**page, "maxItems": max(limit * 5, 15)})
+        # Right company, no addresses. American Express returned three genuine
+        # recruiters and not one contactable, which is the same dead end as
+        # finding nobody -- and the fix is the same: a bigger pool, once.
+        if sum(1 for it in items if _best_email(it)[0]) < limit:
+            items = search({**page, "maxItems": max(limit * 15, 45)})
+    else:
+        # No page found: fall back to text, widening once if too little of the
+        # pool turns out to work there.
+        items = search({"profileScraperMode": "Full + email search",
+                        "searchQuery": f"{company} university recruiter early career",
+                        "maxItems": max(limit * 5, 15)})
+        if sum(1 for it in items if _at_company(it, company)) < limit:
+            items = search({"profileScraperMode": "Full + email search",
+                            "searchQuery": f"{company} university recruiter early career",
+                            "maxItems": max(limit * 15, 45)})
 
     out = []
     for it in items:
