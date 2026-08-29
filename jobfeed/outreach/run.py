@@ -471,7 +471,8 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
     left alone -- the button is the consent, and one press must not become mail
     to every company on the board.
     """
-    out = {"queued": 0, "drafted": 0, "sent": 0, "replied": 0, "problems": []}
+    out = {"queued": 0, "drafted": 0, "waiting": 0, "sent": 0, "replied": 0,
+           "problems": []}
     if not _board.available():
         out["problems"].append("no Upstash credentials; the board is unreadable")
         return out
@@ -517,6 +518,13 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
             stats = prepare(con, limit=1, per_company=per_company, only=[job_key])
             if stats["drafts"]:
                 out["drafted"] += stats["drafts"]
+            elif _waiting(con, job_key):
+                # Mail is already written for this job and waiting for its send
+                # time. `prepare` correctly adds nothing, and calling that
+                # "held" was the bug: the dashboard read "nothing to send" on a
+                # job with two letters armed, so a batch aimed at the wrong
+                # people sat there looking like an empty queue.
+                out["waiting"] += _waiting(con, job_key)
             else:
                 why = "; ".join(stats["skipped"][:2]) or "nothing to draft"
                 _board.write(job_key, "held", note=why)
@@ -620,6 +628,14 @@ def _apply_commands(con) -> list[str]:
     return done
 
 
+def _waiting(con, job_key: str) -> int:
+    """First-step letters written for this job and not yet sent."""
+    return con.execute(
+        "SELECT count(*) FROM outreach o JOIN outreach_job oj "
+        "ON oj.outreach_id = o.id WHERE oj.job_key = ? AND o.step = 0 "
+        "AND o.status IN ('draft','queued')", (job_key,)).fetchone()[0]
+
+
 def _report(con, keys: list[str]) -> None:
     """Write each asked-for job's real state back to the board.
 
@@ -639,8 +655,14 @@ def _report(con, keys: list[str]) -> None:
             _board.write(job_key, "replied", thread=thread, sent=sent)
         elif sent:
             _board.write(job_key, "reached", thread=thread, sent=sent)
-        # still queued otherwise: drafted but not yet due, which the page
-        # already shows as queued.
+        elif any(r["status"] in ("draft", "queued") for r in rows):
+            # Drafted, not yet due. Written back explicitly rather than left
+            # alone: whatever this pass wrote earlier is not necessarily
+            # "queued", and a stale "held" here is the difference between a
+            # page that says nothing is happening and mail that goes out.
+            n = sum(1 for r in rows if r["status"] in ("draft", "queued"))
+            _board.write(job_key, "queued",
+                         note=f"{n} waiting to send")
 
 
 # ---- 4. watch -------------------------------------------------------------

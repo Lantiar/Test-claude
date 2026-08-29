@@ -1,5 +1,8 @@
 # jobfeed — architecture
 
+New here, read [`BRIEFING.md`](BRIEFING.md) first — it is the shorter
+handover: the rules, the map, the environment, and where things stand.
+
 One deduplicated list of internship postings, from several sources, with dates
 — and a pipeline that writes to a recruiter when you mark one applied.
 
@@ -545,7 +548,7 @@ jobfeed outreach verify <email>… # probe addresses, no database writes
 | `OUTREACH_SIGNATURE` | A block under the sign-off. Empty by default — everything it carried is already in the mail |
 | `RESUME_PATH` | The PDF attached to a first note. Default `config/files/resume.pdf`, which is gitignored |
 | `OPENAI_API_KEY` | The copy editor. Without it, drafts go out exactly as the templates wrote them |
-| `OUTREACH_POLISH_MODEL` | Default `gpt-4.1-nano` |
+| `OUTREACH_POLISH_MODEL` | Default `gpt-4.1-mini` |
 | `JOBFEED_URL` | Feed to sync from |
 | `JOBFEED_MIN_MINUTES` | Minimum interval guard on the runner |
 
@@ -660,10 +663,11 @@ travelling through `watch`.
 
 - **The email notification channel has never run.** SMTP is blocked in the
   sandbox this was built in; it will first execute on the GitHub runner.
-- **No outreach send has happened yet.** `dispatch --send` is unexercised
-  against a real recipient. The send path itself is verified via a
-  self-addressed message.
-- Outreach is not wired into any scheduled job. Nothing sends unattended, by
-  design — revisit deliberately.
+- **No outreach send has reached a real recruiter yet.** `dispatch --send`
+  has been exercised end to end — delivery, the attachment, reply detection
+  and bounce handling, including the breaker pausing dispatch — but only
+  against the owner's own mailbox.
+- Outreach now runs on the scheduled job, behind the `OUTREACH_SEND`
+  repository variable. It is armed; that variable is the kill switch.
 - `intern-list.com` was scoped but never built; Simplify plus Instagram covers
   it for now.

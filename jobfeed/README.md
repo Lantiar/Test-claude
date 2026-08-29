@@ -1,5 +1,8 @@
 # jobfeed data
 
+Picking this up cold? Start with [`BRIEFING.md`](BRIEFING.md), then
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
+
 Internship postings from several sources, deduplicated into one list, refreshed
 hourly. Published as static JSON so anything can read it.
 

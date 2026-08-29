@@ -1522,6 +1522,39 @@ def test_a_job_with_no_recruiters_is_reported_held_not_left_spinning(con, monkey
     assert record["state"] == "held" and "recruiters" in record["note"], record
 
 
+def test_a_second_pass_over_armed_mail_does_not_report_it_held(con, monkeypatch):
+    """The button stays pressed, so every later run asks for the same job
+    again and `prepare` rightly writes nothing new. Calling that "held" put
+    "nothing to send" on a job with two letters loaded and waiting -- which is
+    how a batch aimed at the wrong recruiters sat for days looking like an
+    empty queue."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    b = _board(monkeypatch, con, cid, stages={"https://acme/1": "applied"},
+               requests=["https://acme/1"])
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+
+    first = _run.serve_board(con, send=False)
+    assert first["drafted"] and b.records["https://acme/1"]["state"] == "queued"
+    armed = con.execute("SELECT count(*) FROM outreach WHERE status='queued'"
+                        ).fetchone()[0]
+
+    second = _run.serve_board(con, send=False)
+    assert second["drafted"] == 0
+    record = b.records["https://acme/1"]
+    assert record["state"] == "queued", record
+    assert "waiting" in record["note"], record
+    assert not [x for x in second["problems"] if "acme" in x], second["problems"]
+    assert second["waiting"] == armed, second
+    # and the mail is untouched: a re-report must not re-draft or drop it
+    assert con.execute("SELECT count(*) FROM outreach WHERE status='queued'"
+                       ).fetchone()[0] == armed
+
+
 # ---- surviving a rebuild --------------------------------------------------
 #
 # The runner's database is thrown away and reseeded from a published snapshot

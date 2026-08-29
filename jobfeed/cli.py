@@ -224,6 +224,7 @@ def cmd_outreach_board(args, con) -> int:
     """One pass over what the web tracker has asked for."""
     d = _outreach("serve_board")(con, send=args.send, per_company=args.per_company)
     print(f"{d['queued']} requested, {d['drafted']} drafted, "
+          f"{d.get('waiting', 0)} already waiting, "
           f"{'sent' if args.send else 'would send'} {d['sent']}, "
           f"{d['replied']} reply(s)")
     for p in d["problems"]:
