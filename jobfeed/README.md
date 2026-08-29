@@ -265,4 +265,6 @@ will not do so without `--send`.
 address, `OUTREACH_BRACKET` the subject-line bracket
 (default `Prev Google/Zon`).
 `APIFY_PEOPLE_ACTOR` and `APIFY_VERIFY_ACTOR` override the actors, since the
-Apify store churns.
+Apify store churns. `OPENAI_API_KEY` enables the copy editor
+(`OUTREACH_POLISH_MODEL`, default `gpt-4.1-mini`); without it drafts go out
+exactly as the templates wrote them.

@@ -26,7 +26,10 @@ from .profile import ME, signature
 
 ENDPOINT = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/") \
     + "/chat/completions"
-MODEL = os.getenv("OUTREACH_POLISH_MODEL", "gpt-4.1-nano")
+# nano returned HTML on a third of real drafts -- <ul> markup in a plain-text
+# email -- and each of those cost a rejection plus a retry. mini refuses less
+# often, so in practice it is both better behaved and slightly cheaper.
+MODEL = os.getenv("OUTREACH_POLISH_MODEL", "gpt-4.1-mini")
 
 # Per million tokens, for reporting what a run cost. A stale number here makes
 # a wrong report, never a wrong decision.
@@ -83,6 +86,7 @@ character for character. Do not reword, reorder, merge or split them.
 5. Keep the greeting line, the sign-off and the signature block exactly as they \
 are.
 6. Your output must be within {int(LENGTH_BAND * 100)}% of the input's length.
+7. Plain text only. No HTML, no markdown, no <ul>, <li>, <p> or <br>. The bullets stay as two spaces, a dash and a space. This email is sent as text/plain and any tag would be shown to the reader literally.
 
 So: no new claims, no added warmth, no invented prior contact, no strengthened \
 wording. You are removing errors, not improving writing.
@@ -203,13 +207,22 @@ def polish(subject: str, body: str, context: dict) -> dict:
         out["rejected"] = ["OPENAI_API_KEY is not set"]
         return out
 
+    # The signature never goes to the model. Sent and reattached, an edit that
+    # merely reformatted it -- swapping the separators, moving the name -- made
+    # the reattach point unfindable, so the block was appended a second time
+    # and the mail went out signed twice. Every token was still present and the
+    # length stayed inside the band, so nothing downstream objected. Withheld,
+    # the block cannot be reformatted at all.
     sig = signature()
+    head, _, _ = body.partition(sig)
+    head = head.rstrip() if sig in body else body
+
     last: tuple[str, list[str]] | None = None
     cost = 0.0
     for attempt in range(2):
         messages = [{"role": "system", "content": _system()},
                     {"role": "user",
-                     "content": f"SUBJECT\n{subject}\n\nBODY\n{body}"}]
+                     "content": f"SUBJECT\n{subject}\n\nBODY\n{head}"}]
         if last:
             # The checker's own words, fed back. A model told exactly which
             # rule it broke tends to return a smaller, valid edit; told
@@ -227,19 +240,18 @@ def polish(subject: str, body: str, context: dict) -> dict:
             out["rejected"], out["cost"] = [err], cost
             return out
 
-        new_subject, new_body = answer["subject"], answer["body"]
-        # The signature is rebuilt rather than accepted back, so no edit can
-        # reach the one block carrying every link and the graduation year.
-        if sig in body:
-            new_body = new_body.split(sig)[0].rstrip() + "\n\n" + sig + "\n"
-
-        problems = verify(subject, body, new_subject, new_body, context)
+        new_subject, new_head = answer["subject"], answer["body"].rstrip()
+        # Checked on the part the model was actually given, so the untouched
+        # signature cannot pad the length band or supply a token the edit
+        # dropped from the body above it.
+        problems = verify(subject, head, new_subject, new_head, context)
+        new_body = (new_head + "\n\n" + sig + "\n") if sig in body else new_head
         if not problems:
             out.update(subject=new_subject, body=new_body, notes=answer["notes"],
                        cost=cost, retried=attempt > 0,
                        changed=(new_subject, new_body) != (subject, body))
             return out
-        last = (json.dumps({"subject": new_subject, "body": new_body}), problems)
+        last = (json.dumps({"subject": new_subject, "body": new_head}), problems)
 
     out["rejected"], out["cost"], out["retried"] = last[1], cost, True
     return out

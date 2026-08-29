@@ -283,7 +283,7 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         f"({ME['honors']}, {ME['gpa']} GPA), graduating {ME['grad']}. "
         f"A few things I have worked on:\n\n"
         f"{wins}\n\n"
-        f"I would be glad to be considered, and would appreciate any guidance "
+        f"I would be glad to be considered and would appreciate any guidance "
         f"on the process. Resume and projects are at {ME['portfolio']}.\n\n"
         f"Thanks,\n{ME['first_name']}\n\n"
         f"{signature()}\n"

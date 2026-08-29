@@ -811,6 +811,12 @@ def test_the_same_title_twice_is_listed_once():
 # else, and it is not trusted to have obeyed that: verify() decides, and a
 # revision that strayed is discarded whole.
 
+def _head(body):
+    """What the model is actually shown: the body without the signature."""
+    from jobfeed.outreach.profile import signature
+    return body.partition(signature())[0].rstrip()
+
+
 def _draft_pair():
     roles = ["Software Engineer Intern - Vehicle Software",
              "Software Engineer Intern - Information Security",
@@ -872,7 +878,7 @@ def test_a_rejected_revision_leaves_the_original_untouched(monkeypatch):
     def stray(req, timeout=0):
         return _R({"usage": {"prompt_tokens": 400, "completion_tokens": 300},
                    "choices": [{"message": {"content": json.dumps(
-                       {"subject": s, "body": b.replace("Google", "Meta"),
+                       {"subject": s, "body": _head(b).replace("Google", "Meta"),
                         "notes": ["tightened"]})}}]})
 
     monkeypatch.setattr(_p.urllib.request, "urlopen", stray)
@@ -924,7 +930,7 @@ def test_an_accepted_edit_is_written_back(con, monkeypatch):
         return _R({"usage": {"prompt_tokens": 400, "completion_tokens": 300},
                    "choices": [{"message": {"content": json.dumps(
                        {"subject": before["subject"],
-                        "body": before["body"].replace("Hi RA,", "Hi RA,"),
+                        "body": _head(before["body"]),
                         "notes": ["no change needed"]})}}]})
 
     monkeypatch.setattr(_p.urllib.request, "urlopen", fixed)
@@ -1036,8 +1042,8 @@ def test_a_rejected_revision_is_retried_with_the_reason(con, monkeypatch):
         payload = json.loads(req.data)
         seen.append(payload["messages"])
         # First answer strays; second, after being told why, is a real fix.
-        revision = (b.replace("Google", "Meta") if len(seen) == 1
-                    else b.replace("here is one:", "here is one —"))
+        revision = (_head(b).replace("Google", "Meta") if len(seen) == 1
+                    else _head(b).replace("here is one:", "here is one —"))
         return _R({"usage": {"prompt_tokens": 500, "completion_tokens": 400},
                    "choices": [{"message": {"content": json.dumps(
                        {"subject": s, "body": revision, "notes": ["em dash"]})}}]})
@@ -1070,7 +1076,7 @@ def test_two_bad_revisions_give_up_rather_than_looping(con, monkeypatch):
         calls.append(1)
         return _R({"usage": {"prompt_tokens": 500, "completion_tokens": 400},
                    "choices": [{"message": {"content": json.dumps(
-                       {"subject": s, "body": b.replace("Google", "Meta"),
+                       {"subject": s, "body": _head(b).replace("Google", "Meta"),
                         "notes": []})}}]})
 
     monkeypatch.setattr(_p.urllib.request, "urlopen", always_stray)
@@ -1104,7 +1110,7 @@ def test_a_model_that_refuses_temperature_is_not_an_outage(monkeypatch):
                     b'{"error":{"message":"Unsupported value: \'temperature\'"}}'))
         return _R({"usage": {"prompt_tokens": 500, "completion_tokens": 400},
                    "choices": [{"message": {"content": json.dumps(
-                       {"subject": s, "body": b, "notes": []})}}]})
+                       {"subject": s, "body": _head(b), "notes": []})}}]})
 
     monkeypatch.setattr(_p.urllib.request, "urlopen", picky)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -1124,3 +1130,36 @@ def test_the_prompt_lists_the_words_the_checker_allows():
     assert "20%" in prompt
     assert "{" not in prompt.replace('{"subject"', "").replace('{"', ""), \
         "an unformatted placeholder survived into the prompt"
+
+
+def test_the_signature_is_never_shown_to_the_editor(con, monkeypatch):
+    """Sent and reattached, an edit that merely reformatted it made the
+    reattach point unfindable, and the block was appended a second time -- a
+    mail signed twice, with every required token present and the length still
+    inside the band, so nothing downstream objected."""
+    from jobfeed.outreach import polish as _p
+    from jobfeed.outreach.profile import signature
+    s, b, ctx = _draft_pair()
+    shown = []
+
+    class _R:
+        def __init__(self, p): self.p = p
+        def read(self): return json.dumps(self.p).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def reformats_the_signature(req, timeout=0):
+        shown.append(json.loads(req.data)["messages"][1]["content"])
+        mangled = _head(b) + "\n\n" + signature().replace(" · ", "   ")
+        return _R({"usage": {"prompt_tokens": 500, "completion_tokens": 400},
+                   "choices": [{"message": {"content": json.dumps(
+                       {"subject": s, "body": mangled, "notes": []})}}]})
+
+    monkeypatch.setattr(_p.urllib.request, "urlopen", reformats_the_signature)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    out = _p.polish(s, b, ctx)
+
+    assert signature() not in shown[0], "the signature was sent to the model"
+    if not out["rejected"]:
+        assert out["body"].count("Nideesh Bharath Kumar") == 1, out["body"]
+        assert out["body"].count("https://nideesh.ai") == 1

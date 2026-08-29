@@ -188,7 +188,18 @@ Writes drafts. Nothing leaves.
 
 Template copy fails mechanically: a doubled space where a field was empty, a
 comma splice, a sentence that reads as assembled. A small model
-(`gpt-4.1-nano` by default, roughly $0.0002 an email) is good at those.
+(`gpt-4.1-mini` by default, about **$0.07 per 100 emails**) is good at those.
+
+Measured on nine real drafts: **nine unchanged, none refused**. That is the
+expected result and the reason the editor is a safety net rather than a step —
+the copy is deterministic and tested, so on a good day there is nothing to do.
+Fed a draft with real faults (a doubled space, a lowercase "i", a duplicated
+clause) it fixes exactly those and nothing else.
+
+`gpt-4.1-nano` was the first default and returned **HTML on a third of real
+drafts** — `<ul>` markup in a plain-text email — which the checker caught every
+time. Telling it not to did not help. mini refuses less often, so it is both
+better behaved and, after the retries nano forced, no more expensive.
 
 Unsupervised it is also good at *helping* — rounding out a claim, adding a
 number that was not there, warming a sentence with a conversation that never
@@ -219,8 +230,11 @@ default and a model swap should not look like an outage.
    fixing a run-on needs "and", it never needs "admirer".
 3. **Did the text grow?** More than 20% is an addition whatever it claims.
 
-The signature block is rebuilt from `profile.py` rather than accepted back, so
-no edit can reach the one block carrying every link and the graduation year.
+The signature block is **never sent to the model**. Sent and reattached, an
+edit that merely reformatted it made the reattach point unfindable and the
+block was appended a second time — a mail signed twice, which passed every
+check because each required token was present and the length stayed inside the
+band. Withheld, it cannot be reformatted at all.
 
 Any failure — no key, an outage, a rate limit, an unparseable answer — returns
 the original unchanged. This runs on mail about to be sent, so the fallback is
@@ -378,6 +392,8 @@ what it claims**. None of these raised an error.
 | Both follow-up steps keyed off the original send | A queued follow-up | "Following up again" written before the first follow-up was sent, both landing together |
 | Follow-ups scheduled themselves individually | A scattered send time | Five landed on one day, three at one company — the burst everything else prevents, down the one path that skipped the spacing |
 | Follow-ups subject to the company cooldown | A guard holding | A nudge on an open thread held because a *different* person at that employer was written to |
+| Signature sent to the copy editor and reattached | An accepted edit | A reformatted signature made the reattach point unfindable, so the mail went out signed twice |
+| A test that corrupted a draft without checking the corruption applied | A passing check | `str.replace` matched nothing, so "unchanged" measured an unmodified draft |
 | `cursor.lastrowid` trusted after `INSERT OR IGNORE` | A normal insert | Not zero for an ignored row — it is the connection's last rowid, so drafts pointed at contact ids that did not exist |
 
 The last one is the general lesson: **the verification probe only became
@@ -386,7 +402,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 79 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 80 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a
@@ -404,10 +420,6 @@ and absent variants, and each address's verdict.
 
 ## Known gaps
 
-- **The copy editor has never reached the model.** The verifier half is fully
-  exercised — nine out-of-scope revisions rejected, legitimate grammar fixes
-  accepted — but the OpenAI account had no credits, so no real revision has
-  been produced. Add credits and run `jobfeed outreach polish`.
 - **The email notification channel has never run.** SMTP is blocked in the
   sandbox this was built in; it will first execute on the GitHub runner.
 - **No outreach send has happened yet.** `dispatch --send` is unexercised
