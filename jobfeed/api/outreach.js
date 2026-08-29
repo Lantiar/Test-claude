@@ -13,6 +13,12 @@
 const KEY = "jobfeed:outreach";
 const STATE_KEY = "jobfeed:outreach:state";
 const CMD_KEY = "jobfeed:outreach:cmds";
+const PROFILE_KEY = "jobfeed:outreach:profile";
+const RESUME_KEY = "jobfeed:outreach:resume";
+
+// Roughly a megabyte of PDF once base64 has added a third. Bigger than any
+// resume needs to be, and small enough that the store stays quick.
+const MAX_RESUME = 1_400_000;
 
 // What a browser may ask the runner to do. Everything here is a request that
 // the runner applies against its own database on the next pass -- the page
@@ -84,9 +90,10 @@ export default async function handler(req, res) {
         if (!secret || !sameSecret(req.headers["x-passphrase"] || "", secret)) {
           return res.status(401).json({ error: "wrong passphrase" });
         }
-        const [blob, cmds] = await Promise.all([
+        const [blob, cmds, prof] = await Promise.all([
           redis(["GET", STATE_KEY]),
           redis(["HGETALL", CMD_KEY]),
+          redis(["GET", PROFILE_KEY]),
         ]);
         const pending = [];
         for (let i = 0; i < (cmds || []).length; i += 2) {
@@ -94,7 +101,9 @@ export default async function handler(req, res) {
         }
         let state = {};
         try { state = blob ? JSON.parse(blob) : {}; } catch (e) { state = {}; }
-        return res.status(200).json({ state, pending });
+        let settings = {};
+        try { settings = prof ? JSON.parse(prof) : {}; } catch (e) { settings = {}; }
+        return res.status(200).json({ state, pending, settings });
       }
       const flat = (await redis(["HGETALL", KEY])) || [];
       const outreach = {};
@@ -116,6 +125,46 @@ export default async function handler(req, res) {
       const body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
       if (!sameSecret(body.passphrase, secret)) {
         return res.status(401).json({ error: "wrong passphrase" });
+      }
+
+      // The settings the runner applies before it renders anything.
+      if (body.settings) {
+        const s = body.settings;
+        const keep = {};
+        for (const k of ["grad", "portfolio", "linkedin", "gpa", "honors"]) {
+          if (typeof s[k] === "string" && s[k].trim()) keep[k] = s[k].trim().slice(0, 200);
+        }
+        if (Array.isArray(s.wins)) {
+          keep.wins = s.wins
+            .filter((w) => Array.isArray(w) && String(w[0]).trim() && String(w[1]).trim())
+            .slice(0, 6)
+            .map((w) => [String(w[0]).trim().slice(0, 80), String(w[1]).trim().slice(0, 600)]);
+        }
+        if (s.attach_resume !== undefined) keep.attach_resume = !!s.attach_resume;
+        if (typeof s.resume_name === "string" && s.resume_name.trim()) {
+          keep.resume_name = s.resume_name.trim().slice(0, 120);
+        }
+        await redis(["SET", PROFILE_KEY, JSON.stringify(keep)]);
+        return res.status(200).json({ saved: keep });
+      }
+
+      // A replacement resume, as base64. Stored rather than pointed at: the
+      // runner has no filesystem that outlives a run, so a path set here
+      // would mean nothing to it and the attachment would quietly stop.
+      if (body.resume) {
+        const data = String(body.resume.data || "");
+        if (data.length > MAX_RESUME) {
+          return res.status(413).json({ error: "that PDF is too large (about 1MB max)" });
+        }
+        // "%PDF" base64-encodes to this prefix whatever follows it.
+        if (!data.startsWith("JVBERi")) {
+          return res.status(400).json({ error: "that does not look like a PDF" });
+        }
+        await redis(["SET", RESUME_KEY, JSON.stringify({
+          name: String(body.resume.name || "resume.pdf").slice(0, 120),
+          data, at: Math.floor(Date.now() / 1000),
+        })]);
+        return res.status(200).json({ saved: { resume: body.resume.name, bytes: data.length } });
       }
 
       // An instruction for the runner: cancel a draft, move it, send it now.

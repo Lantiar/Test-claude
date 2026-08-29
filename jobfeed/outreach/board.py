@@ -9,6 +9,7 @@ Same store as the stage tracker, reached over HTTP with the standard library.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
@@ -271,3 +272,45 @@ def commands() -> list[dict]:
 def done(command_id: str) -> None:
     """Applied, so it must not be applied again on the next pass."""
     _redis(["HDEL", CMD_KEY, command_id])
+
+
+# ---- settings and the resume ----------------------------------------------
+
+PROFILE_KEY = "jobfeed:outreach:profile"
+RESUME_KEY = "jobfeed:outreach:resume"
+
+
+def profile() -> dict:
+    """What the dashboard has set, or {} for the defaults in profile.py."""
+    raw = _redis(["GET", PROFILE_KEY])
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def resume(into: str) -> str:
+    """Write the stored resume to `into`, or return '' if there is none.
+
+    Kept as bytes in the store rather than as a path, because the runner has
+    no filesystem that outlives a run -- a path set on a laptop means nothing
+    to a GitHub runner, and the attachment would silently stop happening.
+    """
+    raw = _redis(["GET", RESUME_KEY])
+    if not raw:
+        return ""
+    try:
+        blob = json.loads(raw)
+        data = base64.b64decode(blob["data"])
+    except Exception:
+        return ""
+    if not data.startswith(b"%PDF"):
+        # Refused rather than attached: whatever this is, it is not the file a
+        # recruiter is being asked to open.
+        return ""
+    path = os.path.join(into, os.path.basename(blob.get("name") or "resume.pdf"))
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return path

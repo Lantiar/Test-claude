@@ -1858,3 +1858,79 @@ def test_a_missing_resume_does_not_hold_the_note(monkeypatch):
     from jobfeed.outreach import run as _run
     monkeypatch.setenv("RESUME_PATH", "/no/such/resume.pdf")
     assert _run._resume(0) == []
+
+
+# ---- settings from the dashboard ------------------------------------------
+
+def test_settings_change_what_the_email_says(monkeypatch):
+    """The point of the panel. A graduation date moves and a portfolio moves,
+    and editing the repository to change one sentence of a letter means a
+    commit and a deploy."""
+    from jobfeed.outreach import profile
+    monkeypatch.setitem(profile.ME, "grad", profile.ME["grad"])
+    monkeypatch.setattr(profile, "WINS", list(profile.WINS))
+    monkeypatch.setattr(templates, "WINS", profile.WINS, raising=False)
+
+    profile.apply({"grad": "December 2027", "portfolio": "https://example.dev",
+                   "wins": [["Somewhere", "did a specific thing"],
+                            ["Elsewhere", "did another specific thing"]]})
+    _, body, _ = templates.render({"id": 1, "first_name": "Dana"},
+                                  {"company": "BNY", "role": "SWE Intern"})
+    assert "December 2027" in body and "May 2028" not in body
+    assert "https://example.dev" in body
+    assert "  - Somewhere: did a specific thing" in body
+    assert "Gemini" not in body, "an old achievement survived the change"
+
+
+def test_settings_ignore_what_they_may_not_set(monkeypatch):
+    """Name, school and degree are the identity the mail rests on. A typo in
+    one of those is not a setting."""
+    from jobfeed.outreach import profile
+    before = (profile.ME["name"], profile.ME["school"], profile.ME["degree"])
+    profile.apply({"name": "Someone Else", "school": "Elsewhere U",
+                   "degree": "B.A. Basket Weaving", "grad": "May 2029"})
+    assert (profile.ME["name"], profile.ME["school"], profile.ME["degree"]) == before
+    assert profile.ME["grad"] == "May 2029"
+
+
+def test_a_resume_filename_cannot_point_at_a_file(monkeypatch):
+    """It names an attachment. A value straight from a web form must not be
+    able to reach outside it."""
+    from jobfeed.outreach import profile
+    profile.apply({"resume_name": "../../../etc/passwd"})
+    assert profile.RESUME_NAME[0] == "passwd"
+    profile.apply({"resume_name": "/etc/shadow"})
+    assert profile.RESUME_NAME[0] == "shadow"
+
+
+def test_empty_settings_leave_the_defaults_alone(monkeypatch):
+    """A blank field means "whatever the repository says", which is a real
+    state -- it must not blank the sentence in the email."""
+    from jobfeed.outreach import profile
+    grad = profile.ME["grad"]
+    profile.apply({"grad": "   ", "portfolio": "", "wins": []})
+    assert profile.ME["grad"] == grad
+    assert profile.WINS, "the achievements were emptied"
+    profile.apply(None)
+    assert profile.ME["grad"] == grad
+
+
+def test_turning_the_attachment_off_stops_it(monkeypatch):
+    from jobfeed.outreach import run as _run, profile
+    profile.apply({"attach_resume": False})
+    assert _run._resume(0) == []
+    profile.apply({"attach_resume": True})
+
+
+def test_only_a_real_pdf_is_accepted_from_the_store(monkeypatch, tmp_path):
+    """Whatever else it might be, it is not the file a recruiter is being
+    asked to open."""
+    import base64, json as _json
+    from jobfeed.outreach import board as _b
+    monkeypatch.setattr(_b, "_redis", lambda cmd: _json.dumps(
+        {"name": "resume.pdf", "data": base64.b64encode(b"<html>nope").decode()}))
+    assert _b.resume(str(tmp_path)) == ""
+    monkeypatch.setattr(_b, "_redis", lambda cmd: _json.dumps(
+        {"name": "cv.pdf", "data": base64.b64encode(b"%PDF-1.4 real").decode()}))
+    path = _b.resume(str(tmp_path))
+    assert path.endswith("cv.pdf") and pathlib.Path(path).read_bytes().startswith(b"%PDF")

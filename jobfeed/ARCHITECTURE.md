@@ -340,6 +340,29 @@ their addresses, and the page sits on a public URL beside a public job feed.
 The coarse per-job state, which names nobody, stays open because the job
 board's buttons need it.
 
+### Settings, and what they may not touch
+
+The facts a cold email states go stale — a graduation date moves, a portfolio
+moves, and the three things worth saying about yourself change every few
+months. Editing `profile.py` for that means a commit and a deploy to change one
+sentence of a letter, so these live in the store (`jobfeed:outreach:profile`)
+and the runner applies them before it renders anything: graduation, portfolio,
+LinkedIn, GPA, honours, the three achievements, whether the resume attaches,
+and the resume itself.
+
+**Name, school and degree are deliberately not settable.** They are the
+identity the whole mail rests on, and a typo in one is not a setting.
+
+The resume is stored as **bytes, not a path** — the runner has no filesystem
+that outlives a run, so a path set on a laptop means nothing to it and the
+attachment would quietly stop happening. It is refused unless it really begins
+`%PDF`, and its filename is reduced to a basename: it names an attachment, and
+a value straight from a web form must not be able to point at a file.
+
+A blank field means "whatever the repository says", which is a real state and
+must not blank the sentence. Settings apply to notes drafted from then on;
+ones already written keep their wording, and the per-note editor changes those.
+
 ### How the mail is built
 
 Sent as `multipart/mixed` → `multipart/alternative` (plain + HTML) → the
@@ -523,7 +546,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 111 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 117 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

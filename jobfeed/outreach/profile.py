@@ -64,3 +64,62 @@ def signature() -> str:
     OUTREACH_SIGNATURE to bring one back.
     """
     return os.getenv("OUTREACH_SIGNATURE", "").strip()
+
+
+# ---- what the dashboard may change ----------------------------------------
+#
+# The facts in a cold email go stale -- a graduation date moves, a portfolio
+# moves, and the three things worth saying about yourself change every few
+# months. Editing profile.py for that means a commit and a deploy to change a
+# sentence, so these live in the store and the runner applies them before it
+# renders anything.
+#
+# Only these. Name, school and degree are not here: they are the identity the
+# whole mail rests on, and a typo in one is not a setting.
+
+EDITABLE = ("grad", "portfolio", "linkedin", "gpa", "honors")
+
+
+def current() -> dict:
+    """The settings as they stand, for the dashboard to show."""
+    return {**{k: ME[k] for k in EDITABLE},
+            "wins": [list(w) for w in WINS],
+            "attach_resume": ATTACH_RESUME[0],
+            "resume_name": RESUME_NAME[0]}
+
+
+# Mutable so `apply` can change them without every caller re-importing.
+ATTACH_RESUME = [True]
+RESUME_NAME = ["resume.pdf"]
+
+
+def apply(settings: dict | None) -> None:
+    """Take the dashboard's settings, ignoring anything it may not set.
+
+    Silently ignored rather than rejected: a stored profile from an older
+    version of the page will carry keys this one does not know, and refusing
+    the whole thing over one would drop every setting the user did make.
+    """
+    if not settings:
+        return
+    for key in EDITABLE:
+        value = settings.get(key)
+        if isinstance(value, str) and value.strip():
+            ME[key] = value.strip()
+
+    wins = settings.get("wins")
+    if isinstance(wins, list):
+        cleaned = [(str(w[0]).strip(), str(w[1]).strip())
+                   for w in wins
+                   if isinstance(w, (list, tuple)) and len(w) >= 2
+                   and str(w[0]).strip() and str(w[1]).strip()]
+        if cleaned:
+            WINS[:] = cleaned
+
+    if "attach_resume" in settings:
+        ATTACH_RESUME[0] = bool(settings["attach_resume"])
+    name = settings.get("resume_name")
+    if isinstance(name, str) and name.strip():
+        # A filename, never a path: this is used to name an attachment, and a
+        # value from a web form must not be able to point at a file.
+        RESUME_NAME[0] = os.path.basename(name.strip()) or "resume.pdf"

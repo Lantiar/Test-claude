@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import tempfile
 import json
 import time
 
 from .. import apply as _apply
 from .. import db as _db
-from . import apify, board as _board, guards, polish as _polish, titles as _titles
+from . import apify, board as _board, guards, polish as _polish, profile as _profile, titles as _titles
 from .gmail import classify, inbound_since, send as gmail_send
 from .templates import render
 
@@ -169,7 +170,7 @@ def _resume(step: int) -> list[str]:
     or unset, the mail goes without it: an attachment that cannot be found is
     not a reason to hold a note whose text already links to the portfolio.
     """
-    if step:
+    if step or not _profile.ATTACH_RESUME[0]:
         return []
     path = os.getenv("RESUME_PATH", "config/files/resume.pdf")
     return [path] if path and os.path.exists(path) else []
@@ -471,6 +472,18 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
     if not _board.available():
         out["problems"].append("no Upstash credentials; the board is unreadable")
         return out
+
+    # Settings the dashboard has changed -- graduation date, portfolio, the
+    # three achievements, whether the resume goes -- applied before anything
+    # is rendered. Editing profile.py for these would mean a commit and a
+    # deploy to change one sentence of a letter.
+    try:
+        _profile.apply(_board.profile())
+        stored = _board.resume(tempfile.gettempdir())
+        if stored:
+            os.environ["RESUME_PATH"] = stored
+    except Exception as exc:
+        out["problems"].append(f"could not read the settings: {exc}")
 
     # Contacts, drafts and send times, from the last run. Without this the
     # database the runner just seeded knows nothing about outreach: the
