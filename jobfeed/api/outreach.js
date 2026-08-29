@@ -11,6 +11,13 @@
 // more than anybody can keep straight.
 
 const KEY = "jobfeed:outreach";
+const STATE_KEY = "jobfeed:outreach:state";
+const CMD_KEY = "jobfeed:outreach:cmds";
+
+// What a browser may ask the runner to do. Everything here is a request that
+// the runner applies against its own database on the next pass -- the page
+// never edits outreach directly, because the page is not what sends.
+const ACTIONS = ["cancel", "reschedule", "send_now", "retry"];
 
 // Short on purpose -- these are read in a table cell.
 //   queued   you asked for it; the runner has not got to it yet
@@ -68,6 +75,27 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
+      // The detailed view carries recruiters' names and addresses. This page
+      // is on a public URL beside a public job feed, so that half is behind
+      // the passphrase -- the coarse per-job state, which names nobody, is
+      // not, because the buttons on the job board need it.
+      if (req.query && req.query.detail) {
+        const secret = process.env.JOBFEED_PASSPHRASE;
+        if (!secret || !sameSecret(req.headers["x-passphrase"] || "", secret)) {
+          return res.status(401).json({ error: "wrong passphrase" });
+        }
+        const [blob, cmds] = await Promise.all([
+          redis(["GET", STATE_KEY]),
+          redis(["HGETALL", CMD_KEY]),
+        ]);
+        const pending = [];
+        for (let i = 0; i < (cmds || []).length; i += 2) {
+          try { pending.push({ id: cmds[i], ...JSON.parse(cmds[i + 1]) }); } catch (e) {}
+        }
+        let state = {};
+        try { state = blob ? JSON.parse(blob) : {}; } catch (e) { state = {}; }
+        return res.status(200).json({ state, pending });
+      }
       const flat = (await redis(["HGETALL", KEY])) || [];
       const outreach = {};
       for (let i = 0; i < flat.length; i += 2) {
@@ -88,6 +116,33 @@ export default async function handler(req, res) {
       const body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
       if (!sameSecret(body.passphrase, secret)) {
         return res.status(401).json({ error: "wrong passphrase" });
+      }
+
+      // An instruction for the runner: cancel a draft, move it, send it now.
+      // Queued rather than applied, because the database it applies to is on
+      // the runner and is rebuilt from the store on every pass.
+      if (body.action) {
+        if (!ACTIONS.includes(body.action)) {
+          return res.status(400).json({ error: `unknown action ${JSON.stringify(body.action)}`,
+                                        expected: ACTIONS });
+        }
+        if (!body.email) {
+          return res.status(400).json({ error: "which recruiter? send an email" });
+        }
+        const cmd = { action: body.action, email: String(body.email).slice(0, 200),
+                      at: Math.floor(Date.now() / 1000) };
+        if (body.job_key) cmd.job_key = String(body.job_key).slice(0, 400);
+        if (body.step !== undefined) cmd.step = Number(body.step) || 0;
+        if (body.action === "reschedule") {
+          const when = Number(body.when);
+          if (!when || !isFinite(when)) {
+            return res.status(400).json({ error: "reschedule needs a `when` timestamp" });
+          }
+          cmd.when = Math.floor(when);
+        }
+        const id = `${cmd.at}-${Math.random().toString(36).slice(2, 8)}`;
+        await redis(["HSET", CMD_KEY, id, JSON.stringify(cmd)]);
+        return res.status(200).json({ queued: { id, ...cmd } });
       }
 
       const key = body.key;

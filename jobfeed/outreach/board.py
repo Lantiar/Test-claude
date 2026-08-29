@@ -103,3 +103,171 @@ def stages() -> dict[str, str]:
     """
     flat = _redis(["HGETALL", STAGE_KEY]) or []
     return {flat[i]: flat[i + 1] for i in range(0, len(flat) - 1, 2)}
+
+
+# ---- the outreach store ---------------------------------------------------
+#
+# The runner's database is rebuilt from a published snapshot on every run, and
+# that snapshot holds the feed only -- no contacts, no drafts, no send times.
+# Left there, a draft written at 09:00 is gone by 09:30: the recruiter search
+# is paid for again, the batch is rescheduled two days out again, and nothing
+# ever reaches its send time. So outreach keeps its state here.
+#
+# Rows are keyed by things that survive a rebuild -- a company's name, a job
+# key, an address -- and never by rowid, which is assigned fresh each time the
+# feed is seeded and would silently attach a draft to the wrong contact.
+
+STATE_KEY = "jobfeed:outreach:state"
+
+_CONTACT = ("full_name", "first_name", "title", "linkedin_url", "email",
+            "email_status", "source", "found_at", "verified_at")
+_OUTREACH = ("job_key", "variant", "subject", "body", "step", "status",
+             "message_id", "thread_id", "send_after", "sent_at", "campaign",
+             "created_at", "polished_at", "polish_notes")
+
+
+def save(con) -> dict:
+    """Write every outreach table to the store. Returns what was written."""
+    contacts = [
+        {**{k: r[k] for k in _CONTACT},
+         "company": r["company"]}
+        for r in con.execute(
+            "SELECT c.*, cm.name company FROM contact c "
+            "LEFT JOIN company cm ON cm.id = c.company_id")]
+
+    outreach = []
+    for r in con.execute(
+            "SELECT o.*, c.email FROM outreach o JOIN contact c ON c.id=o.contact_id"):
+        row = {k: r[k] for k in _OUTREACH}
+        row["email"] = r["email"]
+        row["covers"] = [x["job_key"] for x in con.execute(
+            "SELECT job_key FROM outreach_job WHERE outreach_id=?", (r["id"],))]
+        outreach.append(row)
+
+    replies = [
+        {"email": r["email"], "job_key": r["job_key"], "received_at": r["received_at"],
+         "from_email": r["from_email"], "kind": r["kind"],
+         "bounce_type": r["bounce_type"], "snippet": r["snippet"]}
+        for r in con.execute(
+            "SELECT rp.*, o.job_key, c.email FROM reply rp "
+            "JOIN outreach o ON o.id = rp.outreach_id "
+            "JOIN contact c ON c.id = o.contact_id")]
+
+    suppression = [dict(r) for r in con.execute(
+        "SELECT s.email, s.reason, s.until, s.created_at, cm.name company "
+        "FROM suppression s LEFT JOIN company cm ON cm.id = s.company_id")]
+    health = [dict(r) for r in con.execute("SELECT * FROM send_health")]
+
+    payload = {"v": 1, "at": int(time.time()), "contacts": contacts,
+               "outreach": outreach, "replies": replies,
+               "suppression": suppression, "health": health}
+    _redis(["SET", STATE_KEY, json.dumps(payload)])
+    return {"contacts": len(contacts), "outreach": len(outreach),
+            "replies": len(replies)}
+
+
+def load(con) -> dict:
+    """Read outreach state back into a freshly seeded database."""
+    raw = _redis(["GET", STATE_KEY])
+    if not raw:
+        return {"contacts": 0, "outreach": 0, "replies": 0}
+    payload = json.loads(raw)
+
+    def company_id(name):
+        if not name:
+            return None
+        row = con.execute("SELECT id FROM company WHERE name=?", (name,)).fetchone()
+        if row:
+            return row["id"]
+        # A company can be in the outreach store and absent from the feed --
+        # its postings closed. The contact is still worth keeping, so the row
+        # is recreated rather than dropped.
+        con.execute("INSERT OR IGNORE INTO company(name, norm, created_at) "
+                    "VALUES(?,?,?)", (name, name.lower(), time.time()))
+        row = con.execute("SELECT id FROM company WHERE name=?", (name,)).fetchone()
+        return row["id"] if row else None
+
+    by_email = {}
+    for c in payload.get("contacts", []):
+        con.execute(
+            "INSERT OR IGNORE INTO contact(company_id, full_name, first_name, "
+            "title, linkedin_url, email, email_status, source, found_at, "
+            "verified_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (company_id(c.get("company")), c["full_name"], c["first_name"],
+             c["title"], c["linkedin_url"], c["email"], c["email_status"],
+             c.get("source") or "apify", c["found_at"], c.get("verified_at")))
+        row = con.execute("SELECT id FROM contact WHERE email=?",
+                          (c["email"],)).fetchone()
+        if row:
+            by_email[c["email"]] = row["id"]
+
+    for o in payload.get("outreach", []):
+        contact_id = by_email.get(o.get("email"))
+        if contact_id is None:
+            continue
+        con.execute(
+            "INSERT OR IGNORE INTO outreach(job_key, contact_id, variant, subject, "
+            "body, step, status, message_id, thread_id, send_after, sent_at, "
+            "campaign, created_at, polished_at, polish_notes) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (o["job_key"], contact_id, o["variant"], o["subject"], o["body"],
+             o["step"], o["status"], o["message_id"], o["thread_id"],
+             o["send_after"], o["sent_at"], o.get("campaign"), o["created_at"],
+             o.get("polished_at"), o.get("polish_notes")))
+        row = con.execute("SELECT id FROM outreach WHERE job_key=? AND contact_id=? "
+                          "AND step=?", (o["job_key"], contact_id, o["step"])).fetchone()
+        for job_key in (o.get("covers") or []):
+            if row:
+                con.execute("INSERT OR IGNORE INTO outreach_job(outreach_id, job_key) "
+                            "VALUES(?,?)", (row["id"], job_key))
+
+    for r in payload.get("replies", []):
+        contact_id = by_email.get(r.get("email"))
+        if contact_id is None:
+            continue
+        row = con.execute("SELECT id FROM outreach WHERE job_key=? AND contact_id=? "
+                          "AND step=0", (r["job_key"], contact_id)).fetchone()
+        if row:
+            con.execute(
+                "INSERT INTO reply(outreach_id, received_at, from_email, kind, "
+                "bounce_type, snippet) VALUES(?,?,?,?,?,?)",
+                (row["id"], r["received_at"], r["from_email"], r["kind"],
+                 r.get("bounce_type"), r.get("snippet")))
+
+    for s in payload.get("suppression", []):
+        con.execute("INSERT INTO suppression(email, company_id, reason, until, "
+                    "created_at) VALUES(?,?,?,?,?)",
+                    (s.get("email"), company_id(s.get("company")), s["reason"],
+                     s.get("until"), s["created_at"]))
+    for h in payload.get("health", []):
+        con.execute("INSERT OR REPLACE INTO send_health(day, sent, hard_bounced, "
+                    "soft_bounced, replied, paused, paused_reason) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (h["day"], h["sent"], h["hard_bounced"], h["soft_bounced"],
+                     h["replied"], h.get("paused", 0), h.get("paused_reason")))
+    con.commit()
+    return {"contacts": len(payload.get("contacts", [])),
+            "outreach": len(payload.get("outreach", [])),
+            "replies": len(payload.get("replies", []))}
+
+
+# ---- instructions from the page -------------------------------------------
+
+CMD_KEY = "jobfeed:outreach:cmds"
+
+
+def commands() -> list[dict]:
+    """What the dashboard has asked for, oldest first."""
+    flat = _redis(["HGETALL", CMD_KEY]) or []
+    out = []
+    for i in range(0, len(flat) - 1, 2):
+        try:
+            out.append({"id": flat[i], **json.loads(flat[i + 1])})
+        except Exception:
+            pass
+    return sorted(out, key=lambda c: c.get("at", 0))
+
+
+def done(command_id: str) -> None:
+    """Applied, so it must not be applied again on the next pass."""
+    _redis(["HDEL", CMD_KEY, command_id])

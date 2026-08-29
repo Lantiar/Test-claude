@@ -456,6 +456,16 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
         out["problems"].append("no Upstash credentials; the board is unreadable")
         return out
 
+    # Contacts, drafts and send times, from the last run. Without this the
+    # database the runner just seeded knows nothing about outreach: the
+    # recruiter search is paid for again, the batch is scheduled two days out
+    # again, and no draft ever reaches its send time.
+    try:
+        out["restored"] = _board.load(con)
+    except Exception as exc:
+        out["problems"].append(f"could not read the outreach store: {exc}")
+        return out
+
     # The tracker is the record of what has been applied to; the runner starts
     # from a published snapshot and holds none of it.
     for job_key, stage in _board.stages().items():
@@ -465,6 +475,8 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
             "updated_at=excluded.updated_at",
             (job_key, stage, time.time()))
     con.commit()
+
+    out["applied"] = _apply_commands(con)
 
     asked = _board.queued()
     out["queued"] = len(asked)
@@ -502,7 +514,69 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
     live = [key for key, record in _board.read().items()
             if record.get("state") in ("queued", "reached")]
     _report(con, sorted(set(asked) | set(live)))
+
+    # Written last, and unconditionally: a pass that failed halfway still
+    # learned something -- an address that bounced, a reply that arrived --
+    # and throwing that away means discovering it again next run.
+    try:
+        out["saved"] = _board.save(con)
+    except Exception as exc:
+        out["problems"].append(f"could not write the outreach store: {exc}")
     return out
+
+
+def _apply_commands(con) -> list[str]:
+    """Carry out what the dashboard asked for: cancel, move, send now, retry.
+
+    Applied here rather than in the page, because the database they act on is
+    rebuilt on the runner every pass -- a browser writing to it directly would
+    be writing to something that no longer exists by the time it matters.
+
+    Each is removed only after it has been applied, so a pass that dies
+    halfway leaves the instruction to be carried out next time rather than
+    losing it.
+    """
+    done = []
+    for cmd in _board.commands():
+        try:
+            where = ["c.email = ?"]
+            params: list = [cmd.get("email", "")]
+            if cmd.get("job_key"):
+                where.append("o.job_key = ?")
+                params.append(cmd["job_key"])
+            if cmd.get("step") is not None:
+                where.append("o.step = ?")
+                params.append(int(cmd["step"]))
+            rows = con.execute(
+                "SELECT o.id, o.status FROM outreach o "
+                "JOIN contact c ON c.id = o.contact_id "
+                f"WHERE {' AND '.join(where)}", params).fetchall()
+
+            for row in rows:
+                action = cmd.get("action")
+                if action == "cancel" and row["status"] in ("draft", "queued", "held"):
+                    # Kept as a row rather than deleted: it is a record that
+                    # this person was going to be written to and deliberately
+                    # was not, and prepare would draft it again from nothing.
+                    con.execute("UPDATE outreach SET status='cancelled' WHERE id=?",
+                                (row["id"],))
+                elif action == "reschedule" and row["status"] in ("draft", "queued", "held"):
+                    con.execute(
+                        "UPDATE outreach SET status='queued', send_after=? WHERE id=?",
+                        (float(cmd["when"]), row["id"]))
+                elif action == "send_now" and row["status"] in ("draft", "queued", "held"):
+                    con.execute(
+                        "UPDATE outreach SET status='queued', send_after=? WHERE id=?",
+                        (time.time() - 60, row["id"]))
+                elif action == "retry" and row["status"] in ("held", "cancelled", "failed"):
+                    con.execute("UPDATE outreach SET status='queued' WHERE id=?",
+                                (row["id"],))
+            con.commit()
+            _board.done(cmd["id"])
+            done.append(f"{cmd.get('action')} {cmd.get('email','')}")
+        except Exception as exc:
+            print(f"  command {cmd.get('id')}: {type(exc).__name__}: {exc}")
+    return done
 
 
 def _report(con, keys: list[str]) -> None:

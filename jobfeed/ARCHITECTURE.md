@@ -297,8 +297,43 @@ and can be pressed again.
 - **Everything in flight is reported on, not just this pass's requests.** Watch
   only the newly-queued and a job reaches "reached out" and can never move to
   "replied".
+- **Outreach state lives in Upstash, not in the runner's database.** That
+  database is thrown away and reseeded from a published snapshot every run, and
+  the snapshot holds the feed only. Left there, a draft written at 09:00 was
+  gone by 09:30: the recruiter search paid for again, the batch rescheduled two
+  days out again, and no draft ever reaching its send time. `board.save/load`
+  carry contacts, drafts, send times, replies and suppression across, keyed by
+  company name, job key and address — **never by rowid**, which is handed out
+  fresh each seed and would reattach a draft to whichever contact happened to
+  hold that id.
 - `OUTREACH_SEND=1` in the repository variables is the kill switch. Unset, the
   button drafts and schedules but sends nothing.
+
+### 1d. The outreach dashboard
+
+A second tab on the same page, fed by the same store the runner writes.
+Summary tiles (queued, sent, replies, bounces, bounce rate against the 2%
+limit) and a row per note: company, recruiter, address and its verification
+class, the roles it names, its state, and when it goes or went.
+
+Per row, while it is still in flight: **send now**, **move** (pick a time),
+**cancel**. A cancelled note can be **restored**. A sent one offers only the
+Gmail thread — nothing here can unsend, and offering it would be a control
+that lies.
+
+Every action is a *request*, queued in `jobfeed:outreach:cmds` and applied by
+the runner on its next pass, for the same reason the button is: the database
+these act on lives on the runner and is rebuilt each run, so a page editing it
+directly would be writing somewhere that no longer exists by the time it
+matters. Until the runner has applied one, the row reads "applying…" rather
+than showing the change as done. An instruction is cleared only after it has
+been applied, so a pass that dies halfway leaves it to be carried out rather
+than losing it.
+
+**The detail view is behind the passphrase.** It names real recruiters and
+their addresses, and the page sits on a public URL beside a public job feed.
+The coarse per-job state, which names nobody, stays open because the job
+board's buttons need it.
 
 ### 2. `schedule` — scatter
 
@@ -465,7 +500,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 96 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 103 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a

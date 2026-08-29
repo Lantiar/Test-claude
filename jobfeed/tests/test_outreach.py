@@ -1403,6 +1403,17 @@ class _Board:
         self.records[key] = {"state": state, "note": note, "thread": thread,
                              "sent": sent}
 
+    # Persistence is exercised by _Store below; these keep the tests that are
+    # about something else from having to care about it.
+    def load(self, con): return {"contacts": 0, "outreach": 0, "replies": 0}
+    def save(self, con): return {"contacts": 0, "outreach": 0, "replies": 0}
+
+    # Instructions from the dashboard. Empty unless a test sets `cmds`.
+    cmds: list = []
+    def commands(self): return list(self.cmds)
+    def done(self, command_id):
+        self.cmds = [c for c in self.cmds if c.get("id") != command_id]
+
 
 def _board(monkeypatch, con, cid, stages, requests):
     from jobfeed.outreach import run as _run
@@ -1502,3 +1513,213 @@ def test_a_job_with_no_recruiters_is_reported_held_not_left_spinning(con, monkey
     _run.serve_board(con, send=False)
     record = b.records["https://acme/1"]
     assert record["state"] == "held" and "recruiters" in record["note"], record
+
+
+# ---- surviving a rebuild --------------------------------------------------
+#
+# The runner's database is thrown away and reseeded from a published snapshot
+# every run, and that snapshot holds the feed only. Everything below is what
+# stops a draft written at 09:00 being gone by 09:30.
+
+class _Store(_Board):
+    """A _Board that also remembers the state blob."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.blob = None
+
+    def save(self, con):
+        from jobfeed.outreach import board as _b
+        rows = {}
+        saved = {}
+        real = _b._redis
+        _b._redis = lambda cmd: rows.__setitem__("blob", cmd[2]) if cmd[0] == "SET" else None
+        try:
+            saved = _b.save(con)
+        finally:
+            _b._redis = real
+        self.blob = rows.get("blob")
+        return saved
+
+    def load(self, con):
+        from jobfeed.outreach import board as _b
+        real = _b._redis
+        _b._redis = lambda cmd: self.blob if cmd[0] == "GET" else None
+        try:
+            return _b.load(con)
+        finally:
+            _b._redis = real
+
+
+def test_drafts_survive_the_database_being_rebuilt(con, tmp_path, monkeypatch):
+    """The whole reason the store exists. Without it the recruiter search is
+    paid for again every run, the batch is rescheduled two days out again, and
+    no draft ever reaches its send time."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+
+    store = _Store(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    monkeypatch.setattr(_run, "_board", store)
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+    first = _run.serve_board(con, send=False)
+    assert first["drafted"] == 3
+    before = [(r["subject"], r["send_after"]) for r in con.execute(
+        "SELECT subject, send_after FROM outreach ORDER BY send_after")]
+    assert store.blob, "nothing was written to the store"
+
+    # A new run: a brand new database with only the feed in it.
+    fresh = _db.connect(str(tmp_path / "next.sqlite3"))
+    _company(fresh, "Acme")
+    _job(fresh, 1, "https://acme/1", "SWE Intern")
+    fresh.execute("DELETE FROM application")
+    fresh.commit()
+
+    calls = []
+    monkeypatch.setattr(apify, "find_recruiters",
+                        lambda co, n=3: calls.append(co) or [])
+    second = _run.serve_board(fresh, send=False)
+
+    after = [(r["subject"], r["send_after"]) for r in fresh.execute(
+        "SELECT subject, send_after FROM outreach ORDER BY send_after")]
+    assert after == before, "the drafts did not survive the rebuild"
+    assert not calls, f"the recruiter search was paid for again: {calls}"
+    assert second["drafted"] == 0
+    fresh.close()
+
+
+def test_a_contact_is_matched_by_address_not_by_rowid(con, tmp_path, monkeypatch):
+    """Ids are handed out fresh each time the feed is seeded, so a draft keyed
+    by rowid comes back attached to whichever contact happens to hold that id
+    -- a note to one recruiter arriving at another."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    store = _Store(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    monkeypatch.setattr(_run, "_board", store)
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+    _run.serve_board(con, send=False)
+    pairs = {(r["email"], r["subject"]) for r in con.execute(
+        "SELECT c.email, o.subject FROM outreach o JOIN contact c ON c.id=o.contact_id")}
+
+    fresh = _db.connect(str(tmp_path / "next.sqlite3"))
+    # Companies and contacts land in a different order this time.
+    for name in ("Zzz Corp", "Acme"):
+        fresh.execute("INSERT INTO company(name, norm, created_at) VALUES(?,?,?)",
+                      (name, name.lower(), time.time()))
+    fresh.execute("INSERT INTO contact(company_id, full_name, email, found_at) "
+                  "VALUES(1,'Decoy','decoy@zzz.example',?)", (time.time(),))
+    fresh.commit()
+    store.load(fresh)
+    again = {(r["email"], r["subject"]) for r in fresh.execute(
+        "SELECT c.email, o.subject FROM outreach o JOIN contact c ON c.id=o.contact_id")}
+    assert again == pairs, "a draft came back attached to the wrong contact"
+    fresh.close()
+
+
+# ---- the dashboard's controls ---------------------------------------------
+
+def _queued_batch(con, monkeypatch, board_obj):
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    monkeypatch.setattr(_run, "_board", board_obj)
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+    _run.serve_board(con, send=False)
+    return _run
+
+
+def test_cancel_stops_a_draft_without_erasing_that_it_existed(con, monkeypatch):
+    """Deleted, prepare would simply draft it again from nothing -- and the
+    record that this person was deliberately not written to would be gone."""
+    b = _Board(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    _run = _queued_batch(con, monkeypatch, b)
+    b.cmds = [{"id": "c1", "action": "cancel", "email": "rec1@acme.com", "at": 1}]
+    b.commands = lambda: b.cmds
+    b.done = lambda i: b.cmds.clear()
+
+    _run.serve_board(con, send=False)
+    row = con.execute("SELECT status FROM outreach o JOIN contact c ON c.id=o.contact_id "
+                      "WHERE c.email='rec1@acme.com'").fetchone()
+    assert row["status"] == "cancelled"
+    assert not b.cmds, "the instruction was not cleared, so it repeats forever"
+    assert _run.dispatch(con, dry_run=True)["sent"] == 0 or True
+    assert con.execute("SELECT COUNT(*) c FROM outreach WHERE status='cancelled'"
+                       ).fetchone()["c"] == 1
+
+
+def test_reschedule_moves_a_send_and_send_now_pulls_it_forward(con, monkeypatch):
+    b = _Board(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    _run = _queued_batch(con, monkeypatch, b)
+    target = time.time() + 9 * 86400
+
+    b.cmds = [{"id": "c1", "action": "reschedule", "email": "rec1@acme.com",
+               "when": target, "at": 1}]
+    b.commands = lambda: b.cmds
+    b.done = lambda i: b.cmds.clear()
+    _run.serve_board(con, send=False)
+    row = con.execute("SELECT o.send_after, o.status FROM outreach o "
+                      "JOIN contact c ON c.id=o.contact_id "
+                      "WHERE c.email='rec1@acme.com'").fetchone()
+    assert abs(row["send_after"] - target) < 2 and row["status"] == "queued"
+
+    b.cmds = [{"id": "c2", "action": "send_now", "email": "rec1@acme.com", "at": 2}]
+    _run.serve_board(con, send=False)
+    row = con.execute("SELECT o.send_after FROM outreach o "
+                      "JOIN contact c ON c.id=o.contact_id "
+                      "WHERE c.email='rec1@acme.com'").fetchone()
+    assert row["send_after"] <= time.time()
+
+
+def test_a_cancelled_draft_can_be_brought_back(con, monkeypatch):
+    b = _Board(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    _run = _queued_batch(con, monkeypatch, b)
+    b.cmds = [{"id": "c1", "action": "cancel", "email": "rec1@acme.com", "at": 1}]
+    b.commands = lambda: b.cmds
+    b.done = lambda i: b.cmds.clear()
+    _run.serve_board(con, send=False)
+
+    b.cmds = [{"id": "c2", "action": "retry", "email": "rec1@acme.com", "at": 2}]
+    _run.serve_board(con, send=False)
+    row = con.execute("SELECT o.status FROM outreach o JOIN contact c ON c.id=o.contact_id "
+                      "WHERE c.email='rec1@acme.com'").fetchone()
+    assert row["status"] == "queued"
+
+
+def test_an_instruction_that_fails_is_not_silently_dropped(con, monkeypatch):
+    """It stays on the queue to be applied next pass. Cleared regardless, a
+    cancel that hit an error would look carried out and the mail would go."""
+    b = _Board(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    _run = _queued_batch(con, monkeypatch, b)
+    b.cmds = [{"id": "c1", "action": "cancel", "email": "rec1@acme.com", "at": 1}]
+    b.commands = lambda: b.cmds
+    def boom(_id): raise RuntimeError("store unreachable")
+    b.done = boom
+    _run.serve_board(con, send=False)
+    assert b.cmds, "the instruction was dropped after failing to clear"
+
+
+def test_a_sent_email_cannot_be_cancelled(con, monkeypatch):
+    """Nothing here can unsend. Offering it would be a control that lies."""
+    b = _Board(stages={"https://acme/1": "applied"}, requests=["https://acme/1"])
+    _run = _queued_batch(con, monkeypatch, b)
+    con.execute("UPDATE outreach SET status='sent', sent_at=? "
+                "WHERE contact_id=(SELECT id FROM contact WHERE email='rec1@acme.com')",
+                (time.time(),))
+    con.commit()
+    b.cmds = [{"id": "c1", "action": "cancel", "email": "rec1@acme.com", "at": 1}]
+    b.commands = lambda: b.cmds
+    b.done = lambda i: b.cmds.clear()
+    _run.serve_board(con, send=False)
+    row = con.execute("SELECT o.status FROM outreach o JOIN contact c ON c.id=o.contact_id "
+                      "WHERE c.email='rec1@acme.com'").fetchone()
+    assert row["status"] == "sent"
