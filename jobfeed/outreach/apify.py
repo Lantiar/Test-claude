@@ -26,6 +26,9 @@ PEOPLE_ACTOR = os.getenv("APIFY_PEOPLE_ACTOR", "harvestapi~linkedin-profile-sear
 # known one: it demands full-account permissions before it will run at all, so
 # it cannot be used without a manual approval click in the Apify console.
 VERIFY_ACTOR = os.getenv("APIFY_VERIFY_ACTOR", "michael.g~email-verifier-validator")
+# Fills a gap when the search finds the right person without an address.
+FINDER_ACTOR = os.getenv("APIFY_FINDER_ACTOR",
+                         "snipercoder~email-finder-by-name-and-domain")
 
 # What a recruiter's title looks like. Deliberately narrow: "recruiter" alone
 # pulls in agency recruiters and recruiting coordinators at other companies,
@@ -37,8 +40,34 @@ RECRUITER_TITLES = ("university recruiter", "campus recruiter", "early career",
 # What LinkedIn is asked for, which is a shorter list: the filter is exact
 # against LinkedIn's own job titles, while RECRUITER_TITLES is matched loosely
 # against the free-text headline afterwards.
-SEARCH_TITLES = ("University Recruiter", "Technical Recruiter",
-                 "Early Career Recruiter", "Recruiter", "Talent Acquisition")
+SEARCH_TITLES = ("University Recruiter", "Campus Recruiter",
+                 "Early Career Recruiter", "Early Careers Recruiter",
+                 "Graduate Recruiter", "Emerging Talent",
+                 "Technical Recruiter", "Recruiter", "Talent Acquisition")
+
+# Who should get the note, in order. A campus recruiter owns the intern
+# pipeline; a talent-acquisition partner may never touch it, and a VP of Talent
+# does not read cold mail from students. Ranked rather than filtered, because
+# at a company with one findable recruiter the generic one is still the right
+# person, and better than nobody.
+_TITLE_TIERS = (
+    ("university", "campus", "early career", "early careers", "earlycareer",
+     "graduate", "emerging talent", "student", "new grad", "intern", "entry level"),
+    ("technical recruiter", "technical sourcer", "engineering recruiter",
+     "tech recruiter", "technology recruiter"),
+    ("recruiter", "recruiting", "recruitment", "talent acquisition",
+     "talent partner", "sourcer", "talent", "hiring"),
+)
+# Seniority that makes someone a worse target, not a better one.
+_SENIOR = ("vice president", "vp ", "head of", "director", "chief", "executive")
+
+
+def title_rank(title: str) -> int:
+    """Lower is a better person to write to."""
+    text = (title or "").lower()
+    tier = next((i for i, words in enumerate(_TITLE_TIERS)
+                 if any(w in text for w in words)), len(_TITLE_TIERS))
+    return tier * 2 + (1 if any(w in text for w in _SENIOR) else 0)
 
 
 def _call(actor: str, payload: dict, timeout: int = 300) -> list[dict]:
@@ -170,10 +199,15 @@ def find_recruiters(company: str, limit: int = 3) -> list[dict]:
         page = {"profileScraperMode": "Full + email search",
                 "currentCompanies": [max(votes, key=votes.get)]}
         items = search({**page, "maxItems": max(limit * 5, 15)})
-        # Right company, no addresses. American Express returned three genuine
-        # recruiters and not one contactable, which is the same dead end as
-        # finding nobody -- and the fix is the same: a bigger pool, once.
-        if sum(1 for it in items if _best_email(it)[0]) < limit:
+        # Three ways the first pass comes up short, all the same dead end: too
+        # few people we can write to, or nobody whose job is early careers. A
+        # pool of fifteen at a large employer is mostly whoever LinkedIn ranked
+        # highest, and the campus recruiter is often not in it -- Philips only
+        # turned one up on the second, wider pass.
+        reachable = [it for it in items if _best_email(it)[0]]
+        campus = [it for it in reachable
+                  if title_rank(it.get("headline") or "") <= 1]
+        if len(reachable) < limit or not campus:
             items = search({**page, "maxItems": max(limit * 15, 45)})
     else:
         # No page found: fall back to text, widening once if too little of the
@@ -208,9 +242,35 @@ def find_recruiters(company: str, limit: int = 3) -> list[dict]:
             "email_status": status,
             "employer": _employer(it),
         })
-    # Deliverable addresses first: three contacts is the whole budget for a
-    # company, and spending one on a catch-all guess is a wasted slot.
-    out.sort(key=lambda c: _RANK.get(c["email_status"], 9))
+    # Reachable first, then whose job it is, then how good the address is.
+    # Role fit alone put three American Express campus recruiters at the top
+    # with not one address between them -- a perfect target nobody can write
+    # to is worth less than a generic one who answers. Among the people we can
+    # actually reach, the campus recruiter still wins.
+    # A campus recruiter we found but cannot write to is the one gap worth
+    # paying to close -- but only when a colleague's real address has already
+    # told us the domain. Without that we would be guessing the domain as well
+    # as the local part, and a guess that lands wrong is a bounce against your
+    # own sending reputation.
+    domain = corporate_domain(out)
+    missing = [c for c in out
+               if not c["email"] and title_rank(c["title"]) <= 1][:limit]
+    if domain and missing:
+        try:
+            filled = find_emails([(c["full_name"], domain) for c in missing])
+            for c in missing:
+                addr = filled.get(c["full_name"])
+                if addr:
+                    c["email"] = addr
+                    # Never "verified" on the finder's say-so: at a catch-all
+                    # domain its validation check passes for anything.
+                    c["email_status"] = verify([addr]).get(addr, "unknown")
+        except Exception as exc:
+            print(f"  apify: email finder: {exc}")
+
+    out.sort(key=lambda c: (0 if c["email"] else 1,
+                            title_rank(c["title"]),
+                            _RANK.get(c["email_status"], 9)))
     return out[:limit]
 
 
@@ -279,3 +339,42 @@ def _status(item: dict) -> str:
     if item.get("isValid") is False:
         return "invalid"
     return "unknown"
+
+
+# ---- filling a gap --------------------------------------------------------
+
+def find_emails(people: list[tuple[str, str]]) -> dict[str, str]:
+    """[(full name, domain)] -> {full name: address}.
+
+    Only ever called with a domain taken from a colleague's real address at the
+    same company. The domain is never guessed: "aexp.com" or
+    "americanexpress.com" is a coin flip, and a coin flip that lands wrong is a
+    bounce against your own sending reputation.
+
+    Checked against two people whose addresses were already known, and it
+    returned both exactly. It also returned "rg@aexp.com" for a Reason Gomez,
+    marked valid -- two initials at a domain that accepts everything, which is
+    what "valid" means at a catch-all. So nothing here is trusted as verified;
+    `verify` decides that separately.
+    """
+    if not people:
+        return {}
+    items = _call(FINDER_ACTOR, {"names": [n for n, _ in people],
+                                 "domains": [d for _, d in people]})
+    out = {}
+    for it in items:
+        name = (it.get("Name") or it.get("name") or "").strip()
+        addr = (it.get("Email") or it.get("email") or "").strip().lower()
+        if name and addr and not is_personal(addr):
+            out[name] = addr
+    return out
+
+
+def corporate_domain(contacts: list[dict]) -> str:
+    """The company's mail domain, learned from an address we actually found."""
+    seen: dict[str, int] = {}
+    for c in contacts:
+        if c.get("email") and not is_personal(c["email"]):
+            d = c["email"].rsplit("@", 1)[-1]
+            seen[d] = seen.get(d, 0) + 1
+    return max(seen, key=seen.get) if seen else ""

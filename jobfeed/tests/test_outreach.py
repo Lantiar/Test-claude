@@ -1947,7 +1947,10 @@ def test_the_company_page_is_used_as_the_filter_when_one_can_be_found(monkeypatc
     def fake(actor, payload, timeout=300):
         calls.append(payload)
         if "currentCompanies" in payload:                 # the exact pass
-            return [{"firstName": f"R{i}", "lastName": "P", "headline": "Recruiter",
+            # Campus-level and contactable, so nothing triggers a widening --
+            # this test is about which filter was used, not about widening.
+            return [{"firstName": f"R{i}", "lastName": "P",
+                     "headline": "University Recruiter",
                      "linkedinUrl": "", "emails": [{"email": f"r{i}@philips.com",
                                                     "status": "good"}],
                      "currentPosition": [{"companyName": "Philips"}]}
@@ -2035,3 +2038,116 @@ def test_a_personal_mailbox_is_not_used():
         {"email": "someone@gmail.com", "status": "good"},
         {"email": "real.person@philips.com", "status": "good"}]})
     assert addr == "real.person@philips.com"
+
+
+# ---- who gets the note ----------------------------------------------------
+
+def test_campus_recruiters_rank_above_generic_ones():
+    """A campus recruiter owns the intern pipeline. A talent-acquisition
+    partner may never touch it, and a VP of Talent does not read cold mail
+    from students."""
+    rank = apify.title_rank
+    assert rank("University Recruiter") == 0
+    assert rank("Senior Recruiter | Early Careers") == 0
+    assert rank("Associate Campus Talent Acquisition Partner") == 0
+    assert rank("Head of Early Careers") == 1              # right job, senior
+    assert rank("Technical Recruiter") == 2
+    assert rank("Talent Acquisition Manager") == 4
+    assert rank("Vice President, Talent Acquisition") == 5
+    assert rank("Software Engineer") > 5
+
+    assert rank("University Recruiter") < rank("Technical Recruiter") \
+        < rank("Talent Acquisition Manager") < rank("Vice President, Talent Acquisition")
+
+
+def test_someone_reachable_outranks_a_better_target_nobody_can_write_to(monkeypatch):
+    """Ranking on role alone put three American Express campus recruiters at
+    the top with not one address between them. A perfect target nobody can
+    write to is worth less than a generic one who answers."""
+    people = [
+        {"firstName": "Campus", "lastName": "Person", "linkedinUrl": "",
+         "headline": "Early Careers Recruiter", "emails": [],
+         "currentPosition": [{"companyName": "Acme"}]},
+        {"firstName": "Generic", "lastName": "Person", "linkedinUrl": "",
+         "headline": "Talent Acquisition Manager",
+         "emails": [{"email": "generic@acme.com", "status": "good"}],
+         "currentPosition": [{"companyName": "Acme"}]},
+    ]
+    monkeypatch.setattr(apify, "_call", lambda a, p, timeout=300: (
+        [] if "currentCompanies" not in p and p.get("profileScraperMode") == "Full"
+        else people))
+    found = apify.find_recruiters("Acme", 2)
+    assert found[0]["email"] == "generic@acme.com"
+    assert found[1]["email"] is None
+
+    # But among people we can reach, the campus recruiter still wins.
+    people[0]["emails"] = [{"email": "campus@acme.com", "status": "good"}]
+    found = apify.find_recruiters("Acme", 2)
+    assert found[0]["email"] == "campus@acme.com"
+
+
+def test_no_campus_recruiter_in_the_pool_widens_it_once(monkeypatch):
+    """Fifteen results at a large employer is mostly whoever LinkedIn ranked
+    highest, and the campus recruiter is often not among them -- Philips only
+    turned one up on the second, wider pass."""
+    sizes = []
+
+    def fake(actor, payload, timeout=300):
+        if "currentCompanies" not in payload:
+            return [{"firstName": "S", "lastName": "O", "headline": "Recruiter",
+                     "currentPosition": [{"companyName": "Philips", "companyLinkedinUrl":
+                         "https://www.linkedin.com/company/philips/"}]}]
+        sizes.append(payload["maxItems"])
+        title = "Early Career Talent Partner" if len(sizes) > 1 else "Recruitment Partner"
+        return [{"firstName": f"R{i}", "lastName": "P", "headline": title,
+                 "linkedinUrl": "",
+                 "emails": [{"email": f"r{i}@philips.com", "status": "good"}],
+                 "currentPosition": [{"companyName": "Philips"}]} for i in range(4)]
+
+    monkeypatch.setattr(apify, "_call", fake)
+    found = apify.find_recruiters("Philips", 3)
+    assert len(sizes) == 2 and sizes[1] > sizes[0], sizes
+    assert apify.title_rank(found[0]["title"]) <= 1
+
+
+def test_a_gap_is_only_filled_when_the_domain_is_already_known(monkeypatch):
+    """Guessing the domain as well as the local part is two coin flips, and one
+    that lands wrong is a bounce against your own sending reputation. American
+    Express turned up three campus recruiters and no address at all, so there
+    was no domain to learn -- and nothing is invented for it."""
+    calls = []
+    monkeypatch.setattr(apify, "find_emails",
+                        lambda people: calls.append(people) or {})
+
+    people = [{"firstName": "Campus", "lastName": "One", "linkedinUrl": "",
+               "headline": "Early Careers Recruiter", "emails": [],
+               "currentPosition": [{"companyName": "Amex"}]}]
+    monkeypatch.setattr(apify, "_call", lambda a, p, timeout=300: (
+        [] if "currentCompanies" not in p and p.get("profileScraperMode") == "Full"
+        else people))
+    apify.find_recruiters("Amex", 3)
+    assert calls == [], "a domain was invented for a company with no known address"
+
+    # A colleague's real address teaches us the domain, so now it may ask.
+    people.append({"firstName": "Known", "lastName": "Two", "linkedinUrl": "",
+                   "headline": "Recruiter",
+                   "emails": [{"email": "known.two@acme.com", "status": "good"}],
+                   "currentPosition": [{"companyName": "Amex"}]})
+    monkeypatch.setattr(apify, "verify", lambda addrs: {a: "accept_all" for a in addrs})
+    monkeypatch.setattr(apify, "find_emails",
+                        lambda ppl: calls.append(ppl) or {"Campus One": "campus.one@acme.com"})
+    found = apify.find_recruiters("Amex", 3)
+    assert calls and calls[0] == [("Campus One", "acme.com")]
+    filled = next(c for c in found if c["full_name"] == "Campus One")
+    assert filled["email"] == "campus.one@acme.com"
+    # Never "verified" on the finder's say-so: at a catch-all domain its own
+    # validation passes for anything.
+    assert filled["email_status"] == "accept_all"
+
+
+def test_the_finder_never_returns_a_personal_mailbox(monkeypatch):
+    monkeypatch.setattr(apify, "_call", lambda a, p, timeout=300: [
+        {"Name": "A Person", "Email": "a.person@gmail.com", "Found": True},
+        {"Name": "B Person", "Email": "b.person@acme.com", "Found": True}])
+    got = apify.find_emails([("A Person", "acme.com"), ("B Person", "acme.com")])
+    assert got == {"B Person": "b.person@acme.com"}

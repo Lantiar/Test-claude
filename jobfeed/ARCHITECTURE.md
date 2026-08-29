@@ -185,6 +185,24 @@ uncontactable person to thirteen employees, ten with addresses.
 Two things widen the pool once more, because both are the same dead end: too
 few people at the company, or nobody with an address.
 
+Contacts are ranked **reachable first, then whose job it is, then how good the
+address is**. Role fit alone put three American Express campus recruiters at
+the top with not one address between them; a perfect target nobody can write to
+is worth less than a generic one who answers. Among people we can reach, the
+campus recruiter wins — `title_rank` puts university and early-careers titles
+above technical recruiters, above generic talent acquisition, and marks
+seniority *down*: a VP of Talent does not read cold mail from students.
+
+When a campus-level recruiter is found with no address, one dedicated
+email-finder call fills the gap — but **only when a colleague's real address
+has already taught us the company's mail domain**. Guessing the domain as well
+as the local part is two coin flips, and one that lands wrong is a bounce
+against your own sending reputation. Its answer is never trusted as verified
+either: checked against two people whose addresses were already known it
+returned both exactly, but it also returned `rg@aexp.com` marked "valid" —
+two initials at a domain that accepts everything, which is what valid means at
+a catch-all. `verify` decides that separately.
+
 A **personal mailbox is never used**. A recruiter's work address is a
 professional contact; their private Outlook is not, and a cold email there is
 visibly scraped whatever it says.
@@ -572,7 +590,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 122 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 127 tests, `python -m pytest jobfeed/tests -q`.
 
 `jobfeed/tests/e2e_demo.py` walks the whole pipeline on a simulated calendar
 against the **real feed**: one posting, three at one company on one day, a
