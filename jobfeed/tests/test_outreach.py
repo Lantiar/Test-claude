@@ -496,16 +496,26 @@ def test_the_ladder_only_drops_what_it_has_to():
     assert "Software Development Engineer Intern" in long, long
 
 
-def test_the_bracket_degrades_when_a_role_is_unset(monkeypatch):
-    """Empty halves must not leave "Ex-, Incoming " or an empty [] in the
-    subject of every mail."""
-    from jobfeed.outreach import profile
-    monkeypatch.setitem(profile.ME, "incoming", "")
-    assert profile.bracket() == "Prev Google"
-    monkeypatch.setitem(profile.ME, "prev", "")
-    assert profile.bracket() == ""
-    monkeypatch.setitem(profile.ME, "incoming", "Amazon")
-    assert profile.bracket() == "Incoming Amazon"
+def test_an_empty_bracket_leaves_no_empty_brackets(monkeypatch):
+    """Clearing it must drop the brackets with it, not send every subject out
+    starting "[] "."""
+    from jobfeed.outreach import profile, templates as t
+    monkeypatch.setattr(profile, "BRACKET", "")
+    monkeypatch.setattr(t, "bracket", lambda: "")
+    subject, _, _ = t.render({"id": 0, "first_name": "Dana"},
+                             {"company": "Acme", "role": "SWE Intern"})
+    assert not subject.startswith("["), subject
+    assert "[]" not in subject
+
+
+def test_the_bracket_is_one_setting(monkeypatch):
+    """Wording it is a judgement call about how you want to be read, so it is
+    a string to set rather than parts to compose."""
+    from jobfeed.outreach import profile, templates as t
+    monkeypatch.setattr(t, "bracket", lambda: "Prev Google/Zon")
+    subject, _, _ = t.render({"id": 0, "first_name": "Dana"},
+                             {"company": "Acme", "role": "SWE Intern"})
+    assert subject.startswith("[Prev Google/Zon] "), subject
 
 
 # ---- several applications at one company ----------------------------------

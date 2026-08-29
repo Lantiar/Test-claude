@@ -286,7 +286,7 @@ jobfeed outreach verify <email>… # probe addresses, no database writes
 | `APIFY_PEOPLE_ACTOR`, `APIFY_VERIFY_ACTOR` | Actor overrides — the store churns |
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Scopes: `gmail.send`, `gmail.readonly` |
 | `OUTREACH_FROM` | From address |
-| `OUTREACH_PREV`, `OUTREACH_INCOMING` | The subject-line bracket |
+| `OUTREACH_BRACKET` | The subject-line bracket, default `Prev Google/Zon` |
 | `JOBFEED_URL` | Feed to sync from |
 | `JOBFEED_MIN_MINUTES` | Minimum interval guard on the runner |
 
@@ -339,7 +339,7 @@ you add a source or an actor, probe it with a control first.
 
 ## Tests
 
-`jobfeed/tests/`, 64 tests, `python -m pytest jobfeed/tests -q`.
+`jobfeed/tests/`, 65 tests, `python -m pytest jobfeed/tests -q`.
 
 Fixtures in `jobfeed/tests/fixtures/` are captured live API responses.
 `people_probe.json` has had identities replaced — the shape is what the tests

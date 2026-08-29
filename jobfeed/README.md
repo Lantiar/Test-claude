@@ -262,6 +262,7 @@ will not do so without `--send`.
 `APIFY_TOKEN` for sourcing and verification; `GMAIL_CLIENT_ID`,
 `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` (scopes: `gmail.send` and
 `gmail.readonly`) for sending and reading. `OUTREACH_FROM` sets the From
-address, `OUTREACH_PREV` the employer named in the subject bracket.
+address, `OUTREACH_BRACKET` the subject-line bracket
+(default `Prev Google/Zon`).
 `APIFY_PEOPLE_ACTOR` and `APIFY_VERIFY_ACTOR` override the actors, since the
 Apify store churns.

@@ -22,34 +22,18 @@ ME = {
     "portfolio": "https://nideesh.ai",
     "linkedin": "https://linkedin.com/in/bknideesh",
     "github": "https://github.com/nb923",
-    # The names that open the subject line -- the only reason a recruiter
-    # opens the mail at all. Configurable rather than hardcoded, because which
-    # name lands hardest depends on who is reading.
-    "prev": os.getenv("OUTREACH_PREV", "Google"),
-    # A role that is signed but has not started. Kept separate from `prev`
-    # rather than folded into it: the Amazon internship is Fall 2026, so
-    # "Prev Amazon" in August is a claim a recruiter at Amazon can check
-    # against their own systems in one lookup, and finding it wrong costs more
-    # than the name was worth. "Incoming" is both accurate and the stronger
-    # read -- it says someone else already made this decision this cycle.
-    "incoming": os.getenv("OUTREACH_INCOMING", "Amazon"),
 }
+
+# The bracket that opens every subject line -- the only reason a recruiter
+# opens the mail at all, and the shortest way to say why this one is worth
+# opening. One setting rather than composed parts: the wording is a judgement
+# call about how you want to be read, not something to derive.
+BRACKET = os.getenv("OUTREACH_BRACKET", "Prev Google/Zon")
 
 
 def bracket() -> str:
-    """The subject-line prefix, e.g. "Ex-Google, Incoming Amazon".
+    return BRACKET.strip()
 
-    Composed rather than stored so that setting either half to empty gives a
-    sentence that still reads: with no incoming role it degrades to
-    "Prev Google", and with neither it disappears entirely rather than
-    leaving an empty pair of brackets in the subject.
-    """
-    prev, incoming = ME["prev"].strip(), ME["incoming"].strip()
-    if prev and incoming:
-        return f"Ex-{prev}, Incoming {incoming}"
-    if incoming:
-        return f"Incoming {incoming}"
-    return f"Prev {prev}" if prev else ""
 
 # Three achievements, ordered strongest first. Each is one line, each carries a
 # number, and each is verbatim from the resume rather than a paraphrase that

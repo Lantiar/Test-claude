@@ -38,33 +38,33 @@ from .profile import ME, WINS, bracket, signature
 # "application". Dropping a whole optional phrase loses less than cutting the
 # middle out of the one that matters.
 SUBJECTS = [
-    ["[{bracket}] {season_short_role} - applied, would love to connect",
-     "[{bracket}] {short_role} - applied, would love to connect",
-     "[{bracket}] {short_role} - applied",
-     "[{bracket}] {short_role}"],
-    ["[{bracket}] Rutgers '28 - {season_short_role} application",
-     "[{bracket}] Rutgers '28 - {short_role} application",
-     "[{bracket}] Rutgers '28 - {short_role}",
-     "[{bracket}] {short_role} - Rutgers '28"],
-    ["[{bracket}] {company} {season_short_role} - an applicant saying hello",
-     "[{bracket}] {company} {short_role} - hello from an applicant",
-     "[{bracket}] {company} {short_role} - hello",
-     "[{bracket}] {company} {short_role}"],
+    ["{prefix}{season_short_role} - applied, would love to connect",
+     "{prefix}{short_role} - applied, would love to connect",
+     "{prefix}{short_role} - applied",
+     "{prefix}{short_role}"],
+    ["{prefix}Rutgers '28 - {season_short_role} application",
+     "{prefix}Rutgers '28 - {short_role} application",
+     "{prefix}Rutgers '28 - {short_role}",
+     "{prefix}{short_role} - Rutgers '28"],
+    ["{prefix}{company} {season_short_role} - an applicant saying hello",
+     "{prefix}{company} {short_role} - hello from an applicant",
+     "{prefix}{company} {short_role} - hello",
+     "{prefix}{company} {short_role}"],
 ]
 
 # When one note covers several applications at the same company. Naming the
 # roles individually is what makes it read as a person who applied to three
 # things rather than a script that fired three times.
 MULTI_SUBJECTS = [
-    ["[{bracket}] {company} {season} intern applications - {n} roles",
-     "[{bracket}] {company} intern applications - {n} roles",
-     "[{bracket}] {company} intern applications"],
-    ["[{bracket}] Rutgers '28 - {n} {company} intern applications",
-     "[{bracket}] Rutgers '28 - {company} intern applications",
-     "[{bracket}] {company} intern applications"],
-    ["[{bracket}] {n} applications at {company} - a quick hello",
-     "[{bracket}] {company} applications - a quick hello",
-     "[{bracket}] {company} intern applications"],
+    ["{prefix}{company} {season} intern applications - {n} roles",
+     "{prefix}{company} intern applications - {n} roles",
+     "{prefix}{company} intern applications"],
+    ["{prefix}Rutgers '28 - {n} {company} intern applications",
+     "{prefix}Rutgers '28 - {company} intern applications",
+     "{prefix}{company} intern applications"],
+    ["{prefix}{n} applications at {company} - a quick hello",
+     "{prefix}{company} applications - a quick hello",
+     "{prefix}{company} intern applications"],
 ]
 
 # These open the note and are followed by the list of roles. Written to end on
@@ -230,7 +230,7 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
     elif len(carried) > 1:
         season = ""
     fields = {
-        "bracket": bracket(),
+        "prefix": f"[{bracket()}] " if bracket() else "",
         "company": job.get("company") or "your team",
         # The cleaned title, or a single-role note reads "Summer 2027 Software
         # Engineer Intern - Vehicle Software - Summer 2027".
