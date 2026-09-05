@@ -1,0 +1,1106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobfeed</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5f4f'/%3E%3Cpath d='M9 21V11h3v7h5v3H9z' fill='%23fff'/%3E%3C/svg%3E">
+<meta name="description" content="Internship postings from SimplifyJobs and Instagram stories, deduplicated and refreshed hourly.">
+<style>
+:root{
+  --bg:#fbfaf8; --panel:#fff; --line:#e6e2dc; --ink:#1c1a17; --dim:#6d675f;
+  --accent:#1f5f4f; --accent-soft:#e7f0ec;
+  --s-applied:#3b6ea5; --s-oa:#7a5ea8; --s-interview:#b06d1f;
+  --s-final:#a2531d; --s-offer:#1f7a4d; --s-accepted:#146b3a; --s-rejected:#8b3a3a;
+  --s-interested:#6d675f;
+  --t-s:#8a6212; --t-s-line:#e3d4ac; --t-s-bg:#faf3e2;
+  --t-a:#1f5f4f; --t-a-line:#bcd8ce; --t-a-bg:#eaf3ef;
+  --t-b:#5b6470; --t-b-line:#d7dbe0; --t-b-bg:#f1f3f5;
+}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+  --bg:#14140f; --panel:#1c1c17; --line:#2f2e28; --ink:#eeece6; --dim:#9a948a;
+  --accent:#6fbfa4; --accent-soft:#1d2f29;
+  --s-applied:#7aa7d8; --s-oa:#b39ae0; --s-interview:#e0a95e; --s-final:#e08f52;
+  --s-offer:#5fc48c; --s-accepted:#4fbd7d; --s-rejected:#e08585; --s-interested:#9a948a;
+  --t-s:#d8b263; --t-s-line:#4a3c1c; --t-s-bg:#2a2312;
+  --t-a:#6fbfa4; --t-a-line:#274038; --t-a-bg:#152520;
+  --t-b:#98a2ae; --t-b-line:#333a42; --t-b-bg:#1c2026;
+}}
+:root[data-theme="dark"]{
+  --bg:#14140f; --panel:#1c1c17; --line:#2f2e28; --ink:#eeece6; --dim:#9a948a;
+  --accent:#6fbfa4; --accent-soft:#1d2f29;
+  --s-applied:#7aa7d8; --s-oa:#b39ae0; --s-interview:#e0a95e; --s-final:#e08f52;
+  --s-offer:#5fc48c; --s-accepted:#4fbd7d; --s-rejected:#e08585; --s-interested:#9a948a;
+  --t-s:#d8b263; --t-s-line:#4a3c1c; --t-s-bg:#2a2312;
+  --t-a:#6fbfa4; --t-a-line:#274038; --t-a-bg:#152520;
+  --t-b:#98a2ae; --t-b-line:#333a42; --t-b-bg:#1c2026;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--bg);
+  border-bottom:1px solid var(--line);padding:14px 20px 10px}
+h1{margin:0 0 2px;font-size:17px;letter-spacing:-.01em}
+h1 span{color:var(--dim);font-weight:400}
+.meta{color:var(--dim);font-size:12.5px}
+.stale{color:#b06d1f;font-weight:600}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+/* A wrapper the phone layout needs and the desktop one must not feel: the
+   four selects go on laying themselves out as direct children of .bar. */
+.selects{display:contents}
+input[type=search],select{background:var(--panel);color:var(--ink);
+  border:1px solid var(--line);border-radius:7px;padding:6px 9px;font:inherit;font-size:13px}
+input[type=search]{min-width:230px}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.pills{display:flex;flex-wrap:wrap;gap:5px;margin-left:auto}
+.pill{border:1px solid var(--line);background:var(--panel);color:var(--dim);
+  border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer;font:inherit;font-size:12px}
+.pill[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.wrap{padding:0 20px 60px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--dim);font-weight:600;padding:12px 10px 7px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--bg)}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:hover td{background:var(--panel)}
+.date{white-space:nowrap;color:var(--dim);font-variant-numeric:tabular-nums;font-size:12.5px}
+.est{opacity:.65}
+.co{font-weight:600}
+a.title{color:var(--ink);text-decoration:none}
+a.title:hover{color:var(--accent);text-decoration:underline}
+.sub{color:var(--dim);font-size:12px;margin-top:2px}
+.tag{display:inline-block;border:1px solid var(--line);border-radius:4px;
+  padding:0 5px;font-size:10.5px;color:var(--dim);margin-right:4px}
+select.stage{min-width:108px;font-size:12.5px}
+select.stage[data-set="1"]{border-color:currentColor;font-weight:600}
+.s-interested{color:var(--s-interested)} .s-applied{color:var(--s-applied)}
+.s-oa{color:var(--s-oa)} .s-interview{color:var(--s-interview)}
+.s-final{color:var(--s-final)} .s-offer{color:var(--s-offer)}
+.s-accepted{color:var(--s-accepted)} .s-rejected{color:var(--s-rejected)}
+
+/* Outreach sits beside the stage, not inside it: a job is "applied" whether or
+   not you have written to anyone, and folding the two into one control would
+   lose the stage the moment outreach moved on. */
+/* The stage cell holds two controls. Laid out here rather than left to
+   inline-block: in a narrow column the button wrapped under the select with a
+   stray left margin, which is what made it look like it had fallen off. */
+td.stagecell{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.reach{display:inline-flex;align-items:center;gap:5px;
+  font-size:11.5px;font-family:inherit;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:5px;padding:4px 9px;
+  cursor:pointer;white-space:nowrap;line-height:1.3}
+.reach:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.reach:disabled{cursor:default}
+.reach:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* Green from the moment it is pressed: the click did something, and a colour
+   that only arrives once the runner has been round is a button that looks
+   broken for half an hour. Filled rather than outlined, so it still reads as
+   in-progress next to the solid green of a reply. */
+.reach.queued{color:var(--accent);border-color:var(--accent);
+  background:var(--accent-soft);font-weight:600}
+.reach.reached{color:var(--s-applied);border-color:var(--s-applied);font-weight:600}
+.reach.replied{color:var(--s-offer);border-color:var(--s-offer);font-weight:700}
+.reach.held,.reach.failed{color:var(--s-rejected);border-color:var(--s-rejected)}
+a.reach{text-decoration:none}
+
+.tier{display:inline-flex;align-items:center;justify-content:center;
+  width:17px;height:17px;border-radius:4px;font-size:10.5px;font-weight:700;
+  letter-spacing:0;margin-right:6px;vertical-align:1px;
+  border:1px solid;font-variant-numeric:normal}
+.tier-S{color:var(--t-s);border-color:var(--t-s-line);background:var(--t-s-bg)}
+.tier-A{color:var(--t-a);border-color:var(--t-a-line);background:var(--t-a-bg)}
+.tier-B{color:var(--t-b);border-color:var(--t-b-line);background:var(--t-b-bg)}
+.empty{padding:50px 10px;text-align:center;color:var(--dim)}
+
+/* ---- tabs ---- */
+.tabs{display:flex;gap:2px;margin:14px 0 0}
+.tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--dim);
+  font:inherit;font-size:13.5px;padding:7px 12px;cursor:pointer;border-radius:5px 5px 0 0}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink);font-weight:600;border-bottom-color:var(--s-applied)}
+.tab:focus-visible{outline:2px solid var(--s-applied);outline-offset:-2px}
+[hidden]{display:none!important}
+
+/* ---- outreach dashboard ---- */
+.tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));
+  padding:16px 20px 4px}
+.tile{border:1px solid var(--line);border-radius:7px;padding:10px 12px;background:var(--panel)}
+.tile b{display:block;font-size:21px;line-height:1.2;font-variant-numeric:tabular-nums}
+.tile span{font-size:11px;color:var(--dim);letter-spacing:.02em}
+.tile.warn b{color:var(--s-rejected)} .tile.good b{color:var(--s-offer)}
+.pill{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:20px;
+  border:1px solid currentColor;white-space:nowrap;font-weight:600}
+.p-draft,.p-queued{color:var(--s-oa)} .p-sent{color:var(--s-applied)}
+.p-replied{color:var(--s-offer)} .p-bounced,.p-held,.p-failed{color:var(--s-rejected)}
+.p-cancelled{color:var(--dim)}
+.act{background:none;border:1px solid var(--line);border-radius:5px;color:var(--dim);
+  font:inherit;font-size:11px;padding:2px 7px;cursor:pointer;margin-right:3px}
+.act:hover{color:var(--ink);border-color:var(--ink)}
+.act.danger:hover{color:var(--s-rejected);border-color:var(--s-rejected)}
+.act:focus-visible{outline:2px solid var(--s-applied);outline-offset:1px}
+td.who{max-width:230px}
+td.who .sub{font-size:11px}
+.locked{padding:40px 20px;color:var(--dim);font-size:13px;max-width:60ch}
+
+/* ---- settings ---- */
+details.settings{margin:14px 20px 0;border:1px solid var(--line);border-radius:8px;
+  background:var(--panel)}
+details.settings summary{cursor:pointer;padding:11px 14px;font-size:13px;
+  font-weight:600;list-style:none}
+details.settings summary::-webkit-details-marker{display:none}
+details.settings summary::before{content:"▸ ";color:var(--dim)}
+details.settings[open] summary::before{content:"▾ "}
+.settings .grid{display:grid;gap:12px;padding:4px 14px 16px;
+  grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.settings label{display:block;font-size:11px;color:var(--dim);
+  letter-spacing:.03em;text-transform:uppercase;margin-bottom:4px}
+.settings input[type=text],.settings input[type=url],.settings textarea{
+  font:inherit;font-size:13px;width:100%;background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+.settings textarea{min-height:56px;resize:vertical;line-height:1.45}
+.settings input:focus,.settings textarea:focus{outline:2px solid var(--s-applied);
+  outline-offset:-1px;border-color:var(--s-applied)}
+.settings .wide{grid-column:1/-1}
+.settings .win{display:grid;gap:6px;grid-template-columns:180px 1fr;align-items:start}
+.settings .foot{display:flex;gap:10px;align-items:center;padding:0 14px 14px}
+.settings .foot .sub{margin-right:auto}
+.settings button{font:inherit;font-size:12.5px;padding:6px 14px;border-radius:6px;
+  border:1px solid var(--s-applied);background:none;color:var(--s-applied);
+  font-weight:600;cursor:pointer}
+.settings .file{font-size:12px;color:var(--dim)}
+.settings .check{display:flex;gap:7px;align-items:center;font-size:12.5px;color:var(--ink);
+  text-transform:none;letter-spacing:0}
+
+/* ---- the editor ---- */
+dialog#editor{border:1px solid var(--line);border-radius:10px;background:var(--panel);
+  color:var(--ink);padding:0;width:min(760px,92vw);max-height:88vh}
+dialog#editor::backdrop{background:rgba(0,0,0,.45)}
+#editor form{display:flex;flex-direction:column;gap:10px;padding:18px 20px 16px}
+#editor h2{margin:0;font-size:15px;font-weight:600}
+#editor .to{font-size:12px;color:var(--dim)}
+#editor label{font-size:11px;color:var(--dim);letter-spacing:.03em;text-transform:uppercase}
+#editor input,#editor textarea{font:inherit;background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%}
+#editor textarea{min-height:340px;resize:vertical;line-height:1.5;font-size:13px}
+#editor input:focus,#editor textarea:focus{outline:2px solid var(--s-applied);
+  outline-offset:-1px;border-color:var(--s-applied)}
+#editor .row{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+#editor .row .sub{margin-right:auto}
+#editor button{font:inherit;font-size:12.5px;padding:6px 14px;border-radius:6px;
+  border:1px solid var(--line);background:none;color:var(--ink);cursor:pointer}
+#editor button[value="save"]{border-color:var(--s-applied);color:var(--s-applied);
+  font-weight:600}
+footer{padding:0 20px 40px;color:var(--dim);font-size:12px}
+
+/* ---- phones -------------------------------------------------------------
+   Both tabs are tables, and a five- or six-column table on a 380px screen is
+   either a horizontal scroll nobody finds or four columns crushed to nothing.
+   Below 760px each row becomes a card laid out on a grid, placed by the
+   column's name rather than its position: adding a column later cannot
+   silently reshuffle the phone layout the way an :nth-child rule would. */
+@media (max-width:760px){
+  /* Not sticky here. The bar, the pills and the tabs come to 220px, and a
+     quarter of the screen permanently spent on filters is worse than
+     scrolling up to reach them. */
+  header{position:static;padding:11px 14px 7px}
+  h1{font-size:16px}
+  /* The per-source health line is detail; the list needs the room more. */
+  #meta{display:none}
+  .bar{gap:6px;margin-top:8px}
+  input[type=search]{flex:1 1 100%;min-width:0}
+  /* Two by two, not a scrolling row: three filters parked off-screen with no
+     scrollbar look like three filters that do not exist. */
+  .selects{display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1 1 100%}
+  .selects select{width:100%;min-height:34px}
+  .pills{margin-left:0;flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:1px}
+  .pills::-webkit-scrollbar{display:none}
+  .pills .pill{flex:0 0 auto}
+  /* Search, the four filters and the stage pills all act on the job board.
+     On the outreach tab they do nothing, and on a phone that is 150px of dead
+     controls sitting above the thing you actually opened. */
+  body:has(#view-jobs[hidden]) .bar{display:none}
+  .tabs{margin-top:9px}
+  .tab{flex:1;padding:8px 6px;font-size:14px}
+
+  .wrap{padding:0 12px 44px;overflow-x:visible}
+  table,tbody,td{display:block;width:100%}
+  thead{display:none}
+  tr{border:1px solid var(--line);border-radius:9px;background:var(--panel);
+    padding:11px 13px;margin:9px 0}
+  tr:hover td{background:none}
+  td{border:none;padding:0;min-width:0}
+  td.who{max-width:none}
+
+  /* Job board card. The date sits with the company rather than on two lines
+     of its own -- a label over a bare date costs more room than it earns. */
+  #view-jobs tr{display:grid;gap:2px 10px;
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"co date" "role role" "where where" "stage stage"}
+  #view-jobs td[data-label="Company"]{grid-area:co;font-size:15px;font-weight:600}
+  #view-jobs td[data-label="Posted"],#view-jobs td[data-label="Added"]{
+    grid-area:date;text-align:right;align-self:start;padding-top:2px}
+  #view-jobs td[data-label="Role"]{grid-area:role}
+  #view-jobs td[data-label="Role"] a.title{font-size:14.5px;line-height:1.4}
+  #view-jobs td[data-label="Where"]{grid-area:where;margin-top:3px}
+  #view-jobs td[data-label="Stage"]{grid-area:stage;
+    margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+
+  /* Outreach card, same shape: who, then what, then when, then the controls. */
+  #view-reach tr{display:grid;gap:2px 10px;
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"co state" "who who" "roles roles" "when when" "do do"}
+  #view-reach td[data-label="Company"]{grid-area:co;font-size:15px;font-weight:600}
+  #view-reach td[data-label="State"]{grid-area:state;text-align:right;align-self:start}
+  #view-reach td[data-label="Recruiter"]{grid-area:who;margin-top:2px}
+  #view-reach td[data-label="Role(s)"]{grid-area:roles;margin-top:5px}
+  #view-reach td[data-label="When"]{grid-area:when;margin-top:5px}
+  #view-reach td[data-label="Do"]{grid-area:do;display:flex;flex-wrap:wrap;gap:6px;
+    margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+  /* "When" is the one value a card cannot explain by itself: sent, or due? */
+  #view-reach td[data-label="When"]::before{content:"When";display:block;
+    font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim)}
+
+  /* Thumbs, not a cursor: every control gets a 34px-plus target. */
+  .stagecell{gap:8px}
+  select.stage{flex:1 1 auto;min-width:0;min-height:36px;font-size:14px}
+  .reach{min-height:36px;padding:6px 13px;font-size:12.5px}
+  .act{min-height:34px;padding:5px 12px;font-size:12px;margin-right:0}
+
+  .tiles{padding:14px 12px 2px;gap:8px;
+    grid-template-columns:repeat(auto-fit,minmax(104px,1fr))}
+  .tile{padding:9px 11px}
+  .tile b{font-size:19px}
+  details.settings{margin:12px 12px 0}
+  .settings .grid{grid-template-columns:1fr;padding:4px 13px 14px}
+  .settings .win{grid-template-columns:1fr}
+  .settings .foot{flex-wrap:wrap}
+  .settings .foot .sub{flex:1 1 100%;margin-right:0}
+  .settings button{min-height:38px;padding:8px 18px}
+
+  dialog#editor{width:min(760px,94vw);max-height:92vh}
+  #editor form{padding:14px 15px 13px}
+  #editor textarea{min-height:180px}
+  #editor .row{flex-wrap:wrap}
+  #editor .row .sub{flex:1 1 100%;margin-right:0;margin-bottom:4px}
+  #editor button{min-height:38px;padding:8px 16px;flex:1 1 auto}
+  footer{padding:0 14px 32px}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>jobfeed <span id="count"></span></h1>
+  <div class="meta" id="age">loading…</div>
+  <div class="meta" id="meta"></div>
+  <div class="bar">
+    <input type="search" id="q" placeholder="company, title, location…" autocomplete="off">
+    <div class="selects">
+      <select id="season"><option value="">any season</option></select>
+      <select id="source"><option value="">any source</option></select>
+      <select id="tier"><option value="">any tier</option><option value="S">S-tier</option><option value="A">A-tier</option><option value="B">B-tier</option><option value="SAB">S, A or B</option></select>
+      <select id="sort">
+        <option value="posted">newest posted</option>
+        <option value="added">newest to the feed</option>
+        <option value="company">by company</option>
+      </select>
+    </div>
+    <div class="pills" id="pills"></div>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" id="tab-jobs" role="tab" aria-selected="true">Job board</button>
+    <button class="tab" id="tab-reach" role="tab" aria-selected="false">Outreach</button>
+  </div>
+</header>
+<div class="wrap" id="view-jobs">
+  <table>
+    <thead><tr>
+      <th style="width:96px" id="datehead">Posted</th><th style="width:170px">Company</th>
+      <th>Role</th><th style="width:164px">Where</th><th style="width:184px">Stage</th>
+    </tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+  <div class="empty" id="empty" hidden>Nothing matches those filters.</div>
+</div>
+<div id="view-reach" hidden>
+  <div class="tiles" id="reach-tiles"></div>
+  <details class="settings" id="settings" hidden>
+    <summary>What every email says about you</summary>
+    <div class="grid">
+      <div><label for="set-grad">Graduating</label>
+        <input type="text" id="set-grad" placeholder="May 2028"></div>
+      <div><label for="set-portfolio">Website</label>
+        <input type="url" id="set-portfolio" placeholder="https://nideesh.ai"></div>
+      <div><label for="set-linkedin">LinkedIn</label>
+        <input type="url" id="set-linkedin"></div>
+      <div><label for="set-gpa">GPA</label>
+        <input type="text" id="set-gpa" placeholder="4.0"></div>
+      <div class="wide"><label>The three things each email says you have done</label>
+        <div class="win"><input type="text" id="win-0-label" placeholder="Google SWE Intern">
+          <textarea id="win-0-text"></textarea></div>
+        <div class="win" style="margin-top:6px"><input type="text" id="win-1-label">
+          <textarea id="win-1-text"></textarea></div>
+        <div class="win" style="margin-top:6px"><input type="text" id="win-2-label">
+          <textarea id="win-2-text"></textarea></div>
+      </div>
+      <div class="wide"><label>Resume</label>
+        <label class="check"><input type="checkbox" id="set-attach">
+          Attach it to the first email of each thread</label>
+        <div style="margin-top:8px"><input type="file" id="set-resume" accept="application/pdf">
+          <span class="file" id="resume-now"></span></div>
+      </div>
+    </div>
+    <div class="foot">
+      <span class="sub">Applied to notes drafted from now on. Ones already written
+        keep their wording — edit those individually.</span>
+      <button id="save-settings">Save</button>
+    </div>
+  </details>
+  <div class="wrap">
+    <table>
+      <thead><tr>
+        <th style="width:150px">Company</th>
+        <th style="width:230px">Recruiter</th>
+        <th>Role(s)</th>
+        <th style="width:96px">State</th>
+        <th style="width:132px">When</th>
+        <th style="width:190px">Do</th>
+      </tr></thead>
+      <tbody id="reach-body"></tbody>
+    </table>
+    <div class="empty" id="reach-empty" hidden></div>
+  </div>
+</div>
+
+<dialog id="editor">
+  <form method="dialog">
+    <h2>Edit before it goes</h2>
+    <div class="to" id="edit-to"></div>
+    <div><label for="edit-subject">Subject</label>
+      <input id="edit-subject" maxlength="400" autocomplete="off"></div>
+    <div><label for="edit-body">Body</label>
+      <textarea id="edit-body" maxlength="20000" spellcheck="true"></textarea></div>
+    <div class="row">
+      <span class="sub">Saved as written — the copy editor will not touch it again.</span>
+      <button value="cancel">Cancel</button>
+      <button value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<footer>A <b>~</b> date is when this feed first saw the job, not when the employer
+posted it. <span id="mode">Checking where stages are saved…</span>
+The job data refreshes hourly.</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+let JOBS = [], STAGES = [], filter = {q:"", season:"", source:"", stage:"", tier:""};
+// key -> {state, at, note, thread, sent}. Written by the runner, read here.
+let REACH = {};
+let sortBy = "posted";
+
+// The published file already arrives newest-posted first, with first_seen and
+// then name breaking the ties, so "posted" needs no work. The others re-sort a
+// copy and keep the same tiebreaks, so a change of view never leaves two runs
+// disagreeing about the order of two jobs.
+function sorted(list){
+  const byName = (a,b) => (a.company||"").localeCompare(b.company||"")
+                       || (a.title||"").localeCompare(b.title||"");
+  // To the minute, for the same reason the published order is: below that,
+  // first_seen records which row an ingest wrote first, which says nothing
+  // about the job.
+  if(sortBy === "added")
+    return [...list].sort((a,b) =>
+      Math.floor((b.first_seen_epoch||0)/60) - Math.floor((a.first_seen_epoch||0)/60)
+      || byName(a,b));
+  if(sortBy === "company")
+    return [...list].sort((a,b) => byName(a,b) || (b.posted_at||0) - (a.posted_at||0));
+  return list;
+}
+
+const fmt = ts => ts ? new Date(ts*1000).toISOString().slice(0,10) : "—";
+
+const STAGE_KEY = "jobfeed.stages.v1";
+const PASS_KEY = "jobfeed.pass.v1";
+// Central when there is an API beside this page, local when there is not.
+// The same file is served from GitHub Pages, which has no write path at all,
+// so absence is an expected state rather than a failure -- and the footer says
+// which mode is in force, because a tracker that silently keeps your stages
+// somewhere other than you think is worse than one that cannot keep them.
+let CENTRAL = false;
+// Stages live in this browser and nowhere else. The data beside them is
+// public -- anyone with the URL reads the same jobs.json -- and where someone
+// has applied is not. It never goes over the wire, which also means it does
+// not follow them to another device; the local viewer, backed by the
+// database, is the one that does.
+function localStages(){
+  try { return JSON.parse(localStorage.getItem(STAGE_KEY) || "{}"); }
+  catch(e){ return {}; }        // private window, cleared storage, blocked
+}
+function saveLocal(key, stage){
+  try {
+    const all = localStages();
+    if(stage) all[key] = stage; else delete all[key];
+    localStorage.setItem(STAGE_KEY, JSON.stringify(all));
+    return true;
+  } catch(e){ return false; }
+}
+
+function passphrase(){
+  try { return localStorage.getItem(PASS_KEY) || ""; } catch(e){ return ""; }
+}
+function rememberPassphrase(p){
+  try { localStorage.setItem(PASS_KEY, p); } catch(e){}
+}
+
+// Returns "" on success, or a sentence explaining what stopped it.
+async function saveStage(key, stage){
+  if(!CENTRAL){
+    return saveLocal(key, stage) ? ""
+      : "This browser will not let the page store anything, so the stage "
+      + "cannot be kept. Private windows and blocked site data do this.";
+  }
+  let pass = passphrase();
+  if(!pass){
+    pass = window.prompt("Passphrase for saving stages:") || "";
+    if(!pass) return "No passphrase given, so nothing was saved.";
+    rememberPassphrase(pass);
+  }
+  let r;
+  try {
+    r = await fetch("./api/stages", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({key, stage, passphrase: pass})});
+  } catch(e){
+    return "Could not reach the store, so the stage was not saved.";
+  }
+  if(r.status === 401){
+    try { localStorage.removeItem(PASS_KEY); } catch(e){}
+    return "That passphrase was not right. Try the change again.";
+  }
+  if(!r.ok){
+    const d = await r.json().catch(() => ({}));
+    return d.detail || d.error || `The store refused that (${r.status}).`;
+  }
+  saveLocal(key, stage);      // a local echo, so a reload is instant offline
+  return "";
+}
+
+// A run can finish minutes after the click, and a tracker that only updates on
+// reload is one you learn not to trust.
+async function pollOutreach(){
+  if(!CENTRAL) return;
+  try {
+    const r = await fetch("./api/outreach", {cache:"no-store"});
+    if(!r.ok) return;
+    const next = (await r.json()).outreach || {};
+    if(JSON.stringify(next) !== JSON.stringify(REACH)){ REACH = next; render(); }
+  } catch(e){}
+}
+setInterval(pollOutreach, 60000);
+// The dashboard is a report on work happening elsewhere, so it has to refresh
+// itself or it is a snapshot of whenever the tab was opened.
+setInterval(async () => {
+  if($("#view-reach") && !$("#view-reach").hidden && DETAIL && DETAIL !== "locked"){
+    await loadDetail(); renderReach();
+  }
+}, 60000);
+
+// ---- outreach dashboard ---------------------------------------------------
+//
+// Fed by the same store the runner writes: contacts, drafts, send times,
+// replies. Behind the passphrase, because it names real recruiters and their
+// addresses and this page sits on a public URL beside a public job feed.
+let DETAIL = null, PENDING = [], SETTINGS = {};
+
+async function loadDetail(){
+  if(!CENTRAL) return;
+  const pass = passphrase();
+  if(!pass){ DETAIL = "locked"; return; }
+  try {
+    const r = await fetch("./api/outreach?detail=1",
+      {cache:"no-store", headers:{"x-passphrase": pass}});
+    if(r.status === 401){ DETAIL = "locked"; return; }
+    if(!r.ok){ DETAIL = "error"; return; }
+    const d = await r.json();
+    DETAIL = d.state || {};
+    PENDING = d.pending || [];
+    SETTINGS = d.settings || {};
+  } catch(e){ DETAIL = "error"; }
+}
+
+const jobTitle = k => (JOBS.find(j => j.key === k) || {}).title || k;
+const when = ts => {
+  if(!ts) return "—";
+  const d = new Date(ts*1000), now = Date.now()/1000;
+  const day = d.toLocaleDateString(undefined, {weekday:"short", day:"numeric", month:"short"});
+  const time = d.toLocaleTimeString(undefined, {hour:"2-digit", minute:"2-digit"});
+  return `${day} ${time}${ts > now ? "" : ""}`;
+};
+
+// What a row is doing, in one word, derived rather than stored: a row is
+// "replied" because a reply exists against it, not because something once
+// wrote that down.
+function rowState(o, replies){
+  if(o.status === "sent" && replies.some(r => r.email === o.email && r.kind === "human"))
+    return "replied";
+  return o.status || "draft";
+}
+
+// The facts a cold email states about you go stale -- a graduation date moves,
+// a portfolio moves, and the three things worth saying change every few
+// months. Editing these in the repository would mean a commit and a deploy to
+// change one sentence of a letter.
+const WIN_PLACEHOLDER = [
+  ["Google SWE Intern", "built the context engine for Gemini Enterprise's orchestration layer…"],
+  ["J&J SWE Intern", "shipped Databricks/Postgres pipelines over petabyte-scale data…"],
+  ["Rutgers IFH", "built ML infrastructure processing 500M+ healthcare records…"],
+];
+
+function fillSettings(){
+  const box = $("#settings");
+  box.hidden = false;
+  const s = SETTINGS || {};
+  $("#set-grad").value = s.grad || "";
+  $("#set-portfolio").value = s.portfolio || "";
+  $("#set-linkedin").value = s.linkedin || "";
+  $("#set-gpa").value = s.gpa || "";
+  $("#set-attach").checked = s.attach_resume !== false;
+  const wins = Array.isArray(s.wins) ? s.wins : [];
+  for(let i = 0; i < 3; i++){
+    $(`#win-${i}-label`).value = (wins[i] && wins[i][0]) || "";
+    $(`#win-${i}-text`).value = (wins[i] && wins[i][1]) || "";
+    $(`#win-${i}-label`).placeholder = WIN_PLACEHOLDER[i][0];
+    $(`#win-${i}-text`).placeholder = WIN_PLACEHOLDER[i][1];
+  }
+  // Blank means "whatever the repository defaults are", which is a real and
+  // useful state -- so the field says so rather than pretending it is unset.
+  $("#resume-now").textContent = s.resume_name
+    ? `currently ${s.resume_name}` : "using the one in the repository";
+}
+
+$("#save-settings").addEventListener("click", async () => {
+  let pass = passphrase();
+  if(!pass){
+    pass = window.prompt("Passphrase:") || "";
+    if(!pass) return;
+    rememberPassphrase(pass);
+  }
+  const wins = [0,1,2]
+    .map(i => [$(`#win-${i}-label`).value.trim(), $(`#win-${i}-text`).value.trim()])
+    .filter(w => w[0] && w[1]);
+  const settings = {
+    grad: $("#set-grad").value.trim(),
+    portfolio: $("#set-portfolio").value.trim(),
+    linkedin: $("#set-linkedin").value.trim(),
+    gpa: $("#set-gpa").value.trim(),
+    attach_resume: $("#set-attach").checked,
+  };
+  if(wins.length) settings.wins = wins;
+
+  const file = $("#set-resume").files[0];
+  const btn = $("#save-settings");
+  btn.disabled = true; btn.textContent = "saving…";
+  try {
+    if(file){
+      if(file.size > 1000000) throw new Error("that PDF is larger than 1MB");
+      const data = await new Promise((ok, bad) => {
+        const fr = new FileReader();
+        fr.onload = () => ok(String(fr.result).split(",")[1] || "");
+        fr.onerror = () => bad(new Error("could not read that file"));
+        fr.readAsDataURL(file);
+      });
+      const up = await fetch("./api/outreach", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({resume:{name:file.name, data}, passphrase: pass})});
+      if(!up.ok){
+        const d = await up.json().catch(() => ({}));
+        throw new Error(d.error || `the store refused the PDF (${up.status})`);
+      }
+      settings.resume_name = file.name;
+    }
+    const r = await fetch("./api/outreach", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({settings, passphrase: pass})});
+    if(r.status === 401){
+      try { localStorage.removeItem(PASS_KEY); } catch(e){}
+      throw new Error("that passphrase was not right");
+    }
+    if(!r.ok){
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || `refused (${r.status})`);
+    }
+    SETTINGS = (await r.json()).saved || settings;
+    $("#set-resume").value = "";
+    fillSettings();
+    btn.textContent = "saved";
+    setTimeout(() => { btn.textContent = "Save"; btn.disabled = false; }, 1400);
+  } catch(err){
+    btn.textContent = "Save"; btn.disabled = false;
+    alert(err.message || "Nothing was saved.");
+  }
+});
+
+function renderReach(){
+  const tiles = $("#reach-tiles"), body = $("#reach-body"), none = $("#reach-empty");
+  if(DETAIL === "locked" || DETAIL === "error" || !CENTRAL){
+    $("#settings").hidden = true;
+    tiles.innerHTML = "";
+    body.innerHTML = "";
+    none.hidden = false;
+    none.innerHTML = !CENTRAL
+      ? "This copy has no store behind it, so there is no outreach to show. The hosted page does."
+      : DETAIL === "locked"
+        ? "Enter the passphrase to see outreach. It names real recruiters and their addresses, so it is not public."
+        : "The store could not be read.";
+    return;
+  }
+  fillSettings();
+  const rows = (DETAIL.outreach || []), contacts = DETAIL.contacts || [];
+  const replies = DETAIL.replies || [];
+  const byEmail = Object.fromEntries(contacts.map(c => [c.email, c]));
+
+  const now = Date.now()/1000, week = now - 7*86400;
+  const sent = rows.filter(r => r.sent_at);
+  const bounced = replies.filter(r => r.kind === "bounce");
+  const answered = replies.filter(r => r.kind === "human");
+  const recent = sent.filter(r => r.sent_at > week);
+  const rate = recent.length ? (bounced.filter(b => b.received_at > week).length
+                               / recent.length) : 0;
+  tiles.innerHTML = [
+    ["queued", rows.filter(r => ["draft","queued"].includes(r.status)).length, ""],
+    ["sent, 7 days", recent.length, ""],
+    ["sent, all", sent.length, ""],
+    ["replies", answered.length, answered.length ? "good" : ""],
+    ["bounces", bounced.length, bounced.length ? "warn" : ""],
+    ["bounce rate", (rate*100).toFixed(1) + "%", rate > 0.02 ? "warn" : ""],
+    ["people", contacts.length, ""],
+  ].map(([label, value, cls]) =>
+    `<div class="tile ${cls}"><b>${esc(String(value))}</b><span>${label}</span></div>`).join("");
+
+  const order = {queued:0, draft:1, held:2, failed:2, sent:3, replied:4,
+                 bounced:5, cancelled:6};
+  const list = [...rows].sort((a,b) =>
+    (order[rowState(a,replies)] ?? 9) - (order[rowState(b,replies)] ?? 9)
+    || (a.send_after||a.sent_at||0) - (b.send_after||b.sent_at||0));
+
+  // Jobs asked for that produced no draft -- no recruiter found, nobody with
+  // an address, a run that failed. Rendered from the per-job records, because
+  // the state blob only holds emails that exist: without this, exactly the
+  // cases worth seeing are the ones the dashboard says nothing about, and the
+  // tab reads as empty when something has in fact gone wrong.
+  const drafted = new Set(rows.flatMap(o => (o.covers && o.covers.length ? o.covers : [o.job_key])));
+  const stuck = Object.entries(REACH)
+    .filter(([key, r]) => !drafted.has(key) && ["queued","held","failed"].includes(r.state))
+    .map(([key, r]) => ({key, ...r}));
+
+  none.hidden = list.length + stuck.length > 0;
+  if(!list.length && !stuck.length)
+    none.textContent = "Nothing yet. Press ▶ on an applied job to start.";
+
+  const stuckRows = stuck.map(s => {
+    const job = JOBS.find(j => j.key === s.key) || {};
+    const label = s.state === "queued" ? "waiting for the next run"
+                : s.state === "held" ? "nothing to send" : "the run failed";
+    return `<tr>
+      <td data-label="Company">${esc(job.company || "—")}</td>
+      <td data-label="Recruiter" class="who"><span class="sub">no recruiter to write to</span></td>
+      <td data-label="Role(s)" class="sub">${esc(job.title || s.key)}
+        ${s.note ? `<div class="sub">${esc(s.note)}</div>` : ""}</td>
+      <td data-label="State"><span class="pill p-${esc(s.state)}">${esc(s.state)}</span></td>
+      <td data-label="When" class="sub">${esc(when(s.at))}</td>
+      <td data-label="Do"><span class="sub">${esc(label)}</span></td>
+    </tr>`;
+  }).join("");
+
+  body.innerHTML = stuckRows + list.map(o => {
+    const c = byEmail[o.email] || {};
+    const st = rowState(o, replies);
+    const roles = (o.covers && o.covers.length ? o.covers : [o.job_key]).map(jobTitle);
+    const inflight = ["draft","queued","held","failed"].includes(o.status);
+    const busy = PENDING.some(p => p.email === o.email);
+    const ts = o.sent_at || o.send_after;
+    return `<tr>
+      <td data-label="Company">${esc(c.company || "—")}</td>
+      <td data-label="Recruiter" class="who">${esc(c.full_name || o.email)}
+        <div class="sub">${esc(o.email)}${c.email_status
+          ? ` · <span class="pill p-${esc(c.email_status)}">${esc(c.email_status)}</span>` : ""}</div></td>
+      <td data-label="Role(s)" class="sub">${roles.map(t => esc(t)).join("<br>")}${
+        o.step ? `<div class="sub">follow-up ${o.step}</div>` : ""}</td>
+      <td data-label="State"><span class="pill p-${esc(st)}">${esc(st)}</span></td>
+      <td data-label="When" class="sub">${esc(when(ts))}</td>
+      <td data-label="Do">${busy ? '<span class="sub">applying…</span>' : (inflight ? `
+        <button class="act" data-edit="${esc(o.email)}" data-step="${o.step||0}">edit</button>
+        <button class="act" data-do="send_now" data-email="${esc(o.email)}" data-step="${o.step||0}">send now</button>
+        <button class="act" data-do="reschedule" data-email="${esc(o.email)}" data-step="${o.step||0}">move</button>
+        <button class="act danger" data-do="cancel" data-email="${esc(o.email)}" data-step="${o.step||0}">cancel</button>`
+        : (o.status === "cancelled" ? `
+        <button class="act" data-do="retry" data-email="${esc(o.email)}" data-step="${o.step||0}">restore</button>` : (
+        o.thread_id ? `<a class="act" target="_blank" rel="noopener"
+          href="https://mail.google.com/mail/u/0/#all/${esc(o.thread_id)}">thread ↗</a>` : "")))}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function load(){
+  let jobs, meta;
+  try {
+    [jobs, meta] = await Promise.all([
+      fetch("./jobs.json", {cache:"no-store"}).then(r => r.json()),
+      fetch("./meta.json", {cache:"no-store"}).then(r => r.json()),
+    ]);
+  } catch(e){
+    document.querySelector("#meta").innerHTML =
+      '<span class="stale">Could not load the feed.</span> ' +
+      'It publishes to jobs.json beside this page.';
+    return;
+  }
+  // The central store if this deployment has one, otherwise this browser's.
+  let mine = localStages();
+  try {
+    try {
+      const o = await fetch("./api/outreach", {cache:"no-store"});
+      if(o.ok) REACH = (await o.json()).outreach || {};
+    } catch(e){ REACH = {}; }        // no endpoint on GitHub Pages; fine
+    const r = await fetch("./api/stages", {cache:"no-store"});
+    if(r.ok){
+      const d = await r.json();
+      CENTRAL = true;
+      mine = d.stages || {};
+    }
+  } catch(e){ /* no API here: GitHub Pages serves the page and no functions */ }
+  setMode();
+  JOBS = jobs.map(j => ({...j,
+    key: j.ats_key || j.url_key || j.url,
+    posted_at: j.posted_at_epoch,
+    stage: mine[j.ats_key || j.url_key || j.url] || "",
+    locations: j.locations || [], sources: j.sources || []}));
+  STAGES = ["interested","applied","oa","interview","final","offer",
+            "accepted","rejected"];
+  showAge(meta);
+  buildControls({counts: countStages()});
+  render();
+}
+
+function job_previous(key){
+  const j = JOBS.find(x => x.key === key);
+  return j ? (j.stage || "") : "";
+}
+
+function setMode(){
+  const el = document.querySelector("#mode");
+  if(!el) return;
+  el.textContent = CENTRAL
+    ? "Stages are saved centrally — the same on every device."
+    : "Stages are kept in this browser only; this copy has no central store.";
+}
+
+function countStages(){
+  const c = {};
+  for(const j of JOBS) if(j.stage) c[j.stage] = (c[j.stage]||0) + 1;
+  return c;
+}
+
+// How old the data is, said plainly. Stories expire after 24 hours, so a
+// stalled feed is losing links rather than merely going out of date, and a
+// page that quietly shows yesterday's list is worse than one that admits it.
+function showAge(meta){
+  const mins = (Date.now()/1000 - meta.generated_at_epoch) / 60;
+  const when = mins < 90 ? Math.round(mins) + " min ago"
+             : Math.round(mins/60) + " h ago";
+  const stale = mins > 150;
+  document.querySelector("#age").innerHTML =
+    (stale ? '<span class="stale">updated ' + when + '</span>'
+           : "updated " + when) +
+    " · " + meta.counts.open_jobs.toLocaleString() + " open";
+}
+
+function buildControls(d){
+  const seasons = [...new Set(JOBS.map(j=>j.season).filter(Boolean))].sort();
+  $("#season").innerHTML = '<option value="">any season</option>' +
+    seasons.map(s=>`<option>${s}</option>`).join("");
+  const srcs = [...new Set(JOBS.flatMap(j=>j.sources))].sort();
+  $("#source").innerHTML = '<option value="">any source</option>' +
+    srcs.map(s=>`<option>${s}</option>`).join("");
+  $("#pills").innerHTML = ["", ...STAGES].map(s =>
+    `<button class="pill" data-stage="${s}" aria-pressed="${s===filter.stage}">
+       ${s || "all"}${d.counts[s] ? " " + d.counts[s] : ""}</button>`).join("");
+  $("#pills").onclick = e => {
+    const b = e.target.closest(".pill"); if(!b) return;
+    filter.stage = b.dataset.stage; 
+    [...$("#pills").children].forEach(p =>
+      p.setAttribute("aria-pressed", p.dataset.stage === filter.stage));
+    render();
+  };
+}
+
+function matches(j){
+  if(filter.season && j.season !== filter.season) return false;
+  if(filter.source && !j.sources.includes(filter.source)) return false;
+  if(filter.tier === "SAB"){ if(!j.tier) return false; }
+  else if(filter.tier && j.tier !== filter.tier) return false;
+  if(filter.stage && j.stage !== filter.stage) return false;
+  if(filter.q){
+    const hay = (j.company+" "+j.title+" "+j.locations.join(" ")).toLowerCase();
+    if(!filter.q.toLowerCase().split(/\s+/).every(w => hay.includes(w))) return false;
+  }
+  return true;
+}
+
+function render(){
+  const shown = sorted(JOBS.filter(matches));
+  $("#count").textContent = `${shown.length.toLocaleString()} of ${JOBS.length.toLocaleString()}`;
+  const tracked = JOBS.filter(j=>j.stage).length;
+  $("#meta").innerHTML = `${tracked} tracked · ${JOBS.length.toLocaleString()} open postings`;
+  $("#empty").hidden = shown.length > 0;
+  $("#datehead").textContent = sortBy === "added" ? "Added" : "Posted";
+  $("#body").innerHTML = shown.slice(0, 600).map(j => `
+    <tr>
+      <td data-label="${sortBy==="added" ? "Added" : "Posted"}" class="date ${sortBy!=="added" && j.posted_is_estimate ? "est" : ""}" title="${
+        sortBy==="added" ? "posted " + (j.posted_is_estimate?"~":"") + fmt(j.posted_at)
+                         : "reached the feed " + fmt(j.first_seen_epoch)}">${
+        sortBy==="added" ? fmt(j.first_seen_epoch)
+                         : (j.posted_is_estimate ? "~" : "") + fmt(j.posted_at)}</td>
+      <td data-label="Company" class="co">${j.tier ? `<span class="tier tier-${j.tier}" title="${j.tier}-tier">${j.tier}</span>` : ""}${esc(j.company)}</td>
+      <td data-label="Role">
+        <a class="title" href="${esc(j.url||"#")}" target="_blank" rel="noopener">${esc(j.title)}</a>
+        <div class="sub">${j.season ? `<span class="tag">${esc(j.season)}</span>` : ""}
+          ${j.ats ? `<span class="tag">${esc(j.ats)}</span>` : ""}
+          ${j.sources.map(s=>`<span class="tag">${esc(s)}</span>`).join("")}</div>
+      </td>
+      <td data-label="Where" class="sub">${esc(j.locations.join(", ") || "—")}</td>
+      <td data-label="Stage" class="stagecell"><select class="stage s-${j.stage||"interested"}" data-set="${j.stage?1:0}" data-key="${esc(j.key)}">
+        <option value="">—</option>
+        ${STAGES.map(s=>`<option value="${s}" ${s===j.stage?"selected":""}>${s}</option>`).join("")}
+      </select>${reachControl(j)}</td>
+    </tr>`).join("");
+  if(shown.length > 600)
+    $("#body").insertAdjacentHTML("beforeend",
+      `<tr><td colspan="5" class="sub" style="padding:14px 10px">
+        Showing the first 600. Narrow the filters to see the rest.</td></tr>`);
+}
+
+// Only for jobs you have actually applied to: the mail says you applied, so
+// offering it before that is offering to send something untrue.
+const REACHABLE = ["applied","oa","interview","final","offer","accepted"];
+
+function reachControl(j){
+  if(!CENTRAL || !REACHABLE.includes(j.stage||"")) return "";
+  const r = REACH[j.key] || {};
+  const title = esc(r.note || "");
+  if(r.state === "replied")
+    return r.thread
+      ? `<a class="reach replied" target="_blank" rel="noopener" title="${title}"
+            href="https://mail.google.com/mail/u/0/#all/${esc(r.thread)}">replied ↗</a>`
+      : `<span class="reach replied" title="${title}">replied</span>`;
+  if(r.state === "reached")
+    return r.thread
+      ? `<a class="reach reached" target="_blank" rel="noopener"
+            title="${title || "opens the thread in Gmail"}"
+            href="https://mail.google.com/mail/u/0/#all/${esc(r.thread)}">reached out ↗</a>`
+      : `<span class="reach reached" title="${title}">reached out</span>`;
+  if(r.state === "queued")
+    return `<button class="reach queued" disabled title="waiting for the next run">queued…</button>`;
+  if(r.state === "held" || r.state === "failed")
+    return `<button class="reach ${r.state}" data-reach="${esc(j.key)}"
+              title="${title || "it did not go; press to ask again"}">${r.state} ↻</button>`;
+  return `<button class="reach" data-reach="${esc(j.key)}"
+            title="write to recruiters at ${esc(j.company)}">▶ reach out</button>`;
+}
+
+function esc(s){ return String(s??"").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+// ---- tabs ----
+function showTab(which){
+  const reach = which === "reach";
+  $("#view-jobs").hidden = reach;
+  $("#view-reach").hidden = !reach;
+  $("#tab-jobs").setAttribute("aria-selected", String(!reach));
+  $("#tab-reach").setAttribute("aria-selected", String(reach));
+  try { localStorage.setItem("jobfeed.tab.v1", which); } catch(e){}
+  if(reach){
+    if(DETAIL === null) loadDetail().then(renderReach); else renderReach();
+  }
+}
+$("#tab-jobs").addEventListener("click", () => showTab("jobs"));
+$("#tab-reach").addEventListener("click", () => showTab("reach"));
+try {
+  if(localStorage.getItem("jobfeed.tab.v1") === "reach") showTab("reach");
+} catch(e){}
+
+// ---- dashboard controls ----
+//
+// Every one of these is a request the runner carries out on its next pass, not
+// an edit made here: the database they act on lives on the runner and is
+// rebuilt from the store each time, so a page writing to it directly would be
+// writing somewhere that no longer exists by the time it matters.
+// ---- editing a note before it goes ----
+//
+// The pipeline drafts it; the last word is the sender's. A hand-written note
+// is marked polished on the runner so the copy editor leaves it alone -- its
+// job is tidying generated text, and "improving" this would undo the edit on
+// the next pass.
+document.addEventListener("click", e => {
+  const btn = e.target.closest("button.act[data-edit]"); if(!btn) return;
+  const email = btn.dataset.edit, step = Number(btn.dataset.step || 0);
+  const rows = (DETAIL && DETAIL.outreach) || [];
+  const row = rows.find(o => o.email === email && (o.step||0) === step);
+  if(!row) return;
+  const who = ((DETAIL.contacts || []).find(c => c.email === email) || {});
+  $("#edit-to").textContent =
+    `To ${who.full_name || email} <${email}>` + (step ? ` · follow-up ${step}` : "");
+  $("#edit-subject").value = row.subject || "";
+  $("#edit-body").value = row.body || "";
+  const dlg = $("#editor");
+  dlg.dataset.email = email; dlg.dataset.step = String(step);
+  dlg.showModal();
+});
+
+$("#editor").addEventListener("close", async () => {
+  const dlg = $("#editor");
+  if(dlg.returnValue !== "save") return;
+  const email = dlg.dataset.email, step = Number(dlg.dataset.step || 0);
+  const subject = $("#edit-subject").value.trim(), body = $("#edit-body").value;
+  if(!subject || !body.trim()) return alert("A subject and a body are both needed.");
+  let pass = passphrase();
+  if(!pass){
+    pass = window.prompt("Passphrase:") || "";
+    if(!pass) return;
+    rememberPassphrase(pass);
+  }
+  let r;
+  try {
+    r = await fetch("./api/outreach", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({action:"edit", email, step, subject, body, passphrase: pass})});
+  } catch(err){ return alert("Could not reach the store, so nothing was changed."); }
+  if(r.status === 401){
+    try { localStorage.removeItem(PASS_KEY); } catch(err){}
+    return alert("That passphrase was not right.");
+  }
+  if(!r.ok){
+    const d = await r.json().catch(() => ({}));
+    return alert(d.detail || d.error || `Refused (${r.status}).`);
+  }
+  PENDING.push({action:"edit", email, step});
+  renderReach();
+});
+
+document.addEventListener("click", async e => {
+  const act = e.target.closest("button.act[data-do]"); if(!act) return;
+  const action = act.dataset.do, email = act.dataset.email;
+  const step = Number(act.dataset.step || 0);
+  let pass = passphrase();
+  if(!pass){
+    pass = window.prompt("Passphrase:") || "";
+    if(!pass) return;
+    rememberPassphrase(pass);
+  }
+  const body = {action, email, step, passphrase: pass};
+
+  if(action === "reschedule"){
+    const now = new Date(Date.now() + 86400000);
+    const guess = new Date(now.getTime() - now.getTimezoneOffset()*60000)
+      .toISOString().slice(0,16);
+    const said = window.prompt("Send when? (YYYY-MM-DDTHH:MM, your local time)", guess);
+    if(!said) return;
+    const at = new Date(said);
+    if(isNaN(at.getTime())) return alert("That date could not be read.");
+    if(at.getTime() < Date.now()) return alert("That is in the past.");
+    body.when = Math.floor(at.getTime()/1000);
+  }
+  if(action === "cancel" &&
+     !confirm(`Cancel the note to ${email}? It will not be sent.`)) return;
+
+  act.disabled = true; act.textContent = "…";
+  let r;
+  try {
+    r = await fetch("./api/outreach", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  } catch(err){ act.disabled = false; return alert("Could not reach the store."); }
+  if(r.status === 401){
+    try { localStorage.removeItem(PASS_KEY); } catch(err){}
+    act.disabled = false;
+    return alert("That passphrase was not right.");
+  }
+  if(!r.ok){
+    const d = await r.json().catch(() => ({}));
+    act.disabled = false;
+    return alert(d.detail || d.error || `Refused (${r.status}).`);
+  }
+  // Shown as pending rather than done. It has been asked for; the runner has
+  // not carried it out yet, and saying otherwise would be the tracker lying
+  // about the one thing it exists to report.
+  PENDING.push({action, email, step});
+  renderReach();
+});
+
+document.addEventListener("click", async e => {
+  const btn = e.target.closest("button.reach[data-reach]"); if(!btn) return;
+  const key = btn.dataset.reach;
+  let pass = passphrase();
+  if(!pass){
+    pass = window.prompt("Passphrase for saving:") || "";
+    if(!pass) return;
+    rememberPassphrase(pass);
+  }
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = "asking…";
+  let r;
+  try {
+    r = await fetch("./api/outreach", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({key, passphrase: pass})});
+  } catch(err){
+    btn.disabled = false; btn.textContent = was;
+    return alert("Could not reach the store, so nothing was requested.");
+  }
+  if(r.status === 401){
+    try { localStorage.removeItem(PASS_KEY); } catch(err){}
+    btn.disabled = false; btn.textContent = was;
+    return alert("That passphrase was not right.");
+  }
+  if(!r.ok && r.status !== 409){
+    const d = await r.json().catch(() => ({}));
+    btn.disabled = false; btn.textContent = was;
+    return alert(d.detail || d.error || `The store refused that (${r.status}).`);
+  }
+  // Recorded, not sent. The runner does the work on its next pass, so the
+  // honest label is the one that says it is waiting.
+  REACH[key] = {state:"queued", at: Math.floor(Date.now()/1000)};
+  render();
+});
+
+document.addEventListener("change", async e => {
+  const sel = e.target.closest("select.stage"); if(!sel) return;
+  const key = sel.dataset.key, stage = sel.value;
+  sel.className = "stage s-" + (stage || "interested");
+  sel.dataset.set = stage ? 1 : 0;
+  const problem = await saveStage(key, stage);
+  if(problem){
+    sel.value = job_previous(key);          // put the control back
+    sel.className = "stage s-" + (sel.value || "interested");
+    sel.dataset.set = sel.value ? 1 : 0;
+    alert(problem);
+    return;
+  }
+  const job = JOBS.find(j=>j.key===key); if(job) job.stage = stage;
+  const counts = countStages();
+  [...$("#pills").children].forEach(p => {
+    const n = counts[p.dataset.stage];
+    p.textContent = (p.dataset.stage || "all") + (n ? " " + n : "");
+  });
+  $("#meta").innerHTML = `${JOBS.filter(j=>j.stage).length} tracked · ${JOBS.length.toLocaleString()} open postings`;
+});
+
+$("#q").oninput = e => { filter.q = e.target.value; render(); };
+$("#season").onchange = e => { filter.season = e.target.value; render(); };
+$("#source").onchange = e => { filter.source = e.target.value; render(); };
+$("#tier").onchange = e => { filter.tier = e.target.value; render(); };
+$("#sort").onchange = e => { sortBy = e.target.value; render(); };
+load();
+</script>
+</body>
+</html>

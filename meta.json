@@ -1,0 +1,30 @@
+{
+ "generated_at": "2026-09-05T23:00:44+00:00",
+ "generated_at_epoch": 1788649244.102172,
+ "counts": {
+  "open_jobs": 4163,
+  "recent_jobs": 1893,
+  "recent_days": 14,
+  "companies": 1100,
+  "with_real_posted_date": 4057,
+  "other_links": 1
+ },
+ "sources": [
+  {
+   "source": "instagram",
+   "last_run_at": "2026-09-05T23:00:21+00:00",
+   "items_seen": 21,
+   "items_new": 1,
+   "note": null
+  },
+  {
+   "source": "simplify",
+   "last_run_at": "2026-09-05T23:00:32+00:00",
+   "items_seen": 2984,
+   "items_new": 1,
+   "note": null
+  }
+ ],
+ "notified_through_epoch": 1788649233.9753418,
+ "schema": "https://github.com/Lantiar/Test-claude/blob/main/jobfeed/README.md"
+}
