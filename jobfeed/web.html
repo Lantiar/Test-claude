@@ -185,6 +185,13 @@ dialog#found::backdrop{background:rgba(0,0,0,.45)}
 #found li b{font-size:13.5px}
 #found code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
   color:var(--accent);user-select:all}
+/* The recruiter's name, when we know where their profile is. Underlined on
+   hover only: every name in the column being blue reads as a table of links
+   rather than a list of people. */
+a.who-li{color:inherit;text-decoration:none;border-bottom:1px dotted var(--dim)}
+a.who-li:hover{color:var(--s-applied);border-bottom-color:currentColor}
+a.who-li:focus-visible{outline:2px solid var(--s-applied);outline-offset:2px}
+
 #found a.li{display:inline-block;margin-left:10px;font-size:12px;color:var(--s-applied);
   text-decoration:none}
 #found a.li:hover{text-decoration:underline}
@@ -774,7 +781,11 @@ function renderReach(){
     const ts = o.sent_at || o.send_after;
     return `<tr>
       <td data-label="Company">${esc(c.company || "—")}</td>
-      <td data-label="Recruiter" class="who">${esc(c.full_name || o.email)}
+      <td data-label="Recruiter" class="who">${https(c.linkedin_url)
+        ? `<a class="who-li" target="_blank" rel="noopener"
+             href="${esc(c.linkedin_url)}"
+             title="LinkedIn profile">${esc(c.full_name || o.email)}</a>`
+        : esc(c.full_name || o.email)}
         <div class="sub">${esc(o.email)}${c.email_status
           ? ` · <span class="pill p-${esc(c.email_status)}">${esc(c.email_status)}</span>` : ""}</div></td>
       <td data-label="Role(s)" class="sub">${roles.map(t => esc(t)).join("<br>")}${
