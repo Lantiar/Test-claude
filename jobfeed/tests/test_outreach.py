@@ -1644,6 +1644,32 @@ def test_a_company_with_nobody_reachable_says_so(con, monkeypatch):
     assert record["state"] == "none" and "no recruiters" in record["note"], record
 
 
+def test_a_search_that_did_not_run_is_not_reported_as_nobody_there(con, monkeypatch):
+    """This one happened. Apify credit ran out, the search returned 402, and
+    the dashboard said "no recruiters found" for Coinbase -- which reads as an
+    employer with no recruiting team rather than a bill to pay, and is a
+    conclusion you act on by never asking again."""
+    from jobfeed.outreach import run as _run, apify as _apify
+
+    def broke(company, n=3):
+        raise RuntimeError("apify harvestapi~linkedin-profile-search returned 402")
+    monkeypatch.setattr(_apify, "find_recruiters", broke)
+    cid = _company(con, "Acme")
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    b = _board(monkeypatch, con, cid, stages={"https://acme/1": "applied"},
+               requests=[], finds=["https://acme/1"])
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+
+    _run.serve_board(con, send=False)
+
+    record = b.found["https://acme/1"]
+    assert record["state"] == "failed", record
+    assert "did not run" in record["note"] and "402" in record["note"], record
+    assert "no recruiters found" not in record["note"], record
+
+
 def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
     """Two independent buttons on one row. Neither answer may overwrite the
     other -- which is why the store keeps them under separate keys."""

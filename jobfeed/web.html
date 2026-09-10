@@ -952,7 +952,8 @@ function reachControl(j){
             href="https://mail.google.com/mail/u/0/#all/${esc(r.thread)}">reached out ↗</a>`
       : `<span class="reach reached" title="${title}">reached out</span>`;
   if(r.state === "queued")
-    return `<button class="reach queued" disabled title="waiting for the next run">queued…</button>`;
+    return `<button class="reach queued" disabled
+              title="${esc(r.note || "waiting for the next run")}">queued…</button>`;
   if(r.state === "held" || r.state === "failed")
     return `<button class="reach ${r.state}" data-reach="${esc(j.key)}"
               title="${title || "it did not go; press to ask again"}">${r.state} ↻</button>`;
@@ -968,15 +969,18 @@ function findControl(j){
   const f = FINDS[j.key] || {};
   if(f.state === "asked")
     return `<button class="reach finding" disabled
-              title="looking on the next run">finding…</button>`;
+              title="${esc(f.note || "looking on the next run")}">finding…</button>`;
   if(f.state === "done"){
     const n = (f.people || []).length;
     return `<button class="reach found" data-find-show="${esc(j.key)}"
               title="show the addresses">✉ ${n} email${n === 1 ? "" : "s"}</button>`;
   }
+  // "none" and "failed" are not the same answer and must not read the same:
+  // one says this employer has nobody, the other says the search never ran.
   if(f.state === "none" || f.state === "failed")
     return `<button class="reach held" data-find="${esc(j.key)}"
-              title="${esc(f.note || "nothing found; press to look again")}">✉ none ↻</button>`;
+              title="${esc(f.note || "nothing found; press to look again")}"
+              >✉ ${f.state === "failed" ? "failed" : "none"} ↻</button>`;
   return `<button class="reach" data-find="${esc(j.key)}"
             title="find verified addresses at ${esc(j.company)}, without writing anything"
             >✉ emails</button>`;
@@ -1148,7 +1152,8 @@ document.addEventListener("click", async e => {
   }
   // Recorded, not sent. The runner does the work on its next pass, so the
   // honest label is the one that says it is waiting.
-  REACH[key] = {state:"queued", at: Math.floor(Date.now()/1000)};
+  const said = await r.json().catch(() => ({}));
+  REACH[key] = {state:"queued", at: Math.floor(Date.now()/1000), note: said.runner || ""};
   render();
 });
 
@@ -1183,7 +1188,11 @@ document.addEventListener("click", async e => {
     btn.disabled = false; btn.textContent = was;
     return alert(d.detail || d.error || `The store refused that (${r.status}).`);
   }
-  FINDS[key] = {state:"asked", at: Math.floor(Date.now()/1000)};
+  // What the store recorded, plus whether the runner was actually woken. Read
+  // from the response rather than assumed: "running now" over a dispatch that
+  // was refused would be the button lying about the one thing it is for.
+  const said = await r.json().catch(() => ({}));
+  FINDS[key] = {state:"asked", at: Math.floor(Date.now()/1000), note: said.runner || ""};
   render();
 });
 

@@ -1,0 +1,67 @@
+name: outreach now
+
+# The board pass on demand, for when waiting half an hour is the wrong answer.
+#
+# Pressing ▶ or ✉ on the tracker writes an intent to Upstash, and nothing is
+# watching that store in between scheduled runs -- so api/outreach.js fires
+# this the moment you click and the work happens in about a minute instead of
+# at the next half hour.
+#
+# Deliberately not the jobfeed workflow: that one polls Instagram and
+# republishes the whole feed, which is a paid call and a megabyte of push for
+# work nobody asked for. This one reads the published snapshot, runs the board
+# pass, and stops. It writes only to Upstash -- no branch is pushed.
+on:
+  workflow_dispatch:
+
+concurrency:
+  # Shares the poll's group. Both passes read and write the same outreach
+  # state, and two of them interleaving would have each overwrite what the
+  # other had just learned.
+  group: jobfeed
+  cancel-in-progress: false
+
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The feed, as last published. `find_contacts` resolves a job key to a
+      # company through the job table, so without this the runner knows the
+      # button was pressed and cannot tell which employer it meant.
+      - name: Fetch the last snapshot
+        run: |
+          git fetch --depth=1 origin jobfeed-data
+          git show FETCH_HEAD:jobs.json > previous.json
+
+      - name: Run the board pass
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          OUTREACH_FROM: ${{ vars.OUTREACH_FROM }}
+          OUTREACH_BRACKET: ${{ vars.OUTREACH_BRACKET }}
+          OUTREACH_COUNTRY: ${{ vars.OUTREACH_COUNTRY }}
+          KV_REST_API_URL: ${{ secrets.KV_REST_API_URL }}
+          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
+          JOBFEED_DB: ${{ runner.temp }}/jobfeed.sqlite3
+        run: |
+          set -e
+          if [ -z "$KV_REST_API_URL" ]; then
+            echo "::notice::no Upstash credentials, so the outreach board was not read"
+            exit 0
+          fi
+          python3 -m jobfeed.cli seed previous.json
+          # The same kill switch as the scheduled run. Nothing sends earlier
+          # than it was scheduled to either way -- dispatch only takes rows
+          # whose send time has already passed -- but the switch stays the one
+          # place that decides whether mail can leave at all.
+          if [ "${{ vars.OUTREACH_SEND }}" = "1" ]; then
+            python3 -m jobfeed.cli outreach board --send
+          else
+            echo "OUTREACH_SEND is not 1: looking up and drafting only, nothing sent"
+            python3 -m jobfeed.cli outreach board
+          fi

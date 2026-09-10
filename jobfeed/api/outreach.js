@@ -2,9 +2,10 @@
 //
 // The page cannot do this work itself: sourcing recruiters is Apify, sending
 // is Gmail, and both are Python running elsewhere. So a click does not send
-// anything -- it records an intent here, and the scheduled runner picks it up,
-// does the work, and writes the outcome back. The button is a request, and the
-// state you see is what actually happened.
+// anything -- it records an intent here, the runner picks it up, does the work,
+// and writes the outcome back. The button is a request, and the state you see
+// is what actually happened. Given a GitHub token the request also wakes the
+// runner so that happens in a minute rather than at the next half hour.
 //
 // Same store and the same passphrase as stages.js, deliberately: two write
 // paths on a public page with two different answers to "who may write" is one
@@ -35,6 +36,42 @@ const ACTIONS = ["cancel", "reschedule", "send_now", "retry", "edit"];
 //   held     the pipeline refused, and `note` says why
 //   failed   something broke, and `note` says what
 const STATES = ["queued", "reached", "replied", "held", "failed"];
+
+// Nothing watches the store between scheduled runs, so a request written here
+// would sit until the next half hour. This wakes the runner instead: the work
+// still happens there, on the machine that holds the API keys, but it happens
+// now. Optional -- without a token the request simply waits, which is what it
+// did before this existed.
+const GH_TOKEN = process.env.GH_PAT || process.env.GITHUB_DISPATCH_TOKEN;
+const GH_REPO = process.env.GITHUB_REPO || "Lantiar/Test-claude";
+const GH_REF = process.env.GITHUB_REF || "claude/plan-reasoning-verification-7i3zz7";
+
+async function wakeRunner() {
+  if (!GH_TOKEN) return "waiting for the next run";
+  const url = `https://api.github.com/repos/${GH_REPO}` +
+              `/actions/workflows/outreach-now.yml/dispatches`;
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${GH_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "jobfeed",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ref: GH_REF }),
+    });
+    // 204 is the only success GitHub returns here. Anything else is reported
+    // rather than swallowed: a button that says "running now" over a dispatch
+    // the API refused is the failure this whole project keeps guarding
+    // against -- the request is still safely recorded either way.
+    return r.status === 204 ? "running now"
+                            : `waiting for the next run (dispatch ${r.status})`;
+  } catch (e) {
+    return "waiting for the next run (dispatch unreachable)";
+  }
+}
 
 function creds() {
   const env = process.env;
@@ -244,7 +281,8 @@ export default async function handler(req, res) {
       if (body.find) {
         await redis(["HSET", FIND_KEY, key, JSON.stringify(
           { state: "asked", at: Math.floor(Date.now() / 1000) })]);
-        return res.status(200).json({ saved: { key, state: "asked" } });
+        return res.status(200).json({ saved: { key, state: "asked" },
+                                      runner: await wakeRunner() });
       }
 
       // A request from the page. Refused if one is already in flight or done,
@@ -259,7 +297,8 @@ export default async function handler(req, res) {
       }
       const record = { state: "queued", at: Math.floor(Date.now() / 1000) };
       await redis(["HSET", KEY, key, JSON.stringify(record)]);
-      return res.status(200).json({ saved: { key, ...record } });
+      return res.status(200).json({ saved: { key, ...record },
+                                    runner: await wakeRunner() });
     }
 
     if (req.method === "DELETE") {

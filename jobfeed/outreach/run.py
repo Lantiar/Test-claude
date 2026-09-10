@@ -238,7 +238,8 @@ def _pick_contacts(con, found: list[dict], company_id: int | None,
     return picked, ""
 
 
-def _recruiters(con, company: str, company_id: int | None, limit: int) -> list[dict]:
+def _recruiters(con, company: str, company_id: int | None, limit: int,
+                errors: list | None = None) -> list[dict]:
     """Recruiters at this company who have not heard from us, cache first.
 
     Cached ninety days: applying to the same firm twice and paying twice for
@@ -269,7 +270,13 @@ def _recruiters(con, company: str, company_id: int | None, limit: int) -> list[d
     try:
         people = apify.find_recruiters(company, len(have) + limit)
     except Exception as exc:
+        # Callers who need to tell "nobody is there" from "the search did not
+        # run" pass a list. Without one this stays as it was: fall back to the
+        # cache and carry on, because a failed search is not a reason to lose
+        # a draft to a recruiter already known.
         print(f"  apify: {company}: {exc}")
+        if errors is not None:
+            errors.append(str(exc))
         return (untouched or have)[:limit]
 
     for person in people:
@@ -307,18 +314,27 @@ def find_contacts(con, job_key: str, limit: int = 3) -> dict:
     if not row or not row["company"]:
         return {"people": [], "note": "no company on that job"}
 
-    people = _recruiters(con, row["company"], row["company_id"], limit * 2)
+    failed: list = []
+    people = _recruiters(con, row["company"], row["company_id"], limit * 2,
+                         errors=failed)
     # An address that would bounce is not an address. Same test the send path
     # uses, so what comes back here is what outreach would have written to.
     usable = [p for p in people
               if p.get("email") and p.get("email_status") not in
               ("invalid", "bounced", "risky")][:limit]
-    if not usable:
-        found = len(people)
-        return {"people": [],
-                "note": f"no usable address among {found} found" if found
-                        else "no recruiters found"}
-    return {"people": usable, "note": ""}
+    if usable:
+        return {"people": usable, "note": ""}
+    # An empty answer has two very different causes and they must not read the
+    # same. "No recruiters found" over a search that never ran -- exhausted
+    # Apify credit, a dead actor -- says this employer has nobody, which is a
+    # lie you would act on by not asking again.
+    if failed:
+        return {"people": [], "failed": True,
+                "note": f"the search did not run: {failed[0][:200]}"}
+    found = len(people)
+    return {"people": [],
+            "note": f"no usable address among {found} found" if found
+                    else "no recruiters found"}
 
 
 def _set_status(con, contact_id: int, status: str) -> None:
@@ -547,7 +563,9 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
     for job_key in _board.find_asked():
         try:
             got = find_contacts(con, job_key, limit=per_company)
-            _board.find_write(job_key, "done" if got["people"] else "none",
+            state = ("done" if got["people"]
+                     else "failed" if got.get("failed") else "none")
+            _board.find_write(job_key, state,
                               people=got["people"], note=got["note"])
             out["found"] += len(got["people"])
         except Exception as exc:
