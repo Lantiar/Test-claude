@@ -1715,6 +1715,31 @@ def test_the_ladder_does_not_climb_into_dollars(con):
         "on a company that yields nobody")
 
 
+def test_every_title_we_pay_to_search_for_is_one_we_would_accept(con):
+    """The invariant that was missing. LinkedIn was asked for "Emerging
+    Talent", the ranking put it top of tier 0, and a third list of words --
+    the accept filter -- had never heard of it. Coinbase's early-career
+    recruiters are titled exactly that, so the search paid to find the right
+    people, ranked them best, dropped them, and the dashboard reported an
+    employer with no recruiting team."""
+    from jobfeed.outreach import apify as _apify
+    dropped = [t for t in _apify.SEARCH_TITLES if not _apify.is_recruiter(t)]
+    assert not dropped, f"paid to search for, then refused: {dropped}"
+
+
+def test_a_recruiter_is_anyone_the_ranking_recognises(con):
+    """One list, so it cannot contradict itself: if the tiers can rank it, it
+    is someone worth writing to; if they cannot, it is not a recruiter."""
+    from jobfeed.outreach import apify as _apify
+    for headline in ("Emerging Talent @ Coinbase", "Talent @ Coinbase",
+                     "University Recruiter", "Technical Sourcer",
+                     "Executive Recruiting @ Coinbase"):
+        assert _apify.is_recruiter(headline), headline
+    for headline in ("Staff Software Engineer", "Building the future of money",
+                     "Product Designer", ""):
+        assert not _apify.is_recruiter(headline), headline
+
+
 def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
     """Two independent buttons on one row. Neither answer may overwrite the
     other -- which is why the store keeps them under separate keys."""

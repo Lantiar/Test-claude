@@ -98,16 +98,10 @@ def in_country(item: dict, code: str = "") -> bool:
              or (location.get("parsed") or {}).get("countryCode") or "")
     return not found or found.upper() == code
 
-# What a recruiter's title looks like. Deliberately narrow: "recruiter" alone
-# pulls in agency recruiters and recruiting coordinators at other companies,
-# and a technical sourcer is a better target than a VP of Talent.
-RECRUITER_TITLES = ("university recruiter", "campus recruiter", "early career",
-                    "early careers", "technical recruiter", "technical sourcer",
-                    "recruiter", "talent acquisition", "recruiting")
-
-# What LinkedIn is asked for, which is a shorter list: the filter is exact
-# against LinkedIn's own job titles, while RECRUITER_TITLES is matched loosely
-# against the free-text headline afterwards.
+# What LinkedIn is asked for. Exact against LinkedIn's own job titles, where
+# `title_rank` is matched loosely against the free-text headline afterwards --
+# so every phrase here needs a home in _TITLE_TIERS below, or the search pays
+# to find people it will then refuse.
 SEARCH_TITLES = ("University Recruiter", "Campus Recruiter",
                  "Early Career Recruiter", "Early Careers Recruiter",
                  "Graduate Recruiter", "Emerging Talent",
@@ -130,12 +124,30 @@ _TITLE_TIERS = (
 _SENIOR = ("vice president", "vp ", "head of", "director", "chief", "executive")
 
 
+# Anything the tiers do not recognise at all.
+UNRANKED = len(_TITLE_TIERS) * 2
+
+
 def title_rank(title: str) -> int:
-    """Lower is a better person to write to."""
+    """Lower is a better person to write to. UNRANKED means "not a recruiter"."""
     text = (title or "").lower()
     tier = next((i for i, words in enumerate(_TITLE_TIERS)
                  if any(w in text for w in words)), len(_TITLE_TIERS))
     return tier * 2 + (1 if any(w in text for w in _SENIOR) else 0)
+
+
+def is_recruiter(title: str) -> bool:
+    """Worth writing to at all.
+
+    Derived from the ranking rather than kept as a third list of words. There
+    used to be one, and the three disagreed: LinkedIn was asked for "Emerging
+    Talent", the ranking put "emerging talent" top of tier 0, and the accept
+    list -- which had no such phrase -- dropped them. Coinbase's early-career
+    recruiters are titled exactly that, so the search paid to find the right
+    people, ranked them best, and threw them away, and the dashboard reported
+    an employer with no recruiting team. One list cannot contradict itself.
+    """
+    return title_rank(title) < UNRANKED
 
 
 def _call(actor: str, payload: dict, timeout: int = 300) -> list[dict]:
@@ -302,7 +314,7 @@ def find_recruiters(company: str, limit: int = 3) -> list[dict]:
             continue
         title = (it.get("headline") or _employer(it) and
                  (it.get("currentPosition") or [{}])[0].get("position") or "")
-        if not any(t in title.lower() for t in RECRUITER_TITLES):
+        if not is_recruiter(title):
             continue
         name = (it.get("fullName") or
                 " ".join(x for x in (it.get("firstName"), it.get("lastName")) if x))
