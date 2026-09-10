@@ -47,59 +47,6 @@ def _get(path: str, token: str, **params):
         return json.loads(r.read())
 
 
-_LIST_ITEM = re.compile(r"^\s{1,4}-\s+(.*)$")
-
-
-def as_html(body: str) -> str:
-    """The same words, marked up so a mail client stops mangling them.
-
-    Sent as plain text alone, Gmail rewraps it in a proportional font and a
-    wrapped bullet's second line starts back at the margin -- so a three-line
-    achievement reads as three separate thoughts, and the note looks like
-    something a script pasted. The words are identical; only the structure the
-    client was guessing at is now stated.
-    """
-    blocks, current, items = [], [], []
-
-    def flush():
-        if items:
-            blocks.append("<ul style=\"margin:0 0 14px;padding-left:22px\">"
-                          + "".join(f"<li style=\"margin:0 0 6px\">{i}</li>"
-                                    for i in items) + "</ul>")
-            items.clear()
-        if current:
-            blocks.append(f"<p style=\"margin:0 0 14px\">{' '.join(current)}</p>")
-            current.clear()
-
-    for line in body.splitlines():
-        if not line.strip():
-            flush()
-            continue
-        if m := _LIST_ITEM.match(line):
-            if current:
-                blocks.append(f"<p style=\"margin:0 0 14px\">{' '.join(current)}</p>")
-                current.clear()
-            items.append(_escape(m.group(1)))
-        else:
-            if items:
-                flush()
-            current.append(_escape(line.strip()))
-    flush()
-    # A line height and nothing else. Anything more starts to look like a
-    # newsletter, which is the opposite of what this mail is.
-    return ('<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;'
-            'font-size:14px;line-height:1.55;color:#202124">'
-            + "".join(blocks) + "</div>")
-
-
-def _escape(text: str) -> str:
-    for a, b in (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;")):
-        text = text.replace(a, b)
-    # Bare URLs, so the reader can click the portfolio link.
-    return re.sub(r"(https?://[^\s<>]+?)([.,)]?)(?=\s|$)",
-                  r'<a href="\1">\1</a>\2', text)
-
-
 def send(to: str, subject: str, body: str, thread_id: str | None = None,
          in_reply_to: str | None = None, token: str | None = None,
          attachments: list[str] | None = None) -> dict:
@@ -115,10 +62,16 @@ def send(to: str, subject: str, body: str, thread_id: str | None = None,
         # rather than a nudge on the first.
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = in_reply_to
+    # Plain text only, deliberately.
+    #
+    # There used to be an HTML alternative alongside this, on the theory that
+    # Gmail rewraps plain text badly. Gmail prefers the HTML part, and what it
+    # showed was not the note that was written: the "  - " achievements became
+    # a real <ul> with bullet glyphs, "Thanks," and the name were folded onto
+    # one line, and the portfolio URL rendered as a blue link. Beside the same
+    # message typed by hand, that reads as a mail-merge -- which is exactly
+    # what a recruiter screens out. A one-to-one email from a person is plain
     msg.set_content(body)
-    # Both parts, same words. A client that prefers plain text still gets the
-    # note exactly as written and tested.
-    msg.add_alternative(as_html(body), subtype="html")
 
     for path in (attachments or []):
         data = pathlib.Path(path).read_bytes()

@@ -819,12 +819,22 @@ def _head(body):
 
 
 def _draft_pair():
+    """A note with a URL in it, so the checker's URL rule has something to
+    check. Rendered with the resume off, which is the variant that carries the
+    portfolio link -- with it on there is no link in a cold note at all."""
+    from jobfeed.outreach import profile as _p
     roles = ["Software Engineer Intern - Vehicle Software",
              "Software Engineer Intern - Information Security",
              "Product Support Engineer Intern - Service Engineering"]
-    subject, body, _ = templates.render(
-        {"id": 1, "first_name": "Dana"},
-        {"company": "Tesla", "roles": roles, "season": "Summer 2027"})
+    was = _p.ATTACH_RESUME[0]
+    try:
+        _p.ATTACH_RESUME[0] = False
+        subject, body, _ = templates.render(
+            {"id": 1, "first_name": "Dana"},
+            {"company": "Tesla", "roles": roles, "season": "Summer 2027"})
+    finally:
+        _p.ATTACH_RESUME[0] = was
+    assert "https://" in body, "the URL cases below would be no-ops"
     return subject, body, {"company": "Tesla", "first_name": "Dana", "roles": roles}
 
 
@@ -1764,6 +1774,82 @@ def test_an_empty_environment_variable_means_unset_not_match_nothing(monkeypatch
         importlib.reload(_apify)
 
 
+def test_what_goes_out_is_plain_text_with_the_resume_attached(tmp_path, monkeypatch):
+    """No HTML part, at the wire level.
+
+    There used to be one, and Gmail preferred it: the "  - " achievements
+    became a real <ul> with bullet glyphs, "Thanks," and the name folded onto
+    one line, and the portfolio URL rendered as a blue link. Beside the same
+    note typed by hand it read as a mail-merge, which is what a recruiter
+    screens out."""
+    import base64, email as _email, json as _json
+    from jobfeed.outreach import gmail as _gmail
+
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+    captured = {}
+
+    class Resp:
+        def __init__(self, payload): self.payload = payload
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return _json.dumps(self.payload).encode()
+
+    def fake_urlopen(req, timeout=None):
+        if req.data:
+            captured["raw"] = _json.loads(req.data)["raw"]
+            return Resp({"id": "x", "threadId": "t"})
+        return Resp({"payload": {"headers": [{"name": "Message-Id",
+                                              "value": "<m@x>"}]}})
+
+    monkeypatch.setattr(_gmail.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(_gmail, "_token", lambda: "fake")
+    monkeypatch.setenv("OUTREACH_FROM", "me@example.com")
+
+    body = ("Hi Kelsey,\n\nI applied.\n\n"
+            "  - Google SWE Intern: built a thing\n"
+            "  - J&J SWE Intern: built another\n\nThanks,\nNideesh\n")
+    _gmail.send("her@example.com", "Subject", body, attachments=[str(pdf)])
+
+    msg = _email.message_from_bytes(base64.urlsafe_b64decode(captured["raw"]))
+    kinds = [p.get_content_type() for p in msg.walk()
+             if p.get_content_maintype() != "multipart"]
+    assert "text/html" not in kinds, f"an HTML part went out: {kinds}"
+    assert kinds.count("text/plain") == 1, kinds
+    assert "application/pdf" in kinds, f"the resume did not go: {kinds}"
+
+    sent = [p for p in msg.walk() if p.get_content_type() == "text/plain"][0]
+    text = sent.get_payload(decode=True).decode()
+    # The dashes stay dashes, and the sign-off stays on two lines.
+    assert "  - Google SWE Intern:" in text, text
+    assert "Thanks,\nNideesh" in text, text
+
+
+def test_a_cold_note_carries_no_link_when_the_resume_is_attached(monkeypatch):
+    """A bare URL is the thing bulk mail leads with, and the attachment is
+    right there in the same message."""
+    from jobfeed.outreach import templates as _t, profile as _p
+    was = _p.ATTACH_RESUME[0]
+
+    def note():
+        return _t.render({"id": 1, "first_name": "Kelsey"},
+                         {"company": "Coinbase", "role": "SWE Intern",
+                          "roles": ["SWE Intern"], "season": "Summer 2027"})[1]
+    try:
+        _p.ATTACH_RESUME[0] = True
+        body = note()
+        assert "http" not in body, body
+        assert "attached to this email" in body
+
+        # With nothing attached there is nothing else to point at, so the
+        # link comes back rather than leaving the note with no way to see any
+        # of the work.
+        _p.ATTACH_RESUME[0] = False
+        assert _p.ME["portfolio"] in note()
+    finally:
+        _p.ATTACH_RESUME[0] = was
+
+
 def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
     """Two independent buttons on one row. Neither answer may overwrite the
     other -- which is why the store keeps them under separate keys."""
@@ -2068,40 +2154,6 @@ def test_a_signature_still_works_when_one_is_set(monkeypatch):
 
 # ---- how the mail actually renders ----------------------------------------
 
-def test_the_html_part_says_the_same_words_as_the_plain_one():
-    """Sent as plain text alone, Gmail rewraps it and a wrapped bullet's second
-    line starts back at the margin, so one achievement reads as several. The
-    HTML part states the structure the client was guessing at -- it must not
-    change a single word while doing so."""
-    from jobfeed.outreach.gmail import as_html
-    import re as _re
-    _, body, _ = templates.render(
-        {"id": 1, "first_name": "Dana"},
-        {"company": "BNY", "role": "SWE Intern", "season": "Summer 2027"})
-    html = as_html(body)
-
-    assert html.count("<li") == 3, "the three achievements must be three items"
-    assert 'href="https://nideesh.ai"' in html
-    plain_words = body.split()
-    html_words = _re.sub(r"<[^>]+>", " ", html).replace("&amp;", "&") \
-        .replace("&lt;", "<").replace("&gt;", ">").split()
-    # The URL appears once as text and once as an href; everything else must
-    # match word for word.
-    assert [w for w in html_words if not w.startswith("http")] == \
-           [w.rstrip(".") if w.startswith("http") else w
-            for w in plain_words if not w.startswith("http")] or True
-    for word in plain_words:
-        if not word.startswith("http"):
-            assert word.replace("&", "&amp;") in html or word in html, word
-
-
-def test_html_escapes_rather_than_letting_a_title_become_markup():
-    """A real posting title contains "Risk & Controls"."""
-    from jobfeed.outreach.gmail import as_html
-    html = as_html("Hi Dana,\n\n  - Data Analytics Intern - Risk & Controls\n")
-    assert "&amp;" in html and "Risk &amp; Controls" in html
-
-
 def test_the_resume_goes_on_the_first_note_only(monkeypatch, tmp_path):
     """Attached to a follow-up too, the same PDF arrives twice in one thread --
     a script that forgot what it had already sent."""
@@ -2139,7 +2191,16 @@ def test_settings_change_what_the_email_says(monkeypatch):
     _, body, _ = templates.render({"id": 1, "first_name": "Dana"},
                                   {"company": "BNY", "role": "SWE Intern"})
     assert "December 2027" in body and "May 2028" not in body
-    assert "https://example.dev" in body
+    # The portfolio only appears when there is no resume attached -- a cold
+    # note does not ask a stranger to click a link it did not need to send.
+    was = profile.ATTACH_RESUME[0]
+    try:
+        profile.ATTACH_RESUME[0] = False
+        _, no_pdf, _ = templates.render({"id": 1, "first_name": "Dana"},
+                                        {"company": "BNY", "role": "SWE Intern"})
+        assert "https://example.dev" in no_pdf
+    finally:
+        profile.ATTACH_RESUME[0] = was
     assert "  - Somewhere: did a specific thing" in body
     assert "Gemini" not in body, "an old achievement survived the change"
 

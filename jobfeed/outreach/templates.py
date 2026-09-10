@@ -11,9 +11,10 @@ stranger reading "turning down the previous offer was difficult" concludes you
 have mistaken them for someone else, and the credibility you were borrowing
 from the Google line evaporates in the same sentence.
 
-Both are plain text. No HTML, no tracking pixel, no unsubscribe footer, no
-shortened links -- each of those is a bulk-mail signal, and a genuine
-one-to-one email carries none of them.
+Both are plain text, and plain text is what goes out -- there is no HTML part.
+No tracking pixel, no unsubscribe footer, no shortened links, and no link at
+all when the resume is attached instead. Each of those is a bulk-mail signal,
+and a genuine one-to-one email carries none of them.
 
 Variants exist so that fifty sends are not fifty identical strings. They rotate
 per contact, deterministically from the contact id, so a re-render produces the
@@ -24,7 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from .profile import ME, WINS, bracket, signature
+from .profile import ATTACH_RESUME, ME, WINS, bracket, signature
 
 # ---- subjects -------------------------------------------------------------
 # The bracket does the work. A recruiter scanning an inbox decides in the
@@ -104,6 +105,21 @@ FOLLOWUPS = {
         "wrong I completely understand. I would welcome the chance to be "
         "considered for anything else on the team."),
 }
+
+
+def _where_the_resume_is() -> str:
+    """Point at the attachment when there is one, at the site when there is not.
+
+    A bare URL in a cold email is a link a stranger is being asked to click,
+    and it is what most bulk mail leads with -- while the attachment is right
+    there in the same message. So the link only appears when it is the only
+    way to see anything.
+    """
+    # A one-element list, so the dashboard can flip it at runtime. Testing
+    # the box rather than its contents is always true.
+    if ATTACH_RESUME[0]:
+        return "My resume is attached to this email for your reference."
+    return f"Resume and projects are at {ME['portfolio']}."
 
 
 def _pick(options, contact_id: int):
@@ -284,7 +300,7 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         f"A few things I have worked on:\n\n"
         f"{wins}\n\n"
         f"I would be glad to be considered and would appreciate any guidance "
-        f"on the process. Resume and projects are at {ME['portfolio']}.\n\n"
+        f"on the process. {_where_the_resume_is()}\n\n"
         f"Thanks,\n{ME['first_name']}\n"
         + (f"\n{signature()}\n" if signature() else "")
     )

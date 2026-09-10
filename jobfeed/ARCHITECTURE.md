@@ -426,18 +426,28 @@ the recruiter's inbox.
 
 ### How the mail is built
 
-Sent as `multipart/mixed` → `multipart/alternative` (plain + HTML) → the
-resume. **The HTML part says the same words as the plain one** and exists only
-because Gmail, given plain text alone, rewraps it in a proportional font: a
-wrapped bullet's second line starts back at the margin, so one three-line
-achievement reads as three separate thoughts and the note looks pasted. The
-markup states the structure the client was guessing at; a test asserts word
-equality between the two parts.
+Sent as `multipart/mixed` → `text/plain` → the resume. **There is no HTML
+part**, and that is the point.
+
+There used to be one, on the theory that Gmail rewraps plain text badly. Gmail
+prefers the HTML part, and what it showed was not the note that had been
+written: the `  - ` achievements became a real `<ul>` with bullet glyphs,
+`Thanks,` and the name folded onto one line, and the portfolio URL rendered as
+a blue link. Put beside the same message typed by hand, it read as a
+mail-merge — which is exactly what a recruiter screens out. The rewrapping the
+markup was there to prevent turned out to cost far less than looking
+automated. A test asserts at the wire level that no `text/html` part goes out.
+
+For the same reason a cold note carries **no link at all** when the resume is
+attached: a bare URL is what bulk mail leads with, and the attachment is
+already in the message. The portfolio link appears only when nothing is
+attached, where it is the one way to see any of the work.
 
 The resume goes on the **first note only** — attached to a follow-up as well,
 the same PDF arrives twice in one thread, which reads as a script that forgot
-what it had already sent. A missing or unset file sends the note without it:
-the text already links to the portfolio, so a file that cannot be found is a
+what it had already sent. A missing or unset file sends the note without it,
+and the closing sentence switches to the portfolio link, so a file that cannot
+be found is a
 worse email, not a reason to send none. The PDF itself is gitignored.
 
 ### 2. `schedule` — scatter
