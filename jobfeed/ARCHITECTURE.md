@@ -426,17 +426,28 @@ the recruiter's inbox.
 
 ### How the mail is built
 
-Sent as `multipart/mixed` → `text/plain` → the resume. **There is no HTML
-part**, and that is the point.
+Sent as `multipart/mixed` → `multipart/alternative` (plain + HTML) → the
+resume. **The HTML part is a transcription of the plain one, not a rendering
+of it** — one `<div>` per line, blank lines as blank divs, leading spaces as
+`&nbsp;`, and not one style attribute, class or list tag.
 
-There used to be one, on the theory that Gmail rewraps plain text badly. Gmail
-prefers the HTML part, and what it showed was not the note that had been
-written: the `  - ` achievements became a real `<ul>` with bullet glyphs,
-`Thanks,` and the name folded onto one line, and the portfolio URL rendered as
-a blue link. Put beside the same message typed by hand, it read as a
-mail-merge — which is exactly what a recruiter screens out. The rewrapping the
-markup was there to prevent turned out to cost far less than looking
-automated. A test asserts at the wire level that no `text/html` part goes out.
+This took two attempts, and the difference between them is the whole lesson.
+
+The first HTML part *read* the text and rebuilt it: `  - ` became a real
+`<ul>` with bullet glyphs, consecutive lines were joined into paragraphs so
+`Thanks,` and the name shared a line, and the portfolio URL was wrapped in an
+`<a>`. Same words, mail-merge silhouette — which is what a recruiter screens
+out.
+
+Removing it entirely was the wrong correction. Gmail renders `text/plain` in a
+fixed narrow column whatever the window width, so the note arrived in a
+half-width ragged block while the same words typed by hand — Gmail compose
+sends HTML — flowed across the message pane. The markup is needed; the
+interpretation was not.
+
+A test asserts the two parts contain character-for-character the same visible
+text, and that the HTML carries none of `<ul>`, `<li>`, `<a `, `style=` or
+`class=`.
 
 For the same reason a cold note carries **no link at all** when the resume is
 attached: a bare URL is what bulk mail leads with, and the attachment is

@@ -1814,8 +1814,8 @@ def test_what_goes_out_is_plain_text_with_the_resume_attached(tmp_path, monkeypa
     msg = _email.message_from_bytes(base64.urlsafe_b64decode(captured["raw"]))
     kinds = [p.get_content_type() for p in msg.walk()
              if p.get_content_maintype() != "multipart"]
-    assert "text/html" not in kinds, f"an HTML part went out: {kinds}"
     assert kinds.count("text/plain") == 1, kinds
+    assert kinds.count("text/html") == 1, kinds
     assert "application/pdf" in kinds, f"the resume did not go: {kinds}"
 
     sent = [p for p in msg.walk() if p.get_content_type() == "text/plain"][0]
@@ -1823,6 +1823,39 @@ def test_what_goes_out_is_plain_text_with_the_resume_attached(tmp_path, monkeypa
     # The dashes stay dashes, and the sign-off stays on two lines.
     assert "  - Google SWE Intern:" in text, text
     assert "Thanks,\nNideesh" in text, text
+
+    # And the part Gmail actually shows carries no markup of its own.
+    shown = [p for p in msg.walk() if p.get_content_type() == "text/html"][0]
+    html = shown.get_payload(decode=True).decode()
+    for banned in ("<ul", "<li", "<a ", "style=", "class="):
+        assert banned not in html, f"{banned} in the HTML part: {html[:200]}"
+
+
+def test_the_html_part_is_a_transcription_not_a_rendering():
+    """Every visible character in the HTML was a character in the text.
+
+    The first version of this part rebuilt the note instead of transcribing
+    it -- "  - " became a <ul>, consecutive lines were merged so "Thanks," and
+    the name shared a line, the URL became an <a>. Same words, mail-merge
+    silhouette. This asserts the two parts say character for character the
+    same thing, so the rendering cannot drift from the note again."""
+    import html as _html, re as _re
+    from jobfeed.outreach.gmail import as_html
+
+    _, body, _ = templates.render(
+        {"id": 1, "first_name": "Dana"},
+        {"company": "BNY", "role": "SWE Intern", "season": "Summer 2027"})
+    markup = as_html(body)
+
+    for banned in ("<ul", "<li", "<a ", "style=", "class=", "<b>", "<strong"):
+        assert banned not in markup, banned
+
+    # Strip the tags and the two parts must be the same characters.
+    text = _html.unescape(_re.sub(r"<[^>]+>", "\n", markup)).replace("\xa0", " ")
+    assert " ".join(text.split()) == " ".join(body.split()), text[:400]
+
+    # A "&" in a posting title is escaped rather than becoming markup.
+    assert "&amp;" in as_html("  - Data Analytics Intern - Risk & Controls")
 
 
 def test_a_cold_note_carries_no_link_when_the_resume_is_attached(monkeypatch):

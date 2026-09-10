@@ -47,6 +47,41 @@ def _get(path: str, token: str, **params):
         return json.loads(r.read())
 
 
+def _escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def as_html(body: str) -> str:
+    """A transcription of the plain text, never an interpretation of it.
+
+    Gmail renders text/plain in a fixed narrow column whatever the window
+    width, so a paragraph that reads as three lines in a hand-typed note comes
+    out as six ragged ones. A note typed in Gmail looks wider and calmer for
+    one reason: compose sends HTML.
+
+    The first attempt at this part read the text and rebuilt it. "  - " became
+    a real <ul> with bullet glyphs, consecutive lines were joined into
+    paragraphs so "Thanks," and the name landed together, and the URL was
+    wrapped in an <a>. That is a mail-merge silhouette, and it is what a
+    recruiter screens out.
+
+    So this interprets nothing. One <div> per line, blank lines become blank
+    divs, leading spaces survive as &nbsp;, and there is not one style
+    attribute, class or list tag -- the same shape Gmail itself emits for a
+    typed message. Every visible character was in the plain text, which is
+    what the test asserts.
+    """
+    out = []
+    for line in body.split("\n"):
+        if not line.strip():
+            out.append("<div><br></div>")
+            continue
+        stripped = line.lstrip(" ")
+        indent = "&nbsp;" * (len(line) - len(stripped))
+        out.append(f"<div>{indent}{_escape(stripped)}</div>")
+    return '<div dir="ltr">' + "".join(out) + "</div>"
+
+
 def send(to: str, subject: str, body: str, thread_id: str | None = None,
          in_reply_to: str | None = None, token: str | None = None,
          attachments: list[str] | None = None) -> dict:
@@ -62,16 +97,12 @@ def send(to: str, subject: str, body: str, thread_id: str | None = None,
         # rather than a nudge on the first.
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = in_reply_to
-    # Plain text only, deliberately.
-    #
-    # There used to be an HTML alternative alongside this, on the theory that
-    # Gmail rewraps plain text badly. Gmail prefers the HTML part, and what it
-    # showed was not the note that was written: the "  - " achievements became
-    # a real <ul> with bullet glyphs, "Thanks," and the name were folded onto
-    # one line, and the portfolio URL rendered as a blue link. Beside the same
-    # message typed by hand, that reads as a mail-merge -- which is exactly
-    # what a recruiter screens out. A one-to-one email from a person is plain
     msg.set_content(body)
+    # Both parts, character for character the same. The HTML one exists only
+    # because Gmail renders text/plain in a fixed narrow column whatever the
+    # window width -- see as_html, which transcribes rather than interprets,
+    # so nothing becomes a bulleted list or a blue link on the way out.
+    msg.add_alternative(as_html(body), subtype="html")
 
     for path in (attachments or []):
         data = pathlib.Path(path).read_bytes()
