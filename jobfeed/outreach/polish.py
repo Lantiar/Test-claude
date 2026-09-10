@@ -24,12 +24,12 @@ import urllib.request
 
 from .profile import ME, signature
 
-ENDPOINT = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/") \
+ENDPOINT = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/") \
     + "/chat/completions"
 # nano returned HTML on a third of real drafts -- <ul> markup in a plain-text
 # email -- and each of those cost a rejection plus a retry. mini refuses less
 # often, so in practice it is both better behaved and slightly cheaper.
-MODEL = os.getenv("OUTREACH_POLISH_MODEL", "gpt-4.1-mini")
+MODEL = os.getenv("OUTREACH_POLISH_MODEL") or "gpt-4.1-mini"
 
 # Per million tokens, for reporting what a run cost. A stale number here makes
 # a wrong report, never a wrong decision.

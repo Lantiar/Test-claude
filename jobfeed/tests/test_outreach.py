@@ -1740,6 +1740,30 @@ def test_a_recruiter_is_anyone_the_ranking_recognises(con):
         assert not _apify.is_recruiter(headline), headline
 
 
+def test_an_empty_environment_variable_means_unset_not_match_nothing(monkeypatch):
+    """A GitHub Actions variable that is not set reaches the process as an
+    empty string, not as absent -- so getenv("OUTREACH_COUNTRY", "US") returns
+    "". That emptied the location filter and made in_country() reject everyone
+    whose country was known: two runs found fourteen Coinbase recruiters,
+    discarded all of them, and reported an employer with no recruiting team."""
+    import importlib
+    from jobfeed.outreach import apify as _apify
+
+    monkeypatch.setenv("OUTREACH_COUNTRY", "")
+    monkeypatch.setenv("OUTREACH_SEARCH_LADDER", "")
+    monkeypatch.setenv("OUTREACH_MIN_CREDIT", "")
+    reloaded = importlib.reload(_apify)
+    try:
+        assert reloaded.COUNTRY == "US", reloaded.COUNTRY
+        assert reloaded.LADDER == (15, 40), reloaded.LADDER
+        assert reloaded.MIN_CREDIT == 2.0, reloaded.MIN_CREDIT
+        assert reloaded.in_country({"location": {"countryCode": "US"}}), \
+            "an empty country variable dropped every recruiter with a known country"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(_apify)
+
+
 def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
     """Two independent buttons on one row. Neither answer may overwrite the
     other -- which is why the store keeps them under separate keys."""

@@ -19,7 +19,7 @@ import os
 import sqlite3
 import time
 
-DEFAULT_PATH = os.getenv("JOBFEED_DB", "data/jobfeed.sqlite3")
+DEFAULT_PATH = os.getenv("JOBFEED_DB") or "data/jobfeed.sqlite3"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS company (

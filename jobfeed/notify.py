@@ -122,7 +122,7 @@ def send_ntfy(subject: str, jobs: list[dict]) -> None:
     topic = os.getenv("NTFY_TOPIC", "")
     if not topic:
         raise RuntimeError("NTFY_TOPIC is not set")
-    server = os.getenv("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
+    server = (os.getenv("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
 
     lines = []
     for j in jobs[:20]:
@@ -172,8 +172,8 @@ def send(subject: str, text: str, html: str = "") -> None:
     if html:
         msg.add_alternative(html, subtype="html")
 
-    host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    port = int(os.getenv("SMTP_PORT", "587"))
+    host = os.getenv("SMTP_HOST") or "smtp.gmail.com"
+    port = int(os.getenv("SMTP_PORT") or "587")
     try:
         with smtplib.SMTP(host, port, timeout=30) as s:
             s.starttls(context=ssl.create_default_context())

@@ -12,7 +12,7 @@ import os
 ME = {
     "name": "Nideesh Bharath Kumar",
     "first_name": "Nideesh",
-    "email": os.getenv("OUTREACH_FROM", "bknideesh@gmail.com"),
+    "email": os.getenv("OUTREACH_FROM") or "bknideesh@gmail.com",
     "phone": "224-333-1045",
     "school": "Rutgers University - New Brunswick",
     "degree": "B.S. Computer Science and Data Science",
@@ -28,7 +28,7 @@ ME = {
 # opens the mail at all, and the shortest way to say why this one is worth
 # opening. One setting rather than composed parts: the wording is a judgement
 # call about how you want to be read, not something to derive.
-BRACKET = os.getenv("OUTREACH_BRACKET", "Prev Google/Zon")
+BRACKET = os.getenv("OUTREACH_BRACKET") or "Prev Google/Zon"
 
 
 def bracket() -> str:

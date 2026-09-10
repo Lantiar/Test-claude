@@ -175,7 +175,7 @@ def _resume(step: int) -> list[str]:
     """
     if step or not _profile.ATTACH_RESUME[0]:
         return []
-    path = os.getenv("RESUME_PATH", "config/files/resume.pdf")
+    path = os.getenv("RESUME_PATH") or "config/files/resume.pdf"
     return [path] if path and os.path.exists(path) else []
 
 

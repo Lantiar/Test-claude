@@ -21,19 +21,26 @@ from .. import normalize as _norm
 ENDPOINT = "https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
 
 # LinkedIn people search, no cookie required.
-PEOPLE_ACTOR = os.getenv("APIFY_PEOPLE_ACTOR", "harvestapi~linkedin-profile-search")
+PEOPLE_ACTOR = os.getenv("APIFY_PEOPLE_ACTOR") or "harvestapi~linkedin-profile-search"
 # SMTP mailbox verification. Not overpowered~verify-email, which is the better
 # known one: it demands full-account permissions before it will run at all, so
 # it cannot be used without a manual approval click in the Apify console.
-VERIFY_ACTOR = os.getenv("APIFY_VERIFY_ACTOR", "michael.g~email-verifier-validator")
+VERIFY_ACTOR = os.getenv("APIFY_VERIFY_ACTOR") or "michael.g~email-verifier-validator"
 # Fills a gap when the search finds the right person without an address.
-FINDER_ACTOR = os.getenv("APIFY_FINDER_ACTOR",
-                         "snipercoder~email-finder-by-name-and-domain")
+FINDER_ACTOR = os.getenv("APIFY_FINDER_ACTOR") or "snipercoder~email-finder-by-name-and-domain"
 
 # Where you are. A recruiter in Amsterdam or Bengaluru does not hire for a US
 # internship, and writing to them is a note nobody can act on -- Philips
 # returned a Dutch, a German and three Indian recruiters before this.
-COUNTRY = os.getenv("OUTREACH_COUNTRY", "US").upper()
+#
+# `or` rather than getenv's default, here and throughout: an unset GitHub
+# Actions variable reaches the process as an empty string, not as absent, so
+# `getenv("X", "US")` returns "". That emptied the location filter and made
+# in_country() reject everyone whose country was known -- two runs and $2 of
+# credit spent finding fourteen Coinbase recruiters and discarding all of
+# them, reported as an employer with no recruiting team. An empty variable
+# must mean "not set", never "match nothing".
+COUNTRY = (os.getenv("OUTREACH_COUNTRY") or "US").upper()
 COUNTRY_NAMES = {"US": "United States", "GB": "United Kingdom", "CA": "Canada",
                  "IN": "India", "DE": "Germany", "NL": "Netherlands",
                  "AU": "Australia", "SG": "Singapore", "IE": "Ireland"}
@@ -50,14 +57,14 @@ COUNTRY_NAMES = {"US": "United States", "GB": "United Kingdom", "CA": "Canada",
 # Widen it deliberately and temporarily through OUTREACH_SEARCH_LADDER when a
 # particular employer is worth the money; not as a standing default.
 LADDER = tuple(int(n) for n in
-               os.getenv("OUTREACH_SEARCH_LADDER", "15,40").split(","))
+               (os.getenv("OUTREACH_SEARCH_LADDER") or "15,40").split(","))
 
 # Refuse to start a paid search with less than this left in the month. Apify
 # answers a search it cannot afford with a 402, which arrives as an empty
 # result -- indistinguishable from an employer with no recruiters unless
 # somebody checks. Checking is one free API call, and it also leaves the feed
 # poll its own headroom instead of a lookup eating the last dollar.
-MIN_CREDIT = float(os.getenv("OUTREACH_MIN_CREDIT", "2.00"))
+MIN_CREDIT = float(os.getenv("OUTREACH_MIN_CREDIT") or "2.00")
 
 
 def remaining_credit() -> float | None:
