@@ -21,15 +21,40 @@ API = "https://gmail.googleapis.com/gmail/v1/users/me"
 
 
 def _token() -> str:
+    """A fresh access token, or an error that says what to do about it.
+
+    Google answers a dead refresh token with a bare 400, and urllib raises it
+    as "HTTP Error 400: Bad Request" -- which appeared once per queued send in
+    the runner log and told nobody anything. Every send and every reply check
+    failed for a day while the queue filled up with mail that looked merely
+    overdue. The reason is in the response body and costs nothing to read.
+    """
+    for name in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"):
+        if not os.getenv(name):
+            raise RuntimeError(f"{name} is not set, so Gmail cannot be reached")
     data = urllib.parse.urlencode({
         "client_id": os.environ["GMAIL_CLIENT_ID"],
         "client_secret": os.environ["GMAIL_CLIENT_SECRET"],
         "refresh_token": os.environ["GMAIL_REFRESH_TOKEN"],
         "grant_type": "refresh_token",
     }).encode()
-    with urllib.request.urlopen("https://oauth2.googleapis.com/token",
-                                data=data, timeout=30) as r:
-        return json.loads(r.read())["access_token"]
+    try:
+        with urllib.request.urlopen("https://oauth2.googleapis.com/token",
+                                    data=data, timeout=30) as r:
+            return json.loads(r.read())["access_token"]
+    except urllib.error.HTTPError as exc:
+        body = exc.read()[:300].decode("utf-8", "replace")
+        try:
+            err = json.loads(body)
+            detail = err.get("error_description") or err.get("error") or body
+        except Exception:
+            detail = body
+        if "invalid_grant" in body:
+            raise RuntimeError(
+                f"Gmail refused the refresh token ({detail}). It has expired or "
+                "been revoked -- mint a new GMAIL_REFRESH_TOKEN and update it "
+                "everywhere it is set, including the GitHub secret.") from exc
+        raise RuntimeError(f"Gmail refused the credentials: {detail}") from exc
 
 
 def _get(path: str, token: str, **params):

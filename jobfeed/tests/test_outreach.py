@@ -1880,6 +1880,43 @@ def test_the_html_part_is_a_transcription_not_a_rendering():
     assert "&amp;" in as_html("  - Data Analytics Intern - Risk & Controls")
 
 
+def test_a_dead_refresh_token_says_so(monkeypatch):
+    """Google answers a revoked token with a bare 400, which urllib raises as
+    "HTTP Error 400: Bad Request". That line appeared once per queued send in
+    the runner log for a day, and told nobody anything -- the queue just
+    looked overdue. The reason is in the response body."""
+    import io, urllib.error
+    from jobfeed.outreach import gmail as _gmail
+
+    def refused(*a, **k):
+        raise urllib.error.HTTPError(
+            "https://oauth2.googleapis.com/token", 400, "Bad Request", {},
+            io.BytesIO(b'{"error":"invalid_grant",'
+                       b'"error_description":"Token has been expired or revoked."}'))
+
+    monkeypatch.setenv("GMAIL_CLIENT_ID", "id")
+    monkeypatch.setenv("GMAIL_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GMAIL_REFRESH_TOKEN", "dead")
+    monkeypatch.setattr(_gmail.urllib.request, "urlopen", refused)
+
+    with pytest.raises(RuntimeError) as exc:
+        _gmail._token()
+    said = str(exc.value)
+    assert "expired or been revoked" in said, said
+    assert "GMAIL_REFRESH_TOKEN" in said and "GitHub secret" in said, said
+    assert "Bad Request" not in said, said
+
+
+def test_a_missing_gmail_variable_is_named(monkeypatch):
+    """Rather than a KeyError naming a dict lookup."""
+    from jobfeed.outreach import gmail as _gmail
+    monkeypatch.setenv("GMAIL_CLIENT_ID", "id")
+    monkeypatch.setenv("GMAIL_CLIENT_SECRET", "secret")
+    monkeypatch.delenv("GMAIL_REFRESH_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="GMAIL_REFRESH_TOKEN is not set"):
+        _gmail._token()
+
+
 def test_a_cold_note_carries_no_link_when_the_resume_is_attached(monkeypatch):
     """A bare URL is the thing bulk mail leads with, and the attachment is
     right there in the same message."""
