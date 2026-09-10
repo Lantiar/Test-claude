@@ -73,12 +73,13 @@ MULTI_SUBJECTS = [
 # four long posting titles run into one sentence are unreadable, and reading
 # like a mail merge is the one thing this copy cannot afford.
 MULTI_OPENERS = [
-    "I applied to {n} openings at {company}{for_season} and wanted to put a "
-    "name to the applications:",
-    "I have just applied to {n} roles at {company}{for_season}. Rather than "
-    "send {n} separate notes, here is one:",
-    "I submitted applications for {n} {company} openings{for_season} and "
-    "thought it was worth reaching out once:",
+    "I hope you're doing well. I recently submitted applications for {n} "
+    "{company} openings{for_season} and thought it was worth reaching out "
+    "once:",
+    "I hope you're doing well. I recently applied to {n} roles at "
+    "{company}{for_season}. Rather than send {n} separate notes, here is one:",
+    "I hope you're doing well. I put in applications for {n} openings at "
+    "{company}{for_season} recently and wanted to put a name to them:",
 ]
 
 # What a subject line has to fit in. Gmail shows roughly this much on a
@@ -87,13 +88,23 @@ MULTI_OPENERS = [
 SUBJECT_MAX = 72
 
 # ---- openers --------------------------------------------------------------
+#
+# His own wording, from the note he writes by hand: the pleasantry, then "the
+# {company} {role} position" rather than "{company}'s". Three variants so
+# fifty sends are not fifty identical strings, differing only in the verb --
+# the shape is the same, because the shape is the part he liked.
+#
+# season_role, not role. His reference note names no season because Coinbase
+# did not put one in the title; where an employer does, saying it once is the
+# difference between an application a recruiter can find and one they cannot.
+# The season logic upstream already guarantees it appears exactly once.
 OPENERS = [
-    "I applied for the {role} role at {company}{for_season} and wanted to "
-    "put a name to the application.",
-    "I just applied to {company}'s {season_role} opening and wanted to "
-    "introduce myself directly.",
-    "I submitted an application for {company}'s {season_role} position and "
-    "thought it was worth reaching out.",
+    "I hope you're doing well. I recently submitted an application for the "
+    "{company} {season_role} position and thought it was worth reaching out.",
+    "I hope you're doing well. I recently applied for the {company} "
+    "{season_role} position and thought it was worth reaching out.",
+    "I hope you're doing well. I put in an application for the {company} "
+    "{season_role} position recently and thought it was worth reaching out.",
 ]
 
 # ---- follow-ups -----------------------------------------------------------
@@ -290,17 +301,20 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         # reads as a second cold email rather than a nudge on the first.
         return subject, body, f"{variant}f{step}"
 
-    wins = "\n".join(f"  - {label}: {text}" for label, text in WINS[:3])
+    # Four, as he writes it. The lead-in sits directly on top of the list
+    # rather than trailing the education sentence, and there is no blank line
+    # between them: a heading belongs to what it introduces.
+    wins = "\n".join(f"  - {label}: {text}" for label, text in WINS[:4])
     body = (
         f"Hi {fields['first_name']},\n\n"
         f"{_pick(MULTI_OPENERS if multi else OPENERS, cid).format(**fields)}"
         f"{_role_list(titles)}\n\n"
         f"I am a {ME['degree']} student at {ME['school']} "
-        f"({ME['honors']}, {ME['gpa']} GPA), graduating {ME['grad']}. "
-        f"A few things I have worked on:\n\n"
+        f"({ME['honors']}, {ME['gpa']} GPA), graduating {ME['grad']}.\n\n"
+        f"A few things I have worked on:\n"
         f"{wins}\n\n"
-        f"I would be glad to be considered and would appreciate any guidance "
-        f"on the process. {_where_the_resume_is()}\n\n"
+        f"I would love to learn more about the next steps in the application "
+        f"process. {_where_the_resume_is()}\n\n"
         f"Thanks,\n{ME['first_name']}\n"
         + (f"\n{signature()}\n" if signature() else "")
     )

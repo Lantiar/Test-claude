@@ -35,22 +35,27 @@ def bracket() -> str:
     return BRACKET.strip()
 
 
-# Three achievements, ordered strongest first. Each is one line, each carries a
-# number, and each is verbatim from the resume rather than a paraphrase that
-# drifts. A template picks the first two or three depending on length.
+# The achievements, ordered strongest first, worded as he writes them himself:
+# a capitalised verb after the colon and a full stop at the end. Each is one
+# line, each carries a number, and each is verbatim from the resume rather
+# than a paraphrase that drifts. The note uses the first four.
 WINS = [
     ("Google SWE Intern",
-     "built the context engine for Gemini Enterprise's orchestration layer, "
-     "cutting plan hallucination from 33% to 2% via a self-healing A2A judge loop"),
+     "Built a context engine for Gemini Enterprise's orchestration layer, "
+     "cutting plan hallucination from 33% to 2% via a self-healing A2A judge "
+     "loop."),
+    ("Amazon SWE Intern",
+     "Architected SageMaker/Bedrock inference microservices for a capital "
+     "project cost platform, serving 12 models at 150 req/sec."),
     ("J&J SWE Intern",
-     "shipped Databricks/Postgres pipelines over petabyte-scale data, "
-     "saving ~$50K and 460 hours a year"),
+     "Shipped Databricks/Postgres pipelines over petabyte-scale data, saving "
+     "~$50K and 460 hours a year."),
     ("Rutgers IFH",
-     "built ML infrastructure processing 500M+ healthcare records at "
-     "300K rows/min"),
+     "Developed ML infrastructure processing 500M+ healthcare records at "
+     "300K rows/min."),
     ("HackRU",
-     "won 1st in track and 2nd overall across two hackathons, most recently an "
-     "AI dementia-care platform on FastAPI, OpenCV and Snowflake"),
+     "Won 1st in track and 2nd overall across two hackathons, most recently "
+     "an AI dementia-care platform on FastAPI, OpenCV and Snowflake."),
 ]
 
 
