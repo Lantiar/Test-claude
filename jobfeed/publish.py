@@ -164,6 +164,12 @@ def publish(con, out: str = "site", recent_days: int = 14) -> dict:
 
     shutil.copyfile(os.path.join(os.path.dirname(__file__), "web.html"),
                     os.path.join(out, "index.html"))
+    # Google will not take an OAuth app out of Testing without a privacy
+    # policy at a real URL, and an app left in Testing has its refresh token
+    # revoked every seven days -- which is how sending and reply-reading
+    # stopped for a week without anything saying so.
+    shutil.copyfile(os.path.join(os.path.dirname(__file__), "privacy.html"),
+                    os.path.join(out, "privacy.html"))
     # The write endpoint, for the deployment that has one. Harmless where
     # nothing runs it: GitHub Pages serves the file as text, the page's probe
     # fails, and it falls back to keeping stages in the browser.
