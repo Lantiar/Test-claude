@@ -95,6 +95,7 @@ jobfeed/
     guards.py       cooldowns, suppression, scatter scheduling, the breaker
     gmail.py        send, read, classify replies and bounces
     board.py        Upstash: the shared state between web and runner
+                    (plus `finds`: addresses looked up without a letter)
     run.py          the five passes, and serve_board() which drives them
   tests/            test_outreach.py (113), e2e_demo.py, timeline_demo.py
 ```

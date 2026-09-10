@@ -290,6 +290,37 @@ def _recruiters(con, company: str, company_id: int | None, limit: int) -> list[d
     return roster()[:limit]
 
 
+# ---- 1a. addresses only ---------------------------------------------------
+
+def find_contacts(con, job_key: str, limit: int = 3) -> dict:
+    """Who to write to at this job's company, and nothing else.
+
+    The same search, the same verification, the same ninety-day cache as
+    `prepare` -- it stops before the letter. For when you would rather write
+    the note yourself.
+    """
+    row = con.execute("""
+        SELECT c.name company, c.id company_id FROM job j
+        LEFT JOIN company c ON c.id = j.company_id
+        WHERE COALESCE(j.ats_key, j.url_key, j.canonical_url) = ?""",
+        (job_key,)).fetchone()
+    if not row or not row["company"]:
+        return {"people": [], "note": "no company on that job"}
+
+    people = _recruiters(con, row["company"], row["company_id"], limit * 2)
+    # An address that would bounce is not an address. Same test the send path
+    # uses, so what comes back here is what outreach would have written to.
+    usable = [p for p in people
+              if p.get("email") and p.get("email_status") not in
+              ("invalid", "bounced", "risky")][:limit]
+    if not usable:
+        found = len(people)
+        return {"people": [],
+                "note": f"no usable address among {found} found" if found
+                        else "no recruiters found"}
+    return {"people": usable, "note": ""}
+
+
 def _set_status(con, contact_id: int, status: str) -> None:
     con.execute("UPDATE contact SET email_status=?, verified_at=? WHERE id=?",
                 (status, time.time(), contact_id))
@@ -471,8 +502,8 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
     left alone -- the button is the consent, and one press must not become mail
     to every company on the board.
     """
-    out = {"queued": 0, "drafted": 0, "waiting": 0, "sent": 0, "replied": 0,
-           "problems": []}
+    out = {"queued": 0, "drafted": 0, "waiting": 0, "found": 0, "sent": 0,
+           "replied": 0, "problems": []}
     if not _board.available():
         out["problems"].append("no Upstash credentials; the board is unreadable")
         return out
@@ -510,6 +541,18 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
     con.commit()
 
     out["applied"] = _apply_commands(con)
+
+    # Addresses without a letter. Answered before drafting, because it is the
+    # cheaper half of the same work and its answer stands on its own.
+    for job_key in _board.find_asked():
+        try:
+            got = find_contacts(con, job_key, limit=per_company)
+            _board.find_write(job_key, "done" if got["people"] else "none",
+                              people=got["people"], note=got["note"])
+            out["found"] += len(got["people"])
+        except Exception as exc:
+            _board.find_write(job_key, "failed", note=f"{type(exc).__name__}: {exc}")
+            out["problems"].append(f"find {job_key[:36]}: {exc}")
 
     asked = _board.queued()
     out["queued"] = len(asked)

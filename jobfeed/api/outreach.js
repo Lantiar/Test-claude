@@ -12,6 +12,9 @@
 
 const KEY = "jobfeed:outreach";
 const STATE_KEY = "jobfeed:outreach:state";
+// Addresses found without writing a letter. Its records name real people,
+// so unlike the outreach hash it is only ever served behind the passphrase.
+const FIND_KEY = "jobfeed:outreach:finds";
 const CMD_KEY = "jobfeed:outreach:cmds";
 const PROFILE_KEY = "jobfeed:outreach:profile";
 const RESUME_KEY = "jobfeed:outreach:resume";
@@ -90,11 +93,16 @@ export default async function handler(req, res) {
         if (!secret || !sameSecret(req.headers["x-passphrase"] || "", secret)) {
           return res.status(401).json({ error: "wrong passphrase" });
         }
-        const [blob, cmds, prof] = await Promise.all([
+        const [blob, cmds, prof, foundFlat] = await Promise.all([
           redis(["GET", STATE_KEY]),
           redis(["HGETALL", CMD_KEY]),
           redis(["GET", PROFILE_KEY]),
+          redis(["HGETALL", FIND_KEY]),
         ]);
+        const finds = {};
+        for (let i = 0; i < (foundFlat || []).length; i += 2) {
+          try { finds[foundFlat[i]] = JSON.parse(foundFlat[i + 1]); } catch (e) {}
+        }
         const pending = [];
         for (let i = 0; i < (cmds || []).length; i += 2) {
           try { pending.push({ id: cmds[i], ...JSON.parse(cmds[i + 1]) }); } catch (e) {}
@@ -103,7 +111,7 @@ export default async function handler(req, res) {
         try { state = blob ? JSON.parse(blob) : {}; } catch (e) { state = {}; }
         let settings = {};
         try { settings = prof ? JSON.parse(prof) : {}; } catch (e) { settings = {}; }
-        return res.status(200).json({ state, pending, settings });
+        return res.status(200).json({ state, pending, settings, finds });
       }
       const flat = (await redis(["HGETALL", KEY])) || [];
       const outreach = {};
@@ -231,6 +239,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ saved: { key, ...record } });
       }
 
+      // Addresses only: no draft, no send. The page asks; the runner writes
+      // the answer straight to the store, so this end only ever takes the ask.
+      if (body.find) {
+        await redis(["HSET", FIND_KEY, key, JSON.stringify(
+          { state: "asked", at: Math.floor(Date.now() / 1000) })]);
+        return res.status(200).json({ saved: { key, state: "asked" } });
+      }
+
       // A request from the page. Refused if one is already in flight or done,
       // so a double click cannot queue a second batch to the same company.
       const existing = await redis(["HGET", KEY, key]);
@@ -255,6 +271,7 @@ export default async function handler(req, res) {
       const key = (req.query && req.query.key) || "";
       if (!key) return res.status(400).json({ error: "which job? send ?key=" });
       await redis(["HDEL", KEY, key]);
+      await redis(["HDEL", FIND_KEY, key]);
       return res.status(200).json({ cleared: key });
     }
 

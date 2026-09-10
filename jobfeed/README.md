@@ -242,6 +242,13 @@ jobfeed outreach status           # counts, and the bounce breaker
 `dispatch` is the only command that can put mail in front of a stranger and it
 will not do so without `--send`.
 
+Next to the ▶ button on every applied job there is a second one, **✉ emails**.
+It runs the same search, the same country filter and the same verification,
+and stops there: three addresses to write to yourself, no draft and nothing
+queued. The two buttons are independent -- asking for addresses never queues
+mail. Addresses are held apart from the public per-job state and are served
+only with the passphrase.
+
 ### What stops it embarrassing you
 
 - **One note per company per day**, and one company per week across

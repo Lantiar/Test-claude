@@ -225,6 +225,7 @@ def cmd_outreach_board(args, con) -> int:
     d = _outreach("serve_board")(con, send=args.send, per_company=args.per_company)
     print(f"{d['queued']} requested, {d['drafted']} drafted, "
           f"{d.get('waiting', 0)} already waiting, "
+          f"{d.get('found', 0)} address(es) looked up, "
           f"{'sent' if args.send else 'would send'} {d['sent']}, "
           f"{d['replied']} reply(s)")
     for p in d["problems"]:

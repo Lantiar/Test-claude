@@ -18,6 +18,7 @@ import urllib.request
 
 KEY = "jobfeed:outreach"
 STAGE_KEY = "jobfeed:stages"
+FIND_KEY = "jobfeed:outreach:finds"
 
 
 def _creds() -> tuple[str, str] | None:
@@ -92,6 +93,47 @@ def write(job_key: str, state: str, note: str = "", thread: str = "",
     if sent:
         record["sent"] = int(sent)
     _redis(["HSET", KEY, job_key, json.dumps(record)])
+
+
+# ---- addresses without a letter -------------------------------------------
+#
+# The same search and the same verification as outreach, stopping before
+# anything is written. Its own hash rather than a field on the outreach
+# record: `write` replaces a record wholesale, so a "reached" from the mail
+# pass would silently take the addresses with it.
+#
+# Records hold real addresses, so unlike the outreach state this is never
+# served without the passphrase.
+
+def finds() -> dict[str, dict]:
+    """job_key -> {state, at, people, note}."""
+    flat = _redis(["HGETALL", FIND_KEY]) or []
+    out: dict[str, dict] = {}
+    for i in range(0, len(flat) - 1, 2):
+        try:
+            out[flat[i]] = json.loads(flat[i + 1])
+        except Exception:
+            pass
+    return out
+
+
+def find_asked() -> list[str]:
+    """The job keys someone has asked for addresses on."""
+    return [k for k, v in finds().items() if v.get("state") == "asked"]
+
+
+def find_write(job_key: str, state: str, people: list[dict] | None = None,
+               note: str = "") -> None:
+    record = {"state": state, "at": int(time.time())}
+    if people:
+        record["people"] = [
+            {"name": p.get("full_name") or "", "title": (p.get("title") or "")[:160],
+             "email": p.get("email") or "",
+             "status": p.get("email_status") or "unknown"}
+            for p in people[:10]]
+    if note:
+        record["note"] = note[:300]
+    _redis(["HSET", FIND_KEY, job_key, json.dumps(record)])
 
 
 def stages() -> dict[str, str]:

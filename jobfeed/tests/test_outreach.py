@@ -1396,9 +1396,10 @@ def test_moving_a_job_back_to_interested_also_stops_it(con, monkeypatch):
 class _Board:
     """A stand-in for the Upstash hash, with the same shape."""
 
-    def __init__(self, stages=None, requests=()):
+    def __init__(self, stages=None, requests=(), finds=()):
         self._stages = stages or {}
         self.records = {k: {"state": "queued"} for k in requests}
+        self.found = {k: {"state": "asked"} for k in finds}
 
     def available(self): return True
     def stages(self): return dict(self._stages)
@@ -1409,6 +1410,19 @@ class _Board:
     def write(self, key, state, note="", thread="", sent=0):
         self.records[key] = {"state": state, "note": note, "thread": thread,
                              "sent": sent}
+
+    # Addresses without a letter, in its own hash for the same reason the real
+    # one uses a second key: `write` replaces a record whole.
+    def finds(self): return dict(self.found)
+    def find_asked(self): return [k for k, v in self.found.items()
+                                  if v.get("state") == "asked"]
+
+    def find_write(self, key, state, people=None, note=""):
+        self.found[key] = {"state": state, "note": note,
+                           "people": [{"name": p.get("full_name"),
+                                       "email": p.get("email"),
+                                       "status": p.get("email_status")}
+                                      for p in (people or [])]}
 
     # Persistence is exercised by _Store below; these keep the tests that are
     # about something else from having to care about it.
@@ -1422,9 +1436,9 @@ class _Board:
         self.cmds = [c for c in self.cmds if c.get("id") != command_id]
 
 
-def _board(monkeypatch, con, cid, stages, requests):
+def _board(monkeypatch, con, cid, stages, requests, finds=()):
     from jobfeed.outreach import run as _run
-    b = _Board(stages, requests)
+    b = _Board(stages, requests, finds)
     monkeypatch.setattr(_run, "_board", b)
     return b
 
@@ -1553,6 +1567,100 @@ def test_a_second_pass_over_armed_mail_does_not_report_it_held(con, monkeypatch)
     # and the mail is untouched: a re-report must not re-draft or drop it
     assert con.execute("SELECT count(*) FROM outreach WHERE status='queued'"
                        ).fetchone()[0] == armed
+
+
+# ---- addresses without a letter -------------------------------------------
+
+def test_asking_for_addresses_finds_three_and_writes_nothing(con, monkeypatch):
+    """The whole point: the search and the verification run, and the drafting
+    does not. A button that quietly queued mail would be the worst possible
+    reading of "just give me the emails"."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    b = _board(monkeypatch, con, cid, stages={"https://acme/1": "applied"},
+               requests=[], finds=["https://acme/1"])
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+
+    out = _run.serve_board(con, send=False)
+
+    assert out["found"] == 3, out
+    record = b.found["https://acme/1"]
+    assert record["state"] == "done", record
+    assert [p["email"] for p in record["people"]] == [
+        "rec1@acme.com", "rec2@acme.com", "rec3@acme.com"], record
+    assert all(p["status"] == "verified" for p in record["people"]), record
+    # nothing drafted, nothing queued, nothing sent
+    assert out["drafted"] == 0 and out["sent"] == 0, out
+    assert con.execute("SELECT count(*) FROM outreach").fetchone()[0] == 0
+    # and the mail button is untouched: asking for addresses is not asking
+    # for a letter
+    assert "https://acme/1" not in b.records, b.records
+
+
+def test_an_address_that_would_bounce_is_not_offered(con, monkeypatch):
+    """Same test the send path applies. Handing over an address outreach
+    would refuse to write to is handing over a bounce."""
+    from jobfeed.outreach import run as _run, apify as _apify
+    cid = _company(con, "Acme")
+    people = [
+        {"full_name": "Bad One", "first_name": "Bad", "title": "Recruiter",
+         "linkedin_url": "", "email": "bad@acme.com", "email_status": "invalid"},
+        {"full_name": "Risky One", "first_name": "Risky", "title": "Recruiter",
+         "linkedin_url": "", "email": "risky@acme.com", "email_status": "risky"},
+        {"full_name": "No Address", "first_name": "No", "title": "Recruiter",
+         "linkedin_url": "", "email": None, "email_status": "unknown"},
+        {"full_name": "Good One", "first_name": "Good", "title": "Recruiter",
+         "linkedin_url": "", "email": "good@acme.com", "email_status": "verified"},
+    ]
+    monkeypatch.setattr(_apify, "find_recruiters", lambda c, n=3: people)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+
+    got = _run.find_contacts(con, "https://acme/1", limit=3)
+
+    assert [p["email"] for p in got["people"]] == ["good@acme.com"], got
+
+
+def test_a_company_with_nobody_reachable_says_so(con, monkeypatch):
+    """Rather than an empty list the page would render as "0 emails" with no
+    reason attached."""
+    from jobfeed.outreach import run as _run, apify as _apify
+    cid = _company(con, "Acme")
+    monkeypatch.setattr(_apify, "find_recruiters", lambda c, n=3: [])
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    b = _board(monkeypatch, con, cid, stages={"https://acme/1": "applied"},
+               requests=[], finds=["https://acme/1"])
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+
+    _run.serve_board(con, send=False)
+
+    record = b.found["https://acme/1"]
+    assert record["state"] == "none" and "no recruiters" in record["note"], record
+
+
+def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
+    """Two independent buttons on one row. Neither answer may overwrite the
+    other -- which is why the store keeps them under separate keys."""
+    from jobfeed.outreach import run as _run
+    cid = _company(con, "Acme")
+    _roster(monkeypatch)
+    _job(con, cid, "https://acme/1", "SWE Intern")
+    con.execute("DELETE FROM application")
+    con.commit()
+    b = _board(monkeypatch, con, cid, stages={"https://acme/1": "applied"},
+               requests=["https://acme/1"], finds=["https://acme/1"])
+    monkeypatch.setattr(_run, "watch", lambda c: {"human": 0})
+
+    out = _run.serve_board(con, send=False)
+
+    assert out["found"] == 3 and out["drafted"] == 3, out
+    assert b.found["https://acme/1"]["state"] == "done"
+    assert b.records["https://acme/1"]["state"] == "queued"
 
 
 # ---- surviving a rebuild --------------------------------------------------
