@@ -141,7 +141,10 @@ OUTREACH_SEND          "1" arms the send. Anything else = dry run.
 OUTREACH_FROM          the From address
 OUTREACH_BRACKET       subject-line bracket, default "Prev Google/Zon"
 OUTREACH_COUNTRY       where recruiters must be, default "US"
-OUTREACH_SEARCH_LADDER how far to widen a thin search, default "15,45,100,200"
+OUTREACH_SEARCH_LADDER how far to widen a thin search, default "15,40". Each
+                       rung is a fresh search, so the cost is the SUM.
+OUTREACH_MIN_CREDIT    refuse a paid search below this much Apify credit ($2)
+JOBFEED_IG_MIN_MINUTES how often Instagram may be scraped, default 120
 NOTIFY_TO              feed notification recipient
 IG_TARGET              the Instagram account, default "zero2sudo"
 JOBFEED_MIN_MINUTES    minimum gap between runs, default 20

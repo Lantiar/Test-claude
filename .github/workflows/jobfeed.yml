@@ -73,6 +73,37 @@ jobs:
 
       # No setup-python and no pip: jobfeed is pure standard library, and the
       # runner's python3 is all it needs.
+      # Simplify is a cached GitHub file and is free however often it is read.
+      # Instagram is a paid scrape at about $0.015 a run, which at every half
+      # hour is $22 a month against a $29 plan -- it left about $6 a month for
+      # everything else and then ran the account dry. Its cadence is now its
+      # own, read from the last run's own record of when it went, so the two
+      # sources no longer share a clock.
+      - name: Is Instagram due?
+        id: ig
+        env:
+          IG_MIN_MINUTES: ${{ vars.JOBFEED_IG_MIN_MINUTES || 120 }}
+        run: |
+          if [ ! -f previous_meta.json ]; then
+            echo "no previous run to compare against; polling it"; exit 0
+          fi
+          AGE=$(python3 - <<'PY' 2>/dev/null || echo 999
+          import json, time, datetime
+          m = json.load(open("previous_meta.json"))
+          for s in m.get("sources", []):
+              if s.get("source") == "instagram" and s.get("last_run_at"):
+                  t = datetime.datetime.fromisoformat(s["last_run_at"]).timestamp()
+                  print(int((time.time() - t) // 60)); break
+          else:
+              print(999)
+          PY
+          )
+          echo "instagram last went $AGE minutes ago (minimum gap $IG_MIN_MINUTES)"
+          if [ "$AGE" -lt "$IG_MIN_MINUTES" ]; then
+            echo "skip=instagram" >> "$GITHUB_OUTPUT"
+            echo "too soon for a paid scrape -- Simplify only this cycle"
+          fi
+
       - name: Poll and publish
         if: steps.guard.outputs.skip != 'true'
         env:
@@ -87,7 +118,7 @@ jobs:
           set -e
           python3 --version
           [ -f previous.json ] && python3 -m jobfeed.cli seed previous.json
-          python3 -m jobfeed.cli run --retire
+          python3 -m jobfeed.cli run --retire --skip "${{ steps.ig.outputs.skip }}"
           # Mail whatever is new, before publishing, so the watermark the
           # notifier moves is the one that gets written into meta.json and
           # survives the next rebuild. Never fatal: a mail that does not go

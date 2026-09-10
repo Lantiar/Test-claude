@@ -1670,6 +1670,51 @@ def test_a_search_that_did_not_run_is_not_reported_as_nobody_there(con, monkeypa
     assert "no recruiters found" not in record["note"], record
 
 
+def test_a_search_is_refused_before_it_can_fail_on_credit(con, monkeypatch):
+    """The floor exists so the 402 never happens: a search that cannot be paid
+    for returns nothing, and nothing is indistinguishable from an employer
+    with no recruiters. Refusing first also leaves the feed poll its budget
+    rather than letting a lookup spend the last dollar."""
+    from jobfeed.outreach import apify as _apify
+
+    called = []
+    monkeypatch.setattr(_apify, "_call", lambda *a, **k: called.append(a) or [])
+    monkeypatch.setattr(_apify, "remaining_credit", lambda: 0.014)
+    monkeypatch.setattr(_apify, "MIN_CREDIT", 2.0)
+
+    with pytest.raises(RuntimeError) as exc:
+        _apify.find_recruiters("Acme", 3)
+    assert "credit" in str(exc.value) and "0.01" in str(exc.value)
+    assert not called, "it spent money it had already been told it did not have"
+
+    # And an account that reads fine is not blocked.
+    monkeypatch.setattr(_apify, "remaining_credit", lambda: 12.0)
+    _apify.find_recruiters("Acme", 3)
+    assert called, "a funded account must still be able to search"
+
+
+def test_an_unreadable_balance_is_not_treated_as_broke(con, monkeypatch):
+    """None is not zero. A blip on the limits endpoint must not become a
+    pipeline that quietly refuses to do anything."""
+    from jobfeed.outreach import apify as _apify
+    called = []
+    monkeypatch.setattr(_apify, "_call", lambda *a, **k: called.append(a) or [])
+    monkeypatch.setattr(_apify, "remaining_credit", lambda: None)
+    monkeypatch.setattr(_apify, "MIN_CREDIT", 2.0)
+    _apify.find_recruiters("Acme", 3)
+    assert called
+
+
+def test_the_ladder_does_not_climb_into_dollars(con):
+    """Each rung is a fresh search, so the ladder's cost is its sum, not its
+    largest rung. 15,45,100,200 was 360 profiles -- $3.60 for one company that
+    yields nobody, which is how a month of credit went in an afternoon."""
+    from jobfeed.outreach import apify as _apify
+    assert sum(_apify.LADDER) <= 60, (
+        f"ladder {_apify.LADDER} would spend ~${sum(_apify.LADDER) * 0.01:.2f} "
+        "on a company that yields nobody")
+
+
 def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
     """Two independent buttons on one row. Neither answer may overwrite the
     other -- which is why the store keeps them under separate keys."""
@@ -2161,8 +2206,8 @@ def test_the_search_widens_until_it_finds_enough(monkeypatch):
                      "currentPosition": [{"companyName": "Amex", "companyLinkedinUrl":
                          "https://www.linkedin.com/company/amex/"}]}]
         sizes.append(payload["maxItems"])
-        # Nobody usable until the third rung.
-        if len(sizes) < 3:
+        # Nobody usable until the last rung, whatever the ladder is set to.
+        if len(sizes) < len(apify.LADDER):
             return [{"firstName": f"R{i}", "lastName": "P", "headline": "Recruiter",
                      "linkedinUrl": "", "emails": [],
                      "location": {"countryCode": "US"},
@@ -2175,7 +2220,10 @@ def test_the_search_widens_until_it_finds_enough(monkeypatch):
 
     monkeypatch.setattr(apify, "_call", fake)
     found = apify.find_recruiters("Amex", 3)
-    assert sizes == sorted(sizes) and len(sizes) == 3, sizes
+    # Every rung, in order -- not a fixed count. The ladder is a cost
+    # decision that gets retuned; what must hold is that a first pass
+    # yielding nobody contactable is widened rather than given up on.
+    assert sizes == list(apify.LADDER), sizes
     assert all(c["email"] for c in found)
 
 

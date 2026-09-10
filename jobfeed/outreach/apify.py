@@ -38,12 +38,51 @@ COUNTRY_NAMES = {"US": "United States", "GB": "United Kingdom", "CA": "Canada",
                  "IN": "India", "DE": "Germany", "NL": "Netherlands",
                  "AU": "Australia", "SG": "Singapore", "IE": "Ireland"}
 
-# How far to keep widening when a company is not yielding anybody usable. Each
-# rung costs about a cent per profile, so this stops rather than spending
-# without limit -- but it goes far enough that a big employer whose campus
-# recruiter sits outside the first page is still found.
+# How far to keep widening when a company is not yielding anybody usable.
+#
+# Each rung is a *fresh* search, not a continuation of the last one, so
+# climbing 15,45,100,200 pays for 360 profiles rather than 200. At about a
+# cent a profile that is $3.60 spent on a single company that yields nobody --
+# which is how a month of credit went in an afternoon.
+#
+# Two rungs. The common case costs 15 profiles, the worst case 55, and a big
+# employer whose campus recruiter sits outside the first page is still found.
+# Widen it deliberately and temporarily through OUTREACH_SEARCH_LADDER when a
+# particular employer is worth the money; not as a standing default.
 LADDER = tuple(int(n) for n in
-               os.getenv("OUTREACH_SEARCH_LADDER", "15,45,100,200").split(","))
+               os.getenv("OUTREACH_SEARCH_LADDER", "15,40").split(","))
+
+# Refuse to start a paid search with less than this left in the month. Apify
+# answers a search it cannot afford with a 402, which arrives as an empty
+# result -- indistinguishable from an employer with no recruiters unless
+# somebody checks. Checking is one free API call, and it also leaves the feed
+# poll its own headroom instead of a lookup eating the last dollar.
+MIN_CREDIT = float(os.getenv("OUTREACH_MIN_CREDIT", "2.00"))
+
+
+def remaining_credit() -> float | None:
+    """Dollars left in this Apify billing cycle, or None if it cannot be read.
+
+    None is not zero. An account whose limits endpoint is unreachable must not
+    be treated as broke -- that would turn a blip into a pipeline that quietly
+    refuses to do anything.
+    """
+    token = os.getenv("APIFY_TOKEN", "")
+    if not token:
+        return None
+    req = urllib.request.Request(
+        "https://api.apify.com/v2/users/me/limits",
+        headers={"Authorization": "Bearer " + token})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.loads(r.read()).get("data", {})
+        cap = (d.get("limits") or {}).get("maxMonthlyUsageUsd")
+        used = (d.get("current") or {}).get("monthlyUsageUsd")
+        if cap is None or used is None:
+            return None
+        return round(float(cap) - float(used), 4)
+    except Exception:
+        return None
 
 
 def in_country(item: dict, code: str = "") -> bool:
@@ -204,6 +243,13 @@ def find_recruiters(company: str, limit: int = 3) -> list[dict]:
     address at all, so the whole run would cost money and produce nothing that
     can be written to.
     """
+    left = remaining_credit()
+    if left is not None and left < MIN_CREDIT:
+        raise RuntimeError(
+            f"only ${left:.2f} of Apify credit left this cycle (floor is "
+            f"${MIN_CREDIT:.2f}); not starting a search that would fail or "
+            f"spend the feed's budget")
+
     def search(payload: dict) -> list:
         return _call(PEOPLE_ACTOR, {
             "currentJobTitles": list(SEARCH_TITLES),

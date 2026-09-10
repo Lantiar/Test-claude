@@ -275,7 +275,26 @@ only with the passphrase.
 address, `OUTREACH_BRACKET` the subject-line bracket
 (default `Prev Google/Zon`).
 `APIFY_PEOPLE_ACTOR` and `APIFY_VERIFY_ACTOR` override the actors, since the
-Apify store churns. `OPENAI_API_KEY` enables the title cleaner and the copy editor
+Apify store churns.
+
+### What it costs, and the two things that stop it running away
+
+The people search is billed per profile returned, about a cent each, and every
+rung of `OUTREACH_SEARCH_LADDER` is a *fresh* search rather than a
+continuation -- so a ladder of `15,45,100,200` pays for 360 profiles, not 200.
+That is $3.60 for one company that yields nobody. The default is now `15,40`:
+15 profiles in the common case, 55 at worst.
+
+`OUTREACH_MIN_CREDIT` (default `$2.00`) is checked before any paid search
+starts. Apify answers a search it cannot afford with a 402, which arrives as
+an empty result -- indistinguishable from an employer with no recruiters
+unless something looks. Below the floor the search is refused with a note that
+says so, which also leaves the feed poll its own headroom.
+
+Instagram has its own cadence, `JOBFEED_IG_MIN_MINUTES` (default 120). It is a
+paid scrape at about $0.015 a run; Simplify is a cached GitHub file and is
+free however often it is read. Polling both every half hour spent $22 of a $29
+month on the paid one and left about $6 for everything else. `OPENAI_API_KEY` enables the title cleaner and the copy editor
 (`OUTREACH_POLISH_MODEL`, default `gpt-4.1-mini`); without it drafts go out
 exactly as the templates wrote them. Neither may write text: the title cleaner
 can only delete words the employer used, and the editor's revision is

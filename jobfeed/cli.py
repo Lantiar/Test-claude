@@ -74,9 +74,19 @@ def cmd_run(args, con) -> int:
     source that found nothing: poll() records the failure in source_run either
     way, and the exit code says whether anything got through -- which is what a
     cron mail or a red Actions run is actually for.
+
+    `--skip` leaves a source out of this cycle. The sources do not cost the
+    same: Simplify is a cached GitHub file and is free at any frequency, while
+    Instagram is a paid scrape at about a cent and a half a run. Polling both
+    on the same clock means paying Instagram's price for Simplify's freshness,
+    and at every half hour that is $22 of a $29 month.
     """
+    skip = {x.strip().lower() for x in (args.skip or "").split(",") if x.strip()}
     ok = 0
     for source in names():
+        if source in skip:
+            print(f"{source}: skipped this cycle")
+            continue
         try:
             c = poll(con, source)
             con.commit()
@@ -439,6 +449,8 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("run"); p.set_defaults(fn=cmd_run)
     p.add_argument("--retire", action="store_true")
+    p.add_argument("--skip", default="",
+                   help="comma-separated sources to leave out of this cycle")
 
     p = sub.add_parser("enrich"); p.set_defaults(fn=cmd_enrich)
     p.add_argument("--limit", type=int, default=40)
