@@ -129,6 +129,7 @@ def find_write(job_key: str, state: str, people: list[dict] | None = None,
         record["people"] = [
             {"name": p.get("full_name") or "", "title": (p.get("title") or "")[:160],
              "email": p.get("email") or "",
+             "linkedin": p.get("linkedin_url") or "",
              "status": p.get("email_status") or "unknown"}
             for p in people[:10]]
     if note:

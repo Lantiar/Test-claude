@@ -185,6 +185,10 @@ dialog#found::backdrop{background:rgba(0,0,0,.45)}
 #found li b{font-size:13.5px}
 #found code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
   color:var(--accent);user-select:all}
+#found a.li{display:inline-block;margin-left:10px;font-size:12px;color:var(--s-applied);
+  text-decoration:none}
+#found a.li:hover{text-decoration:underline}
+#found a.li:focus-visible{outline:2px solid var(--s-applied);outline-offset:2px}
 #found .row{display:flex;gap:8px;justify-content:flex-end;align-items:center}
 #found .row .sub{margin-right:auto}
 #found button{font:inherit;font-size:12.5px;padding:6px 14px;border-radius:6px;
@@ -978,6 +982,11 @@ function findControl(j){
             >✉ emails</button>`;
 }
 
+// These come from a third-party search and end up in an href. esc() stops the
+// attribute being broken out of; it does not stop `javascript:` from running
+// on click, so the scheme is checked rather than assumed.
+function https(u){ return /^https:\/\//i.test(String(u ?? "")); }
+
 function esc(s){ return String(s??"").replace(/[&<>"']/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
@@ -1191,7 +1200,9 @@ document.addEventListener("click", e => {
     <li><b>${esc(pn.name || pn.email)}</b>
       ${pn.status ? `<span class="pill p-${esc(pn.status)}">${esc(pn.status)}</span>` : ""}
       <div class="sub">${esc(pn.title || "")}</div>
-      <code>${esc(pn.email)}</code></li>`).join("");
+      <code>${esc(pn.email)}</code>
+      ${https(pn.linkedin) ? `<a class="li" target="_blank" rel="noopener"
+         href="${esc(pn.linkedin)}">LinkedIn ↗</a>` : ""}</li>`).join("");
   $("#found").dataset.emails = people.map(pn => pn.email).join(", ");
   $("#found").showModal();
 });

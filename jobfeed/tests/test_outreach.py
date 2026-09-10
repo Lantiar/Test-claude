@@ -1421,6 +1421,7 @@ class _Board:
         self.found[key] = {"state": state, "note": note,
                            "people": [{"name": p.get("full_name"),
                                        "email": p.get("email"),
+                                       "linkedin": p.get("linkedin_url") or "",
                                        "status": p.get("email_status")}
                                       for p in (people or [])]}
 
