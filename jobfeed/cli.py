@@ -243,6 +243,29 @@ def cmd_outreach_board(args, con) -> int:
     return 0
 
 
+def cmd_outreach_progress(args, con) -> int:
+    """What the last day's mail says about where applications stand."""
+    if args.dry_run:
+        from .outreach import progress
+        rows = con.execute("""
+            SELECT a.job_key, a.stage, c.name company FROM application a
+            JOIN job j ON COALESCE(j.ats_key, j.url_key, j.canonical_url) = a.job_key
+            LEFT JOIN company c ON c.id = j.company_id
+            WHERE a.stage NOT IN ('interested','rejected','accepted')""").fetchall()
+        apps = {r["job_key"]: r["stage"] for r in rows}
+        jobs = {r["job_key"]: r["company"] or "" for r in rows}
+        moves = progress.scan(apps, jobs, progress.recent(days=args.days))
+        print(f"{len(moves)} would move (nothing written)")
+        for key, m in moves.items():
+            print(f"  {jobs.get(key,'?')}: {m['was']} -> {m['stage']}  ({m['why']})")
+        return 0
+    moved = _outreach("advance_stages")(con, days=args.days)
+    print(f"{len(moved)} application(s) moved")
+    for m in moved:
+        print(f"  {m['company']}: {m['was']} -> {m['stage']}  ({m['why']})")
+    return 0
+
+
 def cmd_outreach_watch(args, con) -> int:
     d = _outreach("watch")(con)
     print(f"{d['seen']} new message(s): {d.get('human',0)} human, "
@@ -513,6 +536,11 @@ def main(argv=None) -> int:
     q.set_defaults(fn=cmd_outreach_board)
     q.add_argument("--send", action="store_true", help="actually send")
     q.add_argument("--per-company", type=int, default=3)
+
+    q = osub.add_parser("progress", help="move stages on from the last day's mail")
+    q.set_defaults(fn=cmd_outreach_progress)
+    q.add_argument("--days", type=float, default=1.0)
+    q.add_argument("--dry-run", action="store_true")
 
     q = osub.add_parser("watch"); q.set_defaults(fn=cmd_outreach_watch)
     q = osub.add_parser("followups"); q.set_defaults(fn=cmd_outreach_followups)

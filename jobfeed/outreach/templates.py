@@ -38,34 +38,32 @@ from .profile import ATTACH_RESUME, ME, WINS, bracket, signature
 # "Summer 2027 Software Development Engineer" with no "Intern" and no
 # "application". Dropping a whole optional phrase loses less than cutting the
 # middle out of the one that matters.
+# Two families, and only two: "Applied to X" and "Interested in the X". The
+# third used to end "- hello" or "- an applicant saying hello", which reads
+# like a mailing list introducing itself rather than a person who applied.
 SUBJECTS = [
-    ["{prefix}{season_short_role} - applied, would love to connect",
-     "{prefix}{short_role} - applied, would love to connect",
-     "{prefix}{short_role} - applied",
-     "{prefix}{short_role}"],
-    ["{prefix}Interested in the {season_short_role} role",
+    ["{prefix}Applied to the {season_short_role} role at {company}",
+     "{prefix}Applied to the {short_role} role at {company}",
+     "{prefix}Applied to the {season_short_role} role",
+     "{prefix}Applied to the {short_role} role",
+     "{prefix}Applied to {short_role}"],
+    ["{prefix}Interested in the {season_short_role} role at {company}",
+     "{prefix}Interested in the {short_role} role at {company}",
+     "{prefix}Interested in the {season_short_role} role",
      "{prefix}Interested in the {short_role} role",
-     "{prefix}Interested in {short_role}",
-     "{prefix}{short_role}"],
-    ["{prefix}{company} {season_short_role} - an applicant saying hello",
-     "{prefix}{company} {short_role} - hello from an applicant",
-     "{prefix}{company} {short_role} - hello",
-     "{prefix}{company} {short_role}"],
+     "{prefix}Interested in {short_role}"],
 ]
 
 # When one note covers several applications at the same company. Naming the
 # roles individually is what makes it read as a person who applied to three
 # things rather than a script that fired three times.
 MULTI_SUBJECTS = [
-    ["{prefix}{company} {season_and}intern applications - {n} roles",
-     "{prefix}{company} intern applications - {n} roles",
-     "{prefix}{company} intern applications"],
-    ["{prefix}Interested in {n} {company} intern roles",
-     "{prefix}Interested in {n} roles at {company}",
-     "{prefix}Interested in {company} intern roles"],
-    ["{prefix}{N} applications at {company} - a quick hello",
-     "{prefix}{company} applications - a quick hello",
-     "{prefix}{company} intern applications"],
+    ["{prefix}Applied to {n} {season_and}intern roles at {company}",
+     "{prefix}Applied to {n} intern roles at {company}",
+     "{prefix}Applied to {n} roles at {company}"],
+    ["{prefix}Interested in {n} {season_and}intern roles at {company}",
+     "{prefix}Interested in {n} intern roles at {company}",
+     "{prefix}Interested in {n} roles at {company}"],
 ]
 
 # These open the note and are followed by the list of roles. Written to end on

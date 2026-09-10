@@ -1272,6 +1272,14 @@ document.addEventListener("change", async e => {
     return;
   }
   const job = JOBS.find(j=>j.key===key); if(job) job.stage = stage;
+  // The ▶ and ✉ buttons only exist for a job you have applied to, so moving
+  // the stage has to rebuild them. Just this cell, not the whole table: a
+  // full render throws away 600 rows and the control you are still holding.
+  const cell = sel.closest("td.stagecell");
+  if(cell && job){
+    cell.querySelectorAll(".reach").forEach(b => b.remove());
+    cell.insertAdjacentHTML("beforeend", reachControl(job) + findControl(job));
+  }
   const counts = countStages();
   [...$("#pills").children].forEach(p => {
     const n = counts[p.dataset.stage];

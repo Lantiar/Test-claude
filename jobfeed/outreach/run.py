@@ -15,7 +15,8 @@ import time
 
 from .. import apply as _apply
 from .. import db as _db
-from . import apify, board as _board, guards, polish as _polish, profile as _profile, titles as _titles
+from . import (apify, board as _board, guards, polish as _polish,
+               profile as _profile, progress as _progress, titles as _titles)
 from .gmail import classify, inbound_since, send as gmail_send
 from .templates import render
 
@@ -69,10 +70,19 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = False,
         # Ask for spares. _pick_contacts only returns people it may write to,
         # and takes no replacement when one is unusable -- so a single contact
         # with no address quietly turned a batch of three into a batch of two.
-        found = _recruiters(con, company, cid, per_company * 2)
+        #
+        # The same distinction find_contacts makes, for the same reason: a
+        # search that never ran is not an employer without recruiters. Stripe
+        # was reported as having none when the truth was $1.23 of Apify credit
+        # left and a refusal to spend it -- and "no recruiters found" is a
+        # conclusion you act on by never asking again.
+        failed: list = []
+        found = _recruiters(con, company, cid, per_company * 2, errors=failed)
         stats["contacts"] += len(found)
         if not found:
-            stats["skipped"].append(f"{company}: no recruiters found")
+            stats["skipped"].append(
+                f"{company}: the search did not run: {failed[0][:160]}" if failed
+                else f"{company}: no recruiters found")
             continue
 
         emails = [c["email"] for c in found
@@ -297,6 +307,39 @@ def _recruiters(con, company: str, company_id: int | None, limit: int,
     return roster()[:limit]
 
 
+# ---- 0. where things actually stand ---------------------------------------
+
+def advance_stages(con, days: float = 1.0) -> list[dict]:
+    """Read the last day's mail and move applications that moved.
+
+    Runs before anything else on a pass: a job that was rejected this morning
+    should not have a follow-up scheduled for it this afternoon.
+    """
+    rows = con.execute("""
+        SELECT a.job_key, a.stage, c.name company
+        FROM application a
+        JOIN job j ON COALESCE(j.ats_key, j.url_key, j.canonical_url) = a.job_key
+        LEFT JOIN company c ON c.id = j.company_id
+        WHERE a.stage NOT IN ('interested', 'rejected', 'accepted')""").fetchall()
+    if not rows:
+        return []
+    applications = {r["job_key"]: r["stage"] for r in rows}
+    jobs = {r["job_key"]: r["company"] or "" for r in rows}
+
+    messages = _progress.recent(days=days)
+    moves = _progress.scan(applications, jobs, messages)
+
+    done = []
+    for job_key, move in moves.items():
+        con.execute("UPDATE application SET stage=?, updated_at=? WHERE job_key=?",
+                    (move["stage"], time.time(), job_key))
+        _board.set_stage(job_key, move["stage"])
+        done.append({"job_key": job_key, "company": jobs.get(job_key, ""), **move})
+    if done:
+        con.commit()
+    return done
+
+
 # ---- 1a. addresses only ---------------------------------------------------
 
 def find_contacts(con, job_key: str, limit: int = 3) -> dict:
@@ -519,7 +562,7 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
     to every company on the board.
     """
     out = {"queued": 0, "drafted": 0, "waiting": 0, "found": 0, "sent": 0,
-           "replied": 0, "problems": []}
+           "replied": 0, "moved": [], "problems": []}
     if not _board.available():
         out["problems"].append("no Upstash credentials; the board is unreadable")
         return out
@@ -557,6 +600,15 @@ def serve_board(con, send: bool = False, per_company: int = 3) -> dict:
     con.commit()
 
     out["applied"] = _apply_commands(con)
+
+    # Where things actually stand, before anything acts on it: a job rejected
+    # this morning must not get a follow-up scheduled this afternoon.
+    try:
+        out["moved"] = advance_stages(con)
+        for m in out["moved"]:
+            print(f"  {m['company']}: {m['was']} -> {m['stage']} ({m['why'][:60]})")
+    except Exception as exc:
+        out["problems"].append(f"stage scan: {type(exc).__name__}: {exc}")
 
     # Addresses without a letter. Answered before drafting, because it is the
     # cheaper half of the same work and its answer stands on its own.

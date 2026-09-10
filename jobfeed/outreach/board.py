@@ -149,6 +149,16 @@ def stages() -> dict[str, str]:
     return {flat[i]: flat[i + 1] for i in range(0, len(flat) - 1, 2)}
 
 
+def set_stage(job_key: str, stage: str) -> None:
+    """Move one job on the tracker, as the page's own control would.
+
+    Same hash the dashboard reads, so a stage the mail moved and a stage you
+    set by hand are the same fact stored the same way -- there is no second
+    place for "where this application actually stands" to disagree from.
+    """
+    _redis(["HSET", STAGE_KEY, job_key, stage])
+
+
 # ---- the outreach store ---------------------------------------------------
 #
 # The runner's database is rebuilt from a published snapshot on every run, and

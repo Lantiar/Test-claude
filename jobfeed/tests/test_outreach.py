@@ -482,18 +482,40 @@ def test_the_team_suffix_is_dropped_from_the_subject_but_kept_in_the_body():
 
 
 def test_the_ladder_only_drops_what_it_has_to():
-    """Otherwise every subject collapses to the barest rung. A short role
-    keeps the closing phrase; a long one gives it up and keeps the role."""
+    """Otherwise every subject collapses to the barest rung.
+
+    Asserted structurally rather than against a phrase: the wording is a
+    judgement call that gets rewritten, and a test pinned to it fails for the
+    wrong reason. What must hold is that a short role keeps the whole line --
+    season and employer -- and a long one gives those up to keep the role,
+    which is the part that says what the mail is about.
+    """
     short, _, _ = templates.render(
         {"id": 0, "first_name": "Dana"},
         {"company": "Acme", "role": "SWE Intern", "season": "Summer 2027"})
-    assert "applied, would love to connect" in short, short
+    assert "Acme" in short and "Summer 2027" in short, short
+    assert len(short) <= templates.SUBJECT_MAX, len(short)
 
     long, _, _ = templates.render(
         {"id": 0, "first_name": "Dana"},
         {"company": "Amazon", "season": "Summer 2027",
          "role": "Software Development Engineer Intern - Annapurna Labs"})
     assert "Software Development Engineer Intern" in long, long
+    assert len(long) <= templates.SUBJECT_MAX, len(long)
+
+
+def test_a_subject_says_applied_or_interested_and_nothing_else():
+    """Both families name what the note is. The third used to close on
+    "- hello" or "- an applicant saying hello", which reads like a mailing
+    list introducing itself rather than a person who applied to a job."""
+    for cid in range(8):
+        for role in ("SWE Intern", "Software Engineer Intern",
+                     "Data AI/ML Engineer Intern - Image Guided Therapy"):
+            subject, _, _ = templates.render(
+                {"id": cid, "first_name": "Dana"},
+                {"company": "Acme", "role": role, "season": "Summer 2027"})
+            assert ("Applied to" in subject or "Interested in" in subject), subject
+            assert "hello" not in subject.lower(), subject
 
 
 def test_no_subject_has_a_gap_where_a_field_was_empty():
@@ -1883,6 +1905,26 @@ def test_a_cold_note_carries_no_link_when_the_resume_is_attached(monkeypatch):
         _p.ATTACH_RESUME[0] = was
 
 
+def test_the_draft_path_also_says_when_a_search_did_not_run(con, monkeypatch):
+    """The ✉ path learned this the hard way; the ▶ path had the same hole.
+    Stripe was reported as an employer with no recruiters when the truth was
+    $1.23 of Apify credit left and a deliberate refusal to spend it."""
+    from jobfeed.outreach import run as _run, apify as _apify
+
+    def broke(company, n=3):
+        raise RuntimeError("only $1.23 of Apify credit left this cycle")
+    monkeypatch.setattr(_apify, "find_recruiters", broke)
+    cid = _company(con, "Stripe")
+    _job(con, cid, "https://stripe/1", "SWE Intern")
+
+    stats = _run.prepare(con, limit=1)
+
+    assert stats["drafts"] == 0
+    said = " ".join(stats["skipped"])
+    assert "did not run" in said and "credit" in said, stats["skipped"]
+    assert "no recruiters found" not in said, stats["skipped"]
+
+
 def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
     """Two independent buttons on one row. Neither answer may overwrite the
     other -- which is why the store keeps them under separate keys."""
@@ -1901,6 +1943,104 @@ def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
     assert out["found"] == 3 and out["drafted"] == 3, out
     assert b.found["https://acme/1"]["state"] == "done"
     assert b.records["https://acme/1"]["state"] == "queued"
+
+
+# ---- stages that move themselves ------------------------------------------
+
+def test_a_rejection_is_read_before_the_stage_it_rejects_you_from():
+    """"Unfortunately we will not be moving forward after your interview"
+    contains the word interview. Read as an invitation it would march a dead
+    application forward and hide it among the live ones."""
+    from jobfeed.outreach import progress
+    assert progress.classify(
+        "Update on your application",
+        "Unfortunately we will not be moving forward after your interview."
+    ) == "rejected"
+    assert progress.classify(
+        "Thanks for your time",
+        "We have decided to move forward with other candidates."
+    ) == "rejected"
+
+
+def test_a_stage_never_moves_backwards():
+    """A scheduling note arriving after an offer must not drag the record back
+    to "interview". The board is meant to say where things stand."""
+    from jobfeed.outreach import progress
+    assert progress.advance("offer", "interview") == ""
+    assert progress.advance("interview", "oa") == ""
+    assert progress.advance("applied", "oa") == "oa"
+    assert progress.advance("oa", "final") == "final"
+
+
+def test_a_rejection_lands_from_anywhere_and_nothing_follows_it():
+    from jobfeed.outreach import progress
+    for stage in ("applied", "oa", "interview", "final", "offer"):
+        assert progress.advance(stage, "rejected") == "rejected", stage
+    # and once rejected, a stray later message cannot revive it
+    assert progress.advance("rejected", "interview") == ""
+    assert progress.advance("rejected", "rejected") == ""
+
+
+def test_accepting_an_offer_is_never_something_an_email_decides():
+    """Accepting is a decision he makes. No message from an employer
+    establishes it, so nothing here may write it."""
+    from jobfeed.outreach import progress
+    assert progress.advance("offer", "accepted") == ""
+    assert progress.advance("applied", "accepted") == ""
+    # and an application already accepted is left alone entirely
+    assert progress.advance("accepted", "rejected") == ""
+    assert progress.advance("accepted", "interview") == ""
+
+
+def test_a_message_only_moves_the_employer_it_is_actually_from():
+    """Applications are answered through an ATS as often as not, so the
+    sender's domain is Greenhouse or Workday rather than the employer -- and
+    a Greenhouse mail about Stripe must not move the Coinbase application."""
+    from jobfeed.outreach import progress
+    apps = {"j1": "applied", "j2": "applied"}
+    jobs = {"j1": "Coinbase", "j2": "Stripe"}
+    moves = progress.scan(apps, jobs, [
+        {"from": "no-reply@greenhouse.io",
+         "subject": "Your Coinbase application - online assessment",
+         "body": "Please complete the assessment."}])
+    assert list(moves) == ["j1"], moves
+    assert moves["j1"]["stage"] == "oa"
+
+
+def test_an_unrelated_newsletter_moves_nothing():
+    """The scan reads every message in the mailbox, most of which are not
+    about a job at all."""
+    from jobfeed.outreach import progress
+    moves = progress.scan({"j1": "applied"}, {"j1": "Coinbase"}, [
+        {"from": "digest@newsletter.com", "subject": "Interview tips for interns",
+         "body": "How to schedule a call with a recruiter."},
+        {"from": "billing@aws.amazon.com", "subject": "Your invoice",
+         "body": "Payment received."}])
+    assert moves == {}, moves
+
+
+def test_two_messages_about_one_job_settle_on_the_furthest():
+    """An assessment and then an interview invitation in the same day should
+    leave the record at interview, whichever order they are read in."""
+    from jobfeed.outreach import progress
+    msgs = [
+        {"from": "r@coinbase.com", "subject": "Invitation to interview", "body": ""},
+        {"from": "r@coinbase.com", "subject": "Your online assessment", "body": ""},
+    ]
+    for order in (msgs, list(reversed(msgs))):
+        moves = progress.scan({"j1": "applied"}, {"j1": "Coinbase"}, order)
+        assert moves["j1"]["stage"] == "interview", moves
+
+
+def test_an_acknowledgement_is_not_progress():
+    """"Thanks for applying" and "your application is under review" arrive for
+    every application and mean nothing has happened yet."""
+    from jobfeed.outreach import progress
+    for subject, body in (
+            ("Thanks for applying to Coinbase", "We have received your application."),
+            ("Your application to Coinbase", "Your application is under review."),
+            ("Coinbase careers", "We will be in touch if there is a match.")):
+        assert progress.classify(subject, body) == "", (subject, body)
 
 
 # ---- surviving a rebuild --------------------------------------------------
