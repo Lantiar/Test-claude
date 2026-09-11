@@ -83,7 +83,48 @@ def describe(url: str, timeout: int = 20) -> dict:
         # nothing better said so.
         if len(parts) > 1 and not out.get("company"):
             out["company"] = _company(parts[-1])
+    if not out.get("company"):
+        out["company"] = company_from_url(url)
     return out
+
+
+# The employer is in the path of every hosted job board, because that is how
+# the board knows whose jobs to show. A page that does not name its own
+# employer in JSON-LD or og tags -- careerpuck does not -- still cannot hide
+# it from the URL that was used to reach it.
+_SLUGS = (
+    re.compile(r"//app\.careerpuck\.com/job-board/([^/?#]+)", re.I),
+    re.compile(r"//(?:job-)?boards\.greenhouse\.io/(?!embed\b)([^/?#]+)", re.I),
+    # The embedded application form carries it as a query parameter instead,
+    # and those postings are the ones that arrived with no company at all --
+    # or with a company scraped out of the page title, "US at DoorDash USA".
+    re.compile(r"//(?:job-)?boards\.greenhouse\.io/embed/[^?#]*[?&]for=([^&#]+)", re.I),
+    re.compile(r"//jobs\.lever\.co/([^/?#]+)", re.I),
+    re.compile(r"//jobs\.ashbyhq\.com/([^/?#]+)", re.I),
+    re.compile(r"//([^./]+)\.wd\d+\.myworkdayjobs\.com", re.I),
+)
+
+
+def company_from_url(url: str) -> str:
+    """The employer's own slug out of a job board URL, or "".
+
+    A last resort, used only when the page itself said nothing: Lyft's
+    posting sat in the feed as company None with "lyft" in the middle of its
+    address, and a job with no company is skipped by every later pass.
+    """
+    for pattern in _SLUGS:
+        m = pattern.search(url or "")
+        if not m:
+            continue
+        slug = m.group(1).strip("-_ ")
+        # Slugs are lowercase and hyphenated; a name is neither. Single words
+        # are safe to capitalise. Anything longer is left alone rather than
+        # guessed into "Doordash Usa".
+        words = [w for w in re.split(r"[-_]+", slug) if w]
+        if len(words) == 1:
+            return words[0].capitalize()
+        return " ".join(words).strip()
+    return ""
 
 
 def _places(node) -> list[str]:

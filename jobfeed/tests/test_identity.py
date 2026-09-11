@@ -46,3 +46,24 @@ def test_the_guard_judges_the_canonical_form():
     # Raw, this carries an id; canonical, the id is kept -- but a URL whose
     # only id is a parameter we strip must be rejected, not trusted.
     assert not looks_like_one_posting("https://tower-research.com/open-positions/?utm_campaign=1")
+
+
+def test_the_employer_is_taken_from_the_board_url_when_the_page_hides_it():
+    """Lyft's posting sat in the feed as company None with "lyft" in the
+    middle of its own address. A job with no company is skipped by every later
+    pass, so the outreach for it could never be set up."""
+    from jobfeed.resolve import company_from_url
+    assert company_from_url(
+        "https://app.careerpuck.com/job-board/lyft/job/8772571002") == "Lyft"
+    assert company_from_url(
+        "https://job-boards.greenhouse.io/stripe/jobs/8128745") == "Stripe"
+    assert company_from_url(
+        "https://job-boards.greenhouse.io/embed/job_app?for=stripe&token=1") == "Stripe"
+    assert company_from_url("https://jobs.lever.co/plaid/abc") == "Plaid"
+    assert company_from_url(
+        "https://acme.wd1.myworkdayjobs.com/en-US/careers/job/x") == "Acme"
+    # A slug of several words is left as it is rather than guessed into
+    # "Doordash Usa", and a page that is not a known board gives nothing.
+    assert company_from_url(
+        "https://app.careerpuck.com/job-board/doordash-usa/job/1") == "doordash usa"
+    assert company_from_url("https://example.com/careers/swe") == ""
