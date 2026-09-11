@@ -113,13 +113,30 @@ def campaign_allowed(con, company_id: int | None) -> str:
     return _company_cooldown(con, company_id)
 
 
+# What a contact's status means about the address that was written to. Only
+# "verified" says a mailbox was confirmed to exist; everything else was a
+# guess at the time of sending, and a guess is what the weekly quota rations.
+SPECULATIVE = ("accept_all", "risky", "unknown", "bounced", "")
+
+
 def accept_all_allowed(con, company_id: int) -> bool:
-    """One speculative send per company per week, and only that."""
+    """One speculative send per company per week, and only that.
+
+    Counted by what the send was, not by what the contact's label says now.
+    Those differ the moment a bounce arrives: watch() rewrites the contact to
+    email_status='bounced', which used to drop it out of an
+    email_status='accept_all' count and hand the company a fresh weekly slot.
+    A bounce would then *buy* another speculative send -- backwards, since a
+    bounce is the evidence that guessing addresses at this domain does not
+    work, and it is the outcome that costs the sending domain most.
+    """
     cutoff = time.time() - ACCEPT_ALL_PER_COMPANY_DAYS * DAY
+    marks = ",".join("?" * len(SPECULATIVE))
     row = con.execute(
         "SELECT COUNT(*) n FROM outreach o JOIN contact c ON c.id=o.contact_id "
-        "WHERE c.company_id=? AND c.email_status='accept_all' "
-        "AND o.sent_at IS NOT NULL AND o.sent_at > ?", (company_id, cutoff)).fetchone()
+        f"WHERE c.company_id=? AND COALESCE(c.email_status,'') IN ({marks}) "
+        "AND o.sent_at IS NOT NULL AND o.sent_at > ?",
+        (company_id, *SPECULATIVE, cutoff)).fetchone()
     return (row["n"] if row else 0) == 0
 
 

@@ -264,6 +264,108 @@ def _draft(con, cid, email, key="k", status="verified"):
     return contact_id
 
 
+def _spent(con, cid, email, status, when=None):
+    """A contact at `cid` who was written to, and the send that reached them."""
+    con.execute("INSERT INTO contact(company_id, full_name, first_name, email, "
+                "email_status, found_at) VALUES(?,?,?,?,?,?)",
+                (cid, email, email.split("@")[0], email, status, time.time()))
+    contact_id = con.execute("SELECT MAX(id) m FROM contact").fetchone()["m"]
+    con.execute("INSERT INTO outreach(job_key, contact_id, subject, body, step, "
+                "status, created_at, sent_at) VALUES(?,?,'s','b',0,'sent',?,?)",
+                ("k", contact_id, time.time(), when or time.time()))
+    con.commit()
+    return contact_id
+
+
+def test_where_the_mailbox_was_read_to_survives_the_run(con, monkeypatch):
+    """The runner is stateless and rebuilds the database every run, so any
+    state that lives only in it is state that does not exist. history_id lived
+    only there: watch() therefore started from None every run, and
+    inbound_since(None) answers "no messages, here is the current id" -- so
+    the bounce watcher never saw a single message in production, and said
+    nothing while it happened. vivian.chen@lyft.com bounced at 18:31 and five
+    hours later nothing had recorded it.
+    """
+    from jobfeed.outreach import board as _board
+
+    store = {}
+
+    def fake_redis(command):
+        if command[0] == "SET":
+            store[command[1]] = command[2]
+            return "OK"
+        if command[0] == "GET":
+            return store.get(command[1])
+        return [] if command[0] == "HGETALL" else None
+
+    monkeypatch.setattr(_board, "_redis", fake_redis)
+    _db.set_state(con, "outreach", "history_id", "998877")
+    con.commit()
+    _board.save(con)
+
+    # the next run: a database that has never heard of any of this
+    fresh = _db.connect(":memory:")
+    try:
+        assert _db.get_state(fresh, "outreach", "history_id") is None
+        _board.load(fresh)
+        assert _db.get_state(fresh, "outreach", "history_id") == "998877"
+    finally:
+        fresh.close()
+
+
+def test_a_store_written_before_history_was_kept_still_loads(con, monkeypatch):
+    """The control: every payload already in Upstash predates this field, and
+    a KeyError on load would take the contacts, drafts and send times with it."""
+    from jobfeed.outreach import board as _board
+
+    store = {_board.STATE_KEY: json.dumps(
+        {"v": 1, "at": 0, "contacts": [], "outreach": [], "replies": [],
+         "suppression": [], "health": []})}
+    monkeypatch.setattr(_board, "_redis",
+                        lambda c: store.get(c[1]) if c[0] == "GET" else "OK")
+    assert _board.load(con)["contacts"] == 0
+    assert _db.get_state(con, "outreach", "history_id") is None
+
+
+def test_a_speculative_send_uses_up_the_week_even_when_it_bounces(con):
+    """The quota is one guessed address per company per week. It was counted
+    by the contact's *current* label, and a bounce rewrites that label from
+    accept_all to bounced -- so the send dropped out of its own count and
+    handed the company a fresh slot. A bounce would buy another guess, which
+    is backwards: the bounce is the evidence that guessing does not work at
+    this domain, and it is the outcome that costs the sending domain most.
+
+    vivian.chen@lyft.com, sent as accept_all, came back "Address not found".
+    """
+    cid = _company(con, "Lyft")
+    _spent(con, cid, "vivian.chen@lyft.com", "accept_all")
+    assert not guards.accept_all_allowed(con, cid), "the week's send is spent"
+
+    # what watch() does when the bounce arrives
+    con.execute("UPDATE contact SET email_status='bounced' WHERE email=?",
+                ("vivian.chen@lyft.com",))
+    con.commit()
+    assert not guards.accept_all_allowed(con, cid), (
+        "a bounce must not refund the week's speculative send")
+
+
+def test_a_verified_send_does_not_spend_the_speculative_quota(con):
+    """The control. If every send counted, the quota would be a company
+    cooldown wearing a different name, and a confirmed mailbox would block a
+    guess it has nothing to do with."""
+    cid = _company(con, "Plaid")
+    _spent(con, cid, "kcrowley@plaid.com", "verified")
+    assert guards.accept_all_allowed(con, cid)
+
+
+def test_an_unsent_speculative_draft_does_not_spend_the_quota(con):
+    """It rations sends, not drafts: three may be written and only the first
+    allowed out."""
+    cid = _company(con, "Stripe")
+    _draft(con, cid, "jason.rathman@stripe.com", status="accept_all")
+    assert guards.accept_all_allowed(con, cid)
+
+
 def test_one_company_does_not_get_three_notes_on_one_day(con):
     """Three recruiters on one team comparing three near-identical emails over
     one lunch is the exact outcome this pipeline exists to avoid, and it is

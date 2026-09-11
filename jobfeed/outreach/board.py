@@ -16,6 +16,8 @@ import time
 import urllib.error
 import urllib.request
 
+from .. import db as _db
+
 KEY = "jobfeed:outreach"
 STAGE_KEY = "jobfeed:stages"
 FIND_KEY = "jobfeed:outreach:finds"
@@ -215,6 +217,15 @@ def save(con) -> dict:
     payload = {"v": 1, "at": int(time.time()), "contacts": contacts,
                "outreach": outreach, "replies": replies,
                "suppression": suppression, "health": health}
+    # Where the mailbox was last read to. The one piece of outreach state that
+    # lived only in the database, which the runner throws away every run: so
+    # watch() started from history_id=None every time, and inbound_since()
+    # answers that with "no messages, here is the current id" -- which it then
+    # wrote back to a database about to be deleted. The bounce watcher never
+    # saw a single message in production. vivian.chen@lyft.com bounced at
+    # 18:31 and five hours and several cycles later nothing had recorded it.
+    if hid := _db.get_state(con, "outreach", "history_id"):
+        payload["history_id"] = str(hid)
     _redis(["SET", STATE_KEY, json.dumps(payload)])
     return {"contacts": len(contacts), "outreach": len(outreach),
             "replies": len(replies)}
@@ -226,6 +237,8 @@ def load(con) -> dict:
     if not raw:
         return {"contacts": 0, "outreach": 0, "replies": 0}
     payload = json.loads(raw)
+    if hid := payload.get("history_id"):
+        _db.set_state(con, "outreach", "history_id", str(hid))
 
     def company_id(name):
         if not name:
