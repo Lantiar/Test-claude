@@ -49,8 +49,21 @@ def needs_review(title: str) -> str:
     return ""
 
 
+# Punctuation that belongs to the phrase rather than the word. Deleting
+# "Summer 2027" off "Software Engineering Intern, Summer 2027" leaves "Intern"
+# without the comma that was only there to introduce what was deleted -- and
+# comparing raw tokens made that legitimate deletion fail, so a Plaid draft
+# was refused with "not a subsequence of the original". Hyphens are not here:
+# "Co-op" and "Coop" are different words, and that distinction is the point.
+_EDGE = ",;:.\u2013\u2014()[]{}\"'"
+
+
 def _tokens(text: str) -> list[str]:
     return (text or "").split()
+
+
+def _bare(token: str) -> str:
+    return token.strip(_EDGE)
 
 
 def is_subsequence(candidate: str, original: str) -> bool:
@@ -58,11 +71,16 @@ def is_subsequence(candidate: str, original: str) -> bool:
 
     The whole guarantee lives here. A model that reorders, rephrases,
     corrects a spelling or adds a word fails this, and the original is kept.
+
+    Words are compared without the punctuation hanging off their edges, so a
+    deletion may take the comma that introduced it. Case and spelling are
+    still compared exactly: the model may drop the employer's words, never
+    change them.
     """
     want, have = _tokens(candidate), _tokens(original)
     i = 0
     for token in have:
-        if i < len(want) and want[i] == token:
+        if i < len(want) and _bare(want[i]) == _bare(token):
             i += 1
     return i == len(want) and bool(want)
 

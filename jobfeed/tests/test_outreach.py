@@ -2026,6 +2026,35 @@ def test_the_term_bracket_and_level_comma_go_but_a_team_stays():
         assert titles.unwrap(kept, "Stripe") == kept, kept
 
 
+def test_a_deletion_may_take_the_comma_that_introduced_it():
+    """Plaid's "Software Engineering Intern, Summer 2027" tokenises the third
+    word as "Intern," -- so deleting "Summer 2027", exactly what the model is
+    asked to do, left "Intern" failing the subsequence check and the whole
+    draft was refused. The comma was only ever there to introduce the words
+    that went."""
+    from jobfeed.outreach import titles
+    assert titles.is_subsequence("Software Engineering Intern",
+                                 "Software Engineering Intern, Summer 2027")
+    assert titles.is_subsequence("Software Engineer Intern",
+                                 "Software Engineer, Intern (Summer or Winter)")
+
+
+def test_the_model_still_cannot_change_a_word():
+    """The guarantee the relaxation must not cost: it may drop the employer's
+    words, never rewrite them."""
+    from jobfeed.outreach import titles
+    original = "Software Engineering Intern, Summer 2027"
+    for candidate, why in (
+            ("Intern Software Engineering", "reordered"),
+            ("Software Developer Intern", "a word swapped"),
+            ("Software Engineering Internship", "a word extended"),
+            ("SWE Intern", "abbreviated"),
+            ("Software Engineering Intern 2028", "a number changed")):
+        assert not titles.is_subsequence(candidate, original), why
+    # A hyphen is part of the word, not punctuation hanging off its edge.
+    assert not titles.is_subsequence("Coop Engineer", "Co-op Engineer")
+
+
 def test_unwrap_keeps_an_employer_name_that_is_part_of_the_role():
     """"Software Engineer, Stripe Terminal" is a team, not page furniture.
     Only a trailing "at <employer>" is the wrapper."""
