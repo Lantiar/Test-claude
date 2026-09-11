@@ -103,7 +103,7 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = False,
         # One batch at one company: the sends inside it do not count against
         # each other's cooldown, and the next batch waits on the last of them.
         campaign = f"{cid}-{int(time.time())}"
-        roles, dropped, meta = _clean_roles(jobs, dry_run)
+        roles, dropped, meta = _clean_roles(jobs, dry_run, company)
         stats["cost"] = stats.get("cost", 0.0) + meta["cost"]
         season = (jobs[0]["season"] or "").split(",")[0].strip()
         if len(meta["seasons"]) > 1:
@@ -142,7 +142,8 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = False,
     return stats
 
 
-def _clean_roles(jobs, dry_run: bool) -> tuple[list[str], list[str], dict]:
+def _clean_roles(jobs, dry_run: bool,
+                 company: str = "") -> tuple[list[str], list[str], dict]:
     """Titles fit to put in an email, plus what was left out and why.
 
     A title the cleaner cannot rescue is dropped from the list rather than
@@ -162,7 +163,11 @@ def _clean_roles(jobs, dry_run: bool) -> tuple[list[str], list[str], dict]:
 
     roles, dropped, spent = [], [], 0.0
     for job in jobs:
-        title = job["title"]
+        # Page furniture off first, deterministically. Greenhouse's embedded
+        # form titles a posting "Job Application for <role> at <employer>",
+        # and the model rightly leaves that alone -- it is told to remove
+        # trailing noise, and a wrapper is neither trailing nor a judgement.
+        title = _titles.unwrap(job["title"], company)
         if dry_run:
             roles.append(title)
             continue

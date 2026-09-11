@@ -34,6 +34,7 @@ _FLAGS = (
     ("three or more separators", re.compile(r"(?:[-–|,].*){3,}")),
     ("a shouted word", re.compile(r"\b[A-Z]{5,}\b")),
     ("a repeated word", re.compile(r"\b(\w+)\b[\s,-]+\b\1\b", re.I)),
+    ("an ATS page title", re.compile(r"^\s*job application for\b", re.I)),
 )
 
 # Below this many words, a trim has taken the title with it.
@@ -64,6 +65,33 @@ def is_subsequence(candidate: str, original: str) -> bool:
         if i < len(want) and want[i] == token:
             i += 1
     return i == len(want) and bool(want)
+
+
+# Page furniture, not a role. Greenhouse's embedded application form has a
+# page title of the form "Job Application for <role> at <employer>", and when
+# a posting is discovered through that URL the whole thing is stored as the
+# title. It reached a draft to a Stripe recruiter reading "I put in an
+# application for the Stripe Job Application for Software Engineer, Intern
+# (Summer or Winter) at Stripe position".
+#
+# Handled here rather than by the model: the model is instructed to remove
+# trailing noise and it kept this correctly, because a leading "Job
+# Application for" is not trailing noise -- it is a wrapper, and recognising
+# a wrapper is a fixed rule, not a judgement call.
+_WRAPPER = re.compile(r"^\s*job application for\s+", re.I)
+
+
+def unwrap(title: str, company: str = "") -> str:
+    """Strip the ATS page furniture from around a role.
+
+    The employer's own name is only removed from the end, where the wrapper
+    puts it. A role that genuinely contains it -- "Software Engineer, Stripe
+    Terminal" -- keeps it, because that is the team and not the wrapper.
+    """
+    out = _WRAPPER.sub("", title or "")
+    if company:
+        out = re.sub(rf"\s+at\s+{re.escape(company)}\s*$", "", out, flags=re.I)
+    return tidy(out)
 
 
 def tidy(title: str) -> str:

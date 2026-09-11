@@ -1962,6 +1962,42 @@ def test_the_draft_path_also_says_when_a_search_did_not_run(con, monkeypatch):
     assert "no recruiters found" not in said, stats["skipped"]
 
 
+def test_an_ats_page_title_never_reaches_a_recruiter(con, monkeypatch):
+    """Greenhouse's embedded form titles a posting "Job Application for <role>
+    at <employer>", and when a posting is found through that URL the whole
+    string is stored as the title. It reached a draft to a Stripe recruiter
+    reading "I put in an application for the Stripe Job Application for
+    Software Engineer, Intern (Summer or Winter) at Stripe position"."""
+    from jobfeed.outreach import run as _run, titles as _titles
+    cid = _company(con, "Stripe")
+    _roster(monkeypatch)
+    monkeypatch.setattr(_titles, "clean",
+                        lambda t: {"title": t, "changed": False, "reason": "",
+                                   "flagged": "", "rejected": "", "cost": 0.0})
+    _job(con, cid, "https://stripe/1",
+         "Job Application for Software Engineer, Intern (Summer or Winter) at Stripe")
+
+    _run.prepare(con, limit=1, per_company=1)
+
+    body = con.execute("SELECT body FROM outreach").fetchone()["body"]
+    assert "Job Application for" not in body, body
+    assert "Software Engineer, Intern (Summer or Winter)" in body, body
+    # and the employer is named once, not twice
+    assert body.count("Stripe") == 1, body
+
+
+def test_unwrap_keeps_an_employer_name_that_is_part_of_the_role():
+    """"Software Engineer, Stripe Terminal" is a team, not page furniture.
+    Only a trailing "at <employer>" is the wrapper."""
+    from jobfeed.outreach import titles
+    assert titles.unwrap("Software Engineer, Stripe Terminal", "Stripe") == \
+        "Software Engineer, Stripe Terminal"
+    assert titles.unwrap("Software Engineer Intern", "Stripe") == \
+        "Software Engineer Intern"
+    assert titles.unwrap("Job Application for Data Scientist at Acme", "Acme") == \
+        "Data Scientist"
+
+
 def test_a_lookup_and_a_send_can_both_be_asked_for(con, monkeypatch):
     """Two independent buttons on one row. Neither answer may overwrite the
     other -- which is why the store keeps them under separate keys."""
