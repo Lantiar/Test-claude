@@ -150,6 +150,14 @@ export default async function handler(req, res) {
         try { settings = prof ? JSON.parse(prof) : {}; } catch (e) { settings = {}; }
         return res.status(200).json({ state, pending, settings, finds });
       }
+      // The coarse view names nobody, but it still says which jobs he wrote
+      // to and which answered -- his application history, on a public URL.
+      // Gated with the same passphrase as the detail; the page asks once.
+      const coarseSecret = process.env.JOBFEED_PASSPHRASE;
+      if (!coarseSecret ||
+          !sameSecret(req.headers["x-passphrase"] || "", coarseSecret)) {
+        return res.status(401).json({ error: "wrong passphrase" });
+      }
       const flat = (await redis(["HGETALL", KEY])) || [];
       const outreach = {};
       for (let i = 0; i < flat.length; i += 2) {

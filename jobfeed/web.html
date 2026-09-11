@@ -171,6 +171,24 @@ details.settings[open] summary::before{content:"▾ "}
 .settings .check{display:flex;gap:7px;align-items:center;font-size:12.5px;color:var(--ink);
   text-transform:none;letter-spacing:0}
 
+/* ---- the way in ---- */
+dialog#gate{border:1px solid var(--line);border-radius:10px;background:var(--panel);
+  color:var(--ink);padding:0;width:min(400px,92vw)}
+dialog#gate::backdrop{background:rgba(0,0,0,.5)}
+#gate form{display:flex;flex-direction:column;gap:11px;padding:22px 22px 18px}
+#gate h2{margin:0;font-size:16px;font-weight:600}
+#gate .sub{margin:0;font-size:12.5px;color:var(--dim);line-height:1.5}
+#gate input{font:inherit;font-size:14px;background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:6px;padding:9px 11px;width:100%}
+#gate input:focus{outline:2px solid var(--accent);outline-offset:-1px;
+  border-color:var(--accent)}
+#gate .warn{margin:0;font-size:12.5px;color:var(--s-rejected)}
+#gate .row{display:flex;gap:8px;justify-content:flex-end;margin-top:3px}
+#gate button{font:inherit;font-size:13px;padding:8px 15px;border-radius:6px;
+  border:1px solid var(--line);background:none;color:var(--dim);cursor:pointer}
+#gate button#gate-go{border-color:var(--accent);color:var(--accent);font-weight:600}
+#gate button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
 /* ---- addresses, without a letter ---- */
 .reach.found{color:var(--s-offer);border-color:var(--s-offer);font-weight:600}
 .reach.finding{color:var(--s-oa);border-color:var(--s-oa)}
@@ -413,6 +431,21 @@ footer{padding:0 20px 40px;color:var(--dim);font-size:12px}
   </div>
 </div>
 
+<dialog id="gate">
+  <form method="dialog">
+    <h2>Your tracker</h2>
+    <p class="sub">Stages, outreach and recruiters are behind a passphrase.
+      The job list itself is public and loads either way.</p>
+    <input type="password" id="gate-pass" placeholder="Passphrase"
+           autocomplete="current-password">
+    <p class="warn" id="gate-bad" hidden>That passphrase was not right.</p>
+    <div class="row">
+      <button value="skip">Just the jobs</button>
+      <button value="open" id="gate-go">Unlock</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="found">
   <form method="dialog">
     <h2>Recruiters to write to</h2>
@@ -486,6 +519,10 @@ const PASS_KEY = "jobfeed.pass.v1";
 // which mode is in force, because a tracker that silently keeps your stages
 // somewhere other than you think is worse than one that cannot keep them.
 let CENTRAL = false;
+// The store exists but this browser has not been unlocked. Not the same as
+// no store: one is "enter the passphrase", the other is "there is nothing
+// to enter it for".
+let LOCKED = false;
 // Stages live in this browser and nowhere else. The data beside them is
 // public -- anyone with the URL reads the same jobs.json -- and where someone
 // has applied is not. It never goes over the wire, which also means it does
@@ -502,6 +539,11 @@ function saveLocal(key, stage){
     localStorage.setItem(STAGE_KEY, JSON.stringify(all));
     return true;
   } catch(e){ return false; }
+}
+
+function pass(){
+  const p = passphrase();
+  return p ? {"x-passphrase": p} : {};
 }
 
 function passphrase(){
@@ -549,7 +591,7 @@ async function saveStage(key, stage){
 async function pollOutreach(){
   if(!CENTRAL) return;
   try {
-    const r = await fetch("./api/outreach", {cache:"no-store"});
+    const r = await fetch("./api/outreach", {cache:"no-store", headers:pass()});
     if(!r.ok) return;
     const next = (await r.json()).outreach || {};
     if(JSON.stringify(next) !== JSON.stringify(REACH)){ REACH = next; render(); }
@@ -822,14 +864,18 @@ async function load(){
   let mine = localStages();
   try {
     try {
-      const o = await fetch("./api/outreach", {cache:"no-store"});
+      const o = await fetch("./api/outreach", {cache:"no-store", headers:pass()});
       if(o.ok) REACH = (await o.json()).outreach || {};
     } catch(e){ REACH = {}; }        // no endpoint on GitHub Pages; fine
-    const r = await fetch("./api/stages", {cache:"no-store"});
+    const r = await fetch("./api/stages", {cache:"no-store", headers:pass()});
     if(r.ok){
       const d = await r.json();
       CENTRAL = true;
       mine = d.stages || {};
+    } else if(r.status === 401){
+      // The store is there; this browser is simply not unlocked. Distinct
+      // from having no store at all, which is what GitHub Pages looks like.
+      CENTRAL = true; LOCKED = true; mine = {};
     }
   } catch(e){ /* no API here: GitHub Pages serves the page and no functions */ }
   setMode();
@@ -843,6 +889,7 @@ async function load(){
   showAge(meta);
   buildControls({counts: countStages()});
   render();
+  if(LOCKED) askForPassphrase();
   // The addresses live behind the passphrase, so the job board only knows
   // which jobs already have them once the detail has been read. Rendered
   // again after, rather than blocking the list on it.
@@ -856,12 +903,52 @@ function job_previous(key){
   return j ? (j.stage || "") : "";
 }
 
+// Shown once on a browser that has never been unlocked. "Just the jobs" is a
+// real answer, not a nag to dismiss: the feed is public and useful on its own,
+// and someone reading it over his shoulder has no business seeing which
+// applications were rejected.
+function askForPassphrase(){
+  const dlg = $("#gate");
+  if(!dlg || dlg.open) return;
+  $("#gate-bad").hidden = true;
+  $("#gate-pass").value = "";
+  dlg.showModal();
+  $("#gate-pass").focus();
+}
+
+$("#gate").addEventListener("close", async () => {
+  const dlg = $("#gate");
+  if(dlg.returnValue !== "open") return;      // "just the jobs"
+  const typed = $("#gate-pass").value.trim();
+  if(!typed) return;
+  // Checked against the store before it is kept, so a typo says so here
+  // rather than looking like an empty tracker.
+  let ok = false;
+  try {
+    const r = await fetch("./api/stages", {cache:"no-store",
+                                           headers:{"x-passphrase": typed}});
+    ok = r.ok;
+  } catch(e){ ok = false; }
+  if(!ok){
+    $("#gate-bad").hidden = false;
+    dlg.showModal();
+    $("#gate-pass").focus();
+    return;
+  }
+  rememberPassphrase(typed);
+  location.reload();
+});
+
 function setMode(){
   const el = document.querySelector("#mode");
   if(!el) return;
-  el.textContent = CENTRAL
-    ? "Stages are saved centrally — the same on every device."
-    : "Stages are kept in this browser only; this copy has no central store.";
+  el.innerHTML = !CENTRAL
+    ? "Stages are kept in this browser only; this copy has no central store."
+    : LOCKED
+      ? 'Locked — the job list only. <a href="#" id="unlock">Enter the passphrase</a> to see stages and outreach.'
+      : "Stages are saved centrally — the same on every device.";
+  const link = $("#unlock");
+  if(link) link.onclick = e => { e.preventDefault(); askForPassphrase(); };
 }
 
 function countStages(){

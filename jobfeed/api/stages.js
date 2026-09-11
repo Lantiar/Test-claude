@@ -79,6 +79,15 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
+      // Reading is gated too, not just writing. The job feed beside this is
+      // public and meant to be; which of those jobs he applied to and which
+      // one rejected him is not, and it sat on a public URL for anyone who
+      // found it. The page asks for the passphrase on entry and remembers it,
+      // so the cost is one prompt on a new browser.
+      const secret = process.env.JOBFEED_PASSPHRASE;
+      if (!secret || !sameSecret(req.headers["x-passphrase"] || "", secret)) {
+        return res.status(401).json({ error: "wrong passphrase" });
+      }
       const flat = (await redis(["HGETALL", KEY])) || [];
       const stages = {};
       for (let i = 0; i < flat.length; i += 2) stages[flat[i]] = flat[i + 1];
