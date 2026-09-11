@@ -1784,6 +1784,33 @@ def test_every_title_we_pay_to_search_for_is_one_we_would_accept(con):
     assert not dropped, f"paid to search for, then refused: {dropped}"
 
 
+def test_an_early_talent_recruiter_outranks_a_generic_one(con):
+    """Rank decides who the letter reaches, and on a catch-all domain only one
+    person is ever written to -- so a tie is a coin flip for the whole send.
+    Lyft has exactly two findable recruiters: a Principal Recruiter for Early
+    Talent Programs, and a Senior Recruiter for everything. "early talent" was
+    not in the tier-0 words ("early career" is a different string), so the two
+    tied at rank 4 and the generic one was scheduled first."""
+    from jobfeed.outreach import apify as _apify
+    early = _apify.title_rank("Principal Recruiter, Early Talent Programs at Lyft")
+    generic = _apify.title_rank("Senior Recruiter at Lyft")
+    assert early == 0, early
+    assert early < generic, (early, generic)
+
+
+def test_the_titles_we_search_for_rank_as_well_as_they_read(con):
+    """is_recruiter() only asks whether the tiers recognise a phrase at all.
+    Accepting an early-career title into tier 2 alongside "talent" would pass
+    that check and still lose to a technical recruiter, which is the wrong way
+    round for an internship."""
+    from jobfeed.outreach import apify as _apify
+    for title in ("University Recruiter", "Campus Recruiter",
+                  "Early Career Recruiter", "Early Careers Recruiter",
+                  "Early Talent Recruiter", "Graduate Recruiter",
+                  "Emerging Talent"):
+        assert _apify.title_rank(title) == 0, (title, _apify.title_rank(title))
+
+
 def test_a_recruiter_is_anyone_the_ranking_recognises(con):
     """One list, so it cannot contradict itself: if the tiers can rank it, it
     is someone worth writing to; if they cannot, it is not a recruiter."""

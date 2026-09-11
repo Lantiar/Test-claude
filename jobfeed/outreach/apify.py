@@ -120,8 +120,15 @@ SEARCH_TITLES = ("University Recruiter", "Campus Recruiter",
 # at a company with one findable recruiter the generic one is still the right
 # person, and better than nobody.
 _TITLE_TIERS = (
+    # "early talent" is not a variant of "early career" as far as a substring
+    # match is concerned, and Lyft's one genuine intern recruiter is titled
+    # "Principal Recruiter, Early Talent Programs" -- she tied with a generic
+    # Senior Recruiter and lost the coin flip for who gets the single send a
+    # catch-all domain allows. Words that cost nothing to add and decide who
+    # the letter reaches.
     ("university", "campus", "early career", "early careers", "earlycareer",
-     "graduate", "emerging talent", "student", "new grad", "intern", "entry level"),
+     "early talent", "earlytalent", "emerging talent",
+     "graduate", "student", "new grad", "intern", "entry level"),
     ("technical recruiter", "technical sourcer", "engineering recruiter",
      "tech recruiter", "technology recruiter"),
     ("recruiter", "recruiting", "recruitment", "talent acquisition",
