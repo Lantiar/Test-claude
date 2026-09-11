@@ -323,6 +323,58 @@ def cmd_render(args, con) -> int:
     return 0
 
 
+def cmd_add(args, con) -> int:
+    """Pin a posting the sources do not carry.
+
+    Written to manual.json rather than straight into the database, because the
+    database is rebuilt from the published snapshot every run and a row only
+    in this one would last until the next poll. The file is re-read by the
+    manual source on every poll, so the posting keeps coming back.
+    """
+    from .sources import manual
+
+    url = args.url.strip()
+    entries = manual.entries()
+    if any(e["url"] == url for e in entries):
+        print(f"already pinned: {url}")
+        return 0
+
+    title, company = args.title, args.company
+    locations = []
+    if not (title and company):
+        from . import resolve
+        found = resolve.describe(url)
+        if err := found.get("error"):
+            # A posting that cannot be read can still be pinned, but not
+            # silently under a blank title: a job with no title and no company
+            # is skipped by every later pass, which is the failure this whole
+            # command exists to prevent.
+            print(f"could not read {url}: {err}", file=sys.stderr)
+            if not (title or company):
+                print("pass --title and --company to pin it anyway",
+                      file=sys.stderr)
+                return 1
+        title = title or found.get("title") or ""
+        company = company or found.get("company") or ""
+        locations = found.get("locations") or []
+    if not (title and company):
+        print(f"the page named title={title!r} company={company!r}; "
+              "supply the missing one with --title / --company", file=sys.stderr)
+        return 1
+
+    entry = {"url": url, "title": title, "company": company,
+             "locations": locations, "added_at": __import__("time").time()}
+    if args.season:
+        entry["season"] = args.season
+    entries.append(entry)
+    manual.PATH.write_text(json.dumps(entries, indent=2) + "\n")
+    print(f"pinned {company} -- {title}")
+    print(f"  {url}")
+    print(f"  {manual.PATH} now holds {len(entries)} posting"
+          f"{'s' if len(entries) != 1 else ''}; commit it")
+    return 0
+
+
 def cmd_stage(args, con) -> int:
     """Set a stage by naming the job rather than by knowing its key."""
     from . import apply as _apply
@@ -490,6 +542,13 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("render"); p.set_defaults(fn=cmd_render)
     p.add_argument("--out", default="dashboard.html")
+
+    p = sub.add_parser("add", help="pin a posting the sources do not carry")
+    p.set_defaults(fn=cmd_add)
+    p.add_argument("url")
+    p.add_argument("--title", default="", help="skip resolving the page for it")
+    p.add_argument("--company", default="")
+    p.add_argument("--season", default="")
 
     p = sub.add_parser("stage"); p.set_defaults(fn=cmd_stage)
     p.add_argument("match", help="company or title substring")

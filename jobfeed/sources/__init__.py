@@ -21,4 +21,4 @@ def names() -> list[str]:
 
 
 def load_all() -> None:
-    from . import instagram, simplify         # noqa: F401
+    from . import instagram, manual, simplify   # noqa: F401

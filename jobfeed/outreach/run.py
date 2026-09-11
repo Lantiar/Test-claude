@@ -277,11 +277,22 @@ def _recruiters(con, company: str, company_id: int | None, limit: int,
     the same faces first and only a wider pool contains different ones.
     """
     def roster():
-        return [dict(r) for r in con.execute(
-            "SELECT c.* FROM contact c WHERE c.company_id=? AND c.found_at > ? "
-            "ORDER BY (SELECT COUNT(*) FROM outreach o WHERE o.contact_id=c.id "
-            "          AND o.sent_at IS NOT NULL) ASC, c.id",
+        rows = [dict(r) for r in con.execute(
+            "SELECT c.*, (SELECT COUNT(*) FROM outreach o "
+            "             WHERE o.contact_id=c.id AND o.sent_at IS NOT NULL) written "
+            "FROM contact c WHERE c.company_id=? AND c.found_at > ?",
             (company_id, time.time() - 90 * 86400)).fetchall()]
+        # Least-written-to first, then the best person to write to. The rank is
+        # applied here and not only in the search, because a cached roster
+        # never goes through the search's sort: Lyft's two recruiters were
+        # found once and read back in insertion order ever after, so the
+        # campus recruiter sat behind a generic one by virtue of a lower
+        # rowid. On a catch-all domain, where only the first draft is ever
+        # allowed to send, that ordering is the whole decision.
+        rows.sort(key=lambda c: (c["written"],
+                                 apify.title_rank(c.get("title") or ""),
+                                 c["id"]))
+        return rows
 
     have = roster()
     untouched = [c for c in have if not con.execute(
