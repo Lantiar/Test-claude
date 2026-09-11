@@ -264,17 +264,56 @@ def _draft(con, cid, email, key="k", status="verified"):
     return contact_id
 
 
-def _spent(con, cid, email, status, when=None):
+def _spent(con, cid, email, status, when=None, campaign=None):
     """A contact at `cid` who was written to, and the send that reached them."""
     con.execute("INSERT INTO contact(company_id, full_name, first_name, email, "
                 "email_status, found_at) VALUES(?,?,?,?,?,?)",
                 (cid, email, email.split("@")[0], email, status, time.time()))
     contact_id = con.execute("SELECT MAX(id) m FROM contact").fetchone()["m"]
     con.execute("INSERT INTO outreach(job_key, contact_id, subject, body, step, "
-                "status, created_at, sent_at) VALUES(?,?,'s','b',0,'sent',?,?)",
-                ("k", contact_id, time.time(), when or time.time()))
+                "status, campaign, created_at, sent_at) "
+                "VALUES(?,?,'s','b',0,'sent',?,?,?)",
+                ("k", contact_id, campaign, time.time(), when or time.time()))
     con.commit()
     return contact_id
+
+
+def test_an_address_a_person_supplied_is_not_a_guess(con):
+    """The speculative quota rations the pipeline inventing first.last@domain
+    at a company whose server answers yes to anything. An address someone hands
+    over is not that, and blocking it leaves reaching past the guards by hand
+    as the only way through -- which is how bknideesh@gmail.com got a bounce.
+
+    Not "verified": no probe confirmed the mailbox. Only a person did.
+    """
+    from jobfeed.outreach import run as _run
+
+    cid = _company(con, "Lyft")
+    # Same campaign, so the company cooldown is waived by design and the quota
+    # is the only rule left standing between these two addresses.
+    _spent(con, cid, "vivian.chen@lyft.com", "accept_all", campaign="c")
+    assert not guards.accept_all_allowed(con, cid)
+
+    guessed = {"email": "e.jones@lyft.com", "email_status": "accept_all"}
+    assert _run._may_write(con, guessed, cid, campaign="c") == (
+        "accept_all quota for this company is spent")
+
+    given = {"email": "brandonb@lyft.com", "email_status": "confirmed"}
+    assert _run._may_write(con, given, cid, campaign="c") == ""
+
+
+def test_a_supplied_address_still_obeys_every_other_rule(con):
+    """It waives the quota and nothing else. A person vouching for an address
+    cannot un-bounce it, and must not reopen one that is suppressed."""
+    from jobfeed.outreach import run as _run
+
+    cid = _company(con, "Lyft")
+    bounced = {"email": "vivian.chen@lyft.com", "email_status": "bounced"}
+    assert _run._may_write(con, bounced, cid) == "address is bounced"
+
+    guards.suppress(con, "brandonb@lyft.com", None, "asked not to be written to")
+    given = {"email": "brandonb@lyft.com", "email_status": "confirmed"}
+    assert _run._may_write(con, given, cid) == "asked not to be written to"
 
 
 def test_where_the_mailbox_was_read_to_survives_the_run(con, monkeypatch):

@@ -419,6 +419,15 @@ def _may_write(con, contact: dict, company_id: int | None,
         return f"address is {status}"
     if status == "risky":
         return "address is risky"
+    # "confirmed" is a person saying "write to this address" -- not a probe
+    # saying the mailbox exists, which is what "verified" means and why this
+    # is not that. It skips the speculative quota because it is not a guess:
+    # the quota rations the pipeline inventing first.last@domain at a company
+    # whose server will answer yes to anything. It skips nothing else --
+    # suppression, bounces and the company cooldown all still apply below.
+    #
+    # It exists because the alternative was reaching past the guards by hand,
+    # which is how bknideesh@gmail.com got a bounce of its own.
     if status == "accept_all" and company_id is not None \
             and not guards.accept_all_allowed(con, company_id):
         return "accept_all quota for this company is spent"
