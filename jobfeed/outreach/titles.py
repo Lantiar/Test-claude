@@ -81,16 +81,41 @@ def is_subsequence(candidate: str, original: str) -> bool:
 _WRAPPER = re.compile(r"^\s*job application for\s+", re.I)
 
 
-def unwrap(title: str, company: str = "") -> str:
-    """Strip the ATS page furniture from around a role.
+# A trailing bracket holding nothing but terms: "(Summer or Winter)",
+# "(Summer 2027)", "(Fall/Spring)". Not a team, not a location, nothing that
+# identifies the role -- and the sentence names the season itself.
+_TERMS = re.compile(
+    r"\s*\((?:\s*(?:summer|winter|fall|autumn|spring|or|and|/|&|\d{4}|,)\s*)+\)\s*$",
+    re.I)
 
-    The employer's own name is only removed from the end, where the wrapper
-    puts it. A role that genuinely contains it -- "Software Engineer, Stripe
-    Terminal" -- keeps it, because that is the team and not the wrapper.
+# "Software Engineer, Intern" is one role written with the employer's comma.
+# Only before a level, never before a team: "Software Engineer, Machine
+# Learning" must keep its comma, because there the comma separates two
+# different things rather than punctuating one.
+_LEVELS = ("intern", "internship", "co-op", "coop", "new grad", "new graduate",
+           "apprentice", "trainee")
+_LEVEL_COMMA = re.compile(
+    r",\s+(?=(?:" + "|".join(re.escape(w) for w in _LEVELS) + r")\b)", re.I)
+
+
+def unwrap(title: str, company: str = "") -> str:
+    """Strip the furniture an ATS puts around a role, and nothing else.
+
+    Four fixed rules, no judgement and no model:
+
+    - "Job Application for ..." -- Greenhouse's embedded form page title.
+    - a trailing "at <employer>", where that wrapper puts the company. A role
+      that genuinely contains it, "Software Engineer, Stripe Terminal", keeps
+      it, because that is the team.
+    - a trailing bracket of nothing but terms, "(Summer or Winter)".
+    - the comma in "Software Engineer, Intern", which is the employer's
+      punctuation of one role rather than a list of two.
     """
     out = _WRAPPER.sub("", title or "")
     if company:
         out = re.sub(rf"\s+at\s+{re.escape(company)}\s*$", "", out, flags=re.I)
+    out = _TERMS.sub("", out)
+    out = _LEVEL_COMMA.sub(" ", out)
     return tidy(out)
 
 

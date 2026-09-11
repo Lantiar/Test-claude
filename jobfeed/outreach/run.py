@@ -40,7 +40,8 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = False,
     stats = {"jobs": 0, "companies": 0, "contacts": 0, "drafts": 0,
              "skipped": [], "verify": {}}
     rows = con.execute("""
-        SELECT a.job_key, j.title, j.season, c.name company, c.id company_id
+        SELECT a.job_key, j.title, j.season, j.canonical_url, c.name company,
+               c.id company_id
         FROM application a
         JOIN job j ON COALESCE(j.ats_key, j.url_key, j.canonical_url) = a.job_key
         LEFT JOIN company c ON c.id = j.company_id
@@ -122,7 +123,10 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = False,
 
         for contact in contacts:
             subject, body, variant = render(
-                contact, {"company": company, "roles": roles, "season": season})
+                contact, {"company": company, "roles": roles, "season": season,
+                          # Which portal the application went through, so the
+                          # note can name the account it is under.
+                          "url": jobs[0]["canonical_url"] or jobs[0]["job_key"]})
             cur = con.execute(
                 "INSERT OR IGNORE INTO outreach(job_key, contact_id, variant, "
                 "subject, body, step, status, campaign, created_at) "

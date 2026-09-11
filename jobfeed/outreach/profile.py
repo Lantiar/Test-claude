@@ -20,6 +20,10 @@ ME = {
     "gpa": "4.0",
     "grad": "May 2028",
     "portfolio": "https://nideesh.ai",
+    # The address some application portals hold, which is not the one the
+    # note is sent from. A recruiter searching their system for the sender
+    # finds nothing unless the note says so.
+    "school_email": "nb923@scarletmail.rutgers.edu",
     "linkedin": "https://linkedin.com/in/bknideesh",
     "github": "https://github.com/nb923",
 }
@@ -82,7 +86,8 @@ def signature() -> str:
 # Only these. Name, school and degree are not here: they are the identity the
 # whole mail rests on, and a typo in one is not a setting.
 
-EDITABLE = ("grad", "portfolio", "linkedin", "gpa", "honors")
+EDITABLE = ("grad", "portfolio", "linkedin", "gpa", "honors",
+            "school_email")
 
 
 def current() -> dict:

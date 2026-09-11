@@ -1981,9 +1981,49 @@ def test_an_ats_page_title_never_reaches_a_recruiter(con, monkeypatch):
 
     body = con.execute("SELECT body FROM outreach").fetchone()["body"]
     assert "Job Application for" not in body, body
-    assert "Software Engineer, Intern (Summer or Winter)" in body, body
+    # The role as a person would say it: the wrapper gone, the term bracket
+    # gone, and the employer's comma between role and level gone with them.
+    assert "Software Engineer Intern" in body, body
+    assert "(Summer or Winter)" not in body, body
     # and the employer is named once, not twice
     assert body.count("Stripe") == 1, body
+
+
+def test_the_note_names_the_portal_account_when_there_is_one():
+    """He applies to some postings through RippleMatch, whose account is under
+    his university address. A recruiter who searches their system for the
+    address the note came from finds nothing and concludes he never applied."""
+    from jobfeed.outreach import templates as _t
+    job = {"company": "Plaid", "role": "Software Engineering Intern",
+           "roles": ["Software Engineering Intern"], "season": "Summer 2027"}
+
+    _, through_portal, _ = _t.render(
+        {"id": 1, "first_name": "Sam"},
+        {**job, "url": "https://app.ripplematch.com/v2/public/job/02cb6f70"})
+    assert "RippleMatch" in through_portal, through_portal
+    assert "nb923@scarletmail.rutgers.edu" in through_portal
+
+    # A posting applied to directly needs no explanation of an address, and
+    # an unconditional line about email is noise on every other note.
+    _, direct, _ = _t.render(
+        {"id": 1, "first_name": "Sam"},
+        {**job, "url": "https://boards.greenhouse.io/plaid/jobs/1"})
+    assert "RippleMatch" not in direct and "scarletmail" not in direct, direct
+
+
+def test_the_term_bracket_and_level_comma_go_but_a_team_stays():
+    """"Software Engineer, Intern (Summer or Winter)" is one role written with
+    the employer's punctuation. "Software Engineer, Machine Learning" is a
+    role and a team, and collapsing that comma would rewrite what it says."""
+    from jobfeed.outreach import titles
+    assert titles.unwrap("Software Engineer, Intern (Summer or Winter)", "Stripe") \
+        == "Software Engineer Intern"
+    assert titles.unwrap("Software Engineer, Co-op (Fall 2027)", "Acme") \
+        == "Software Engineer Co-op"
+    for kept in ("Software Engineer, Machine Learning",
+                 "Software Engineer, Stripe Terminal",
+                 "Software Engineering Intern, Summer 2027"):
+        assert titles.unwrap(kept, "Stripe") == kept, kept
 
 
 def test_unwrap_keeps_an_employer_name_that_is_part_of_the_role():

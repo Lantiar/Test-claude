@@ -105,6 +105,32 @@ OPENERS = [
     "{season_role} position recently and thought it was worth reaching out.",
 ]
 
+# Portals that hold their own account, under an address the note is not sent
+# from. A recruiter who searches their system for bknideesh@gmail.com finds
+# nothing, and concludes the application does not exist -- so the note has to
+# say which address to look under. Keyed on the posting's own URL, because
+# that is how the pipeline already knows where the job came from.
+PORTALS = {
+    "ripplematch.com": "RippleMatch",
+    "simplify.jobs": "Simplify",
+    "handshake.com": "Handshake",
+    "joinhandshake.com": "Handshake",
+}
+
+APPLIED_AS = ("I applied through {portal}, where my account is under my "
+              "university address ({school_email}); this one is my primary "
+              "address.")
+
+
+def portal_for(url: str) -> str:
+    """The named portal this posting came from, or "" for a direct careers page."""
+    host = (url or "").lower()
+    for match, name in PORTALS.items():
+        if match in host:
+            return name
+    return ""
+
+
 # ---- follow-ups -----------------------------------------------------------
 FOLLOWUPS = {
     1: ("Following up on my note about the {role} role at {company}. Happy to "
@@ -114,6 +140,20 @@ FOLLOWUPS = {
         "wrong I completely understand. I would welcome the chance to be "
         "considered for anything else on the team."),
 }
+
+
+def _applied_as(job: dict) -> str:
+    """The paragraph naming the portal account, or nothing at all.
+
+    Only when the posting came from a portal that holds a different address,
+    and only when that address is set -- an unconditional line explaining an
+    email address is noise on the nine notes out of ten that do not need it.
+    """
+    portal = portal_for(job.get("url") or "")
+    other = (ME.get("school_email") or "").strip()
+    if not portal or not other or other.lower() == (ME.get("email") or "").lower():
+        return ""
+    return APPLIED_AS.format(portal=portal, school_email=other) + "\n\n"
 
 
 def _where_the_resume_is() -> str:
@@ -307,6 +347,7 @@ def render(contact: dict, job: dict, step: int = 0) -> tuple[str, str, str]:
         f"Hi {fields['first_name']},\n\n"
         f"{_pick(MULTI_OPENERS if multi else OPENERS, cid).format(**fields)}"
         f"{_role_list(titles)}\n\n"
+        f"{_applied_as(job)}"
         f"I am a {ME['degree']} student at {ME['school']} "
         f"({ME['honors']}, {ME['gpa']} GPA), graduating {ME['grad']}.\n\n"
         f"A few things I have worked on:\n"
