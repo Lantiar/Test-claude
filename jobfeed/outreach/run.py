@@ -86,6 +86,10 @@ def prepare(con, limit: int = 5, per_company: int = 3, dry_run: bool = False,
                 else f"{company}: no recruiters found")
             continue
 
+        # Everything the search actor did not prove bad. Its optimistic
+        # verdict is no longer trusted, so this is now most of them -- which
+        # is the point: an address goes out only once an independent probe has
+        # had its say, or is rationed as the guess it is.
         emails = [c["email"] for c in found
                   if c.get("email") and c.get("email_status", "unknown") == "unknown"]
         statuses = apify.verify(emails) if emails and not dry_run else {}

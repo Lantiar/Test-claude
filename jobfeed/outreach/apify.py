@@ -228,8 +228,18 @@ def _best_email(item: dict) -> tuple[str | None, str]:
             continue
         status = _status({**e, "catch_all": e.get("catchAllDomain"),
                           "status": e.get("status")})
-        if status == "unknown" and e.get("deliverable") is True:
-            status = "verified"
+        # The search actor's own "deliverable: true" used to be promoted to
+        # verified here. It is not a verification -- adrianna.tatti@stripe.com
+        # carried it and bounced, on a domain an independent probe calls
+        # catch-all for a made-up address too. Worse than being wrong, the
+        # label was load-bearing: accept_all is rationed to one speculative
+        # send per company per week, and "verified" walks straight past that
+        # quota. So a guess wearing the wrong label spent a send the rules
+        # would have refused.
+        #
+        # Its pessimistic verdicts are kept -- invalid, risky and catch-all
+        # are safe to believe. Only the optimistic one is downgraded to
+        # "unknown", which is what makes prepare run the real verifier on it.
         scored.append((_RANK.get(status, 9), addr, status))
     if not scored:
         return None, "unknown"

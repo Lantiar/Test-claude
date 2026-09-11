@@ -1702,6 +1702,31 @@ def test_a_search_that_did_not_run_is_not_reported_as_nobody_there(con, monkeypa
     assert "no recruiters found" not in record["note"], record
 
 
+def test_the_search_actor_cannot_call_its_own_guess_verified(con):
+    """adrianna.tatti@stripe.com arrived marked deliverable, was stored as
+    "verified", and bounced. stripe.com answers the same for an address that
+    cannot exist, so nothing had verified anything.
+
+    The label was load-bearing, not cosmetic: accept_all is rationed to one
+    speculative send per company per week and "verified" walks past that
+    quota, so a guess wearing the wrong label spent a send the rules would
+    have refused. Optimism from the search actor is now "unknown", which is
+    what makes the real verifier run."""
+    from jobfeed.outreach import apify as _apify
+    item = {"emails": [{"email": "adrianna.tatti@stripe.com",
+                        "deliverable": True, "status": None}]}
+    addr, status = _apify._best_email(item)
+    assert addr == "adrianna.tatti@stripe.com"
+    assert status == "unknown", f"a guess was called {status!r}"
+
+    # Its pessimistic verdicts are still believed -- those are safe.
+    bad = {"emails": [{"email": "x@stripe.com", "status": "invalid"}]}
+    assert _apify._best_email(bad)[1] == "invalid"
+    catch = {"emails": [{"email": "y@stripe.com", "catchAllDomain": True,
+                         "status": "risky"}]}
+    assert _apify._best_email(catch)[1] == "accept_all"
+
+
 def test_a_search_is_refused_before_it_can_fail_on_credit(con, monkeypatch):
     """The floor exists so the 402 never happens: a search that cannot be paid
     for returns nothing, and nothing is indistinguishable from an employer
