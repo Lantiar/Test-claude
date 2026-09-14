@@ -278,6 +278,75 @@ def _spent(con, cid, email, status, when=None, campaign=None):
     return contact_id
 
 
+def _queued(con, cid, email, status, key="k", campaign="c"):
+    con.execute("INSERT INTO contact(company_id, full_name, first_name, email, "
+                "email_status, found_at) VALUES(?,?,?,?,?,?)",
+                (cid, email, email.split("@")[0], email, status, time.time()))
+    contact_id = con.execute("SELECT MAX(id) m FROM contact").fetchone()["m"]
+    con.execute("INSERT INTO outreach(job_key, contact_id, subject, body, step, "
+                "status, campaign, created_at, send_after) "
+                "VALUES(?,?,'s','b',0,'queued',?,?,?)",
+                (key, contact_id, campaign, time.time(), time.time() - 60))
+    con.execute("INSERT OR IGNORE INTO application(job_key, stage, updated_at) "
+                "VALUES(?,'applied',?)", (key, time.time()))
+    con.execute("INSERT OR IGNORE INTO outreach_job(outreach_id, job_key) "
+                "VALUES((SELECT MAX(id) FROM outreach),?)", (key,))
+    con.commit()
+    return contact_id
+
+
+def test_the_applicant_may_authorise_more_than_the_weekly_ration(con, monkeypatch):
+    """"Send to three recruiters at this company today" is a thing a person
+    is allowed to decide, and the quota rations guessed addresses at one per
+    week. Without a way to say it, the only route is a one-off script calling
+    gmail_send directly -- which skips every guard rather than the one in the
+    way, and is how bknideesh@gmail.com came to receive a bounce.
+
+    Each override is spent on one message, not switched on for the run.
+    """
+    from jobfeed.outreach import run as _run
+
+    # Sent for real, against a fake transport. A dry run cannot show this:
+    # the quota counts rows with a sent_at, which dry_run never writes, so it
+    # reports three going out where a live run would send one.
+    monkeypatch.setattr(_run, "gmail_send",
+                        lambda to, s, b, **k: {"message_id": "m", "thread_id": "t"})
+    monkeypatch.setattr(_run, "_resume", lambda step: [])
+
+    cid = _company(con, "Robinhood")
+    for who in ("stefanie@robinhood.com", "lyndsey@robinhood.com",
+                "courtney.ryan@robinhood.com"):
+        _queued(con, cid, who, "accept_all")
+
+    plain = _run.dispatch(con, dry_run=False, limit=10)
+    assert plain["sent"] == 1, f"the ration is one, unauthorised: {plain}"
+    assert len(plain["held"]) == 2, plain["held"]
+
+    con.execute("UPDATE outreach SET status='queued' WHERE status='held'")
+    con.commit()
+    more = _run.dispatch(con, dry_run=False, limit=10, quota_override=2)
+    assert more["sent"] == 2, more
+    assert len(more["overridden"]) == 2, more["overridden"]
+
+
+def test_an_override_waives_the_quota_and_nothing_else(con):
+    """The control that matters. If it waived refusals generally it would be a
+    switch for turning the guards off, and a suppressed or bounced address
+    would go out under it."""
+    from jobfeed.outreach import run as _run
+
+    cid = _company(con, "Robinhood")
+    _queued(con, cid, "diana.feroz@robinhood.com", "bounced")
+    _queued(con, cid, "alexander.vaughan@robinhood.com", "accept_all")
+    guards.suppress(con, "alexander.vaughan@robinhood.com", None, "asked us to stop")
+
+    out = _run.dispatch(con, dry_run=False, limit=10, quota_override=9)
+    assert out["sent"] == 0, out
+    assert out["overridden"] == [], out["overridden"]
+    assert sorted(h.split(":")[1].strip() for h in out["held"]) == [
+        "address is bounced", "asked us to stop"]
+
+
 def test_an_address_a_person_supplied_is_not_a_guess(con):
     """The speculative quota rations the pipeline inventing first.last@domain
     at a company whose server answers yes to anything. An address someone hands

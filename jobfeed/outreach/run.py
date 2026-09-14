@@ -409,6 +409,11 @@ def _set_status(con, contact_id: int, status: str) -> None:
                 (status, time.time(), contact_id))
 
 
+# The one refusal dispatch's quota_override is allowed to waive, named so the
+# two cannot drift apart into a string comparison that silently stops matching.
+QUOTA_SPENT = "accept_all quota for this company is spent"
+
+
 def _may_write(con, contact: dict, company_id: int | None,
                campaign: str | None = None, followup: bool = False) -> str:
     email = contact.get("email")
@@ -430,7 +435,7 @@ def _may_write(con, contact: dict, company_id: int | None,
     # which is how bknideesh@gmail.com got a bounce of its own.
     if status == "accept_all" and company_id is not None \
             and not guards.accept_all_allowed(con, company_id):
-        return "accept_all quota for this company is spent"
+        return QUOTA_SPENT
     return guards.suppressed(con, email, company_id, campaign, followup)
 
 
@@ -531,8 +536,22 @@ def schedule(con) -> dict:
 
 # ---- 3. dispatch ----------------------------------------------------------
 
-def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
-    """Send whatever is due. Refuses entirely while the breaker is tripped."""
+def dispatch(con, dry_run: bool = True, limit: int = 10,
+             quota_override: int = 0) -> dict:
+    """Send whatever is due. Refuses entirely while the breaker is tripped.
+
+    `quota_override` is the applicant saying "write to this many people at
+    this company anyway", and it waives exactly one rule: the weekly ration on
+    addresses nothing could verify. Suppression, bounces, the breaker, the
+    company cooldown and a withdrawn application all still stop a send, and
+    each override is spent on one message rather than switching the rule off
+    for the run.
+
+    It exists because the alternative is a one-off script that calls
+    gmail_send directly, which is how bknideesh@gmail.com came to receive a
+    bounce: reaching past the guards skips all of them, not the one in the
+    way.
+    """
     h = guards.health(con)
     if h["paused"] or h["over_limit"]:
         if h["over_limit"] and not h["paused"]:
@@ -544,7 +563,7 @@ def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
         "FROM outreach o JOIN contact c ON c.id=o.contact_id "
         "WHERE o.status='queued' AND o.send_after <= ? ORDER BY o.send_after LIMIT ?",
         (time.time(), limit)).fetchall()
-    sent, errors, held = 0, [], []
+    sent, errors, held, overridden = 0, [], [], []
     for row in due:
         # Re-checked here, not only at draft time. A draft can sit in the queue
         # for a week, and in that week the address may have bounced or the
@@ -552,6 +571,10 @@ def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
         # of which happened after the only check the first version made.
         why = _may_write(con, dict(row), row["company_id"], row["campaign"],
                          followup=bool(row["step"]))
+        if why == QUOTA_SPENT and quota_override > 0:
+            quota_override -= 1
+            why = ""
+            overridden.append(row["email"])
         if not why and not _still_applied(con, row):
             why = "the application it refers to is no longer on record"
         if why:
@@ -577,7 +600,7 @@ def dispatch(con, dry_run: bool = True, limit: int = 10) -> dict:
         sent += 1
     con.commit()
     return {"sent": sent, "dry_run": dry_run, "errors": errors, "held": held,
-            "paused": False}
+            "overridden": overridden, "paused": False}
 
 
 # ---- the board -------------------------------------------------------------
