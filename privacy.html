@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobfeed — privacy</title>
+<style>
+:root{--bg:#fbfaf8;--panel:#fff;--line:#e6e2dc;--ink:#1c1a17;--dim:#6d675f;--accent:#1f5f4f}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#14140f;--panel:#1c1c17;--line:#2f2e28;--ink:#eeece6;--dim:#9a948a;--accent:#6fbfa4}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:68ch;margin:0 auto;padding:48px 20px 80px}
+h1{font-size:26px;letter-spacing:-.01em;margin:0 0 6px}
+.sub{color:var(--dim);font-size:14px;margin:0 0 34px}
+h2{font-size:16px;margin:34px 0 8px;letter-spacing:-.005em}
+p,li{color:var(--ink)}
+ul{padding-left:20px}
+li{margin-bottom:7px}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);
+  color:var(--dim);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<h1>jobfeed — privacy policy</h1>
+<p class="sub">Last updated 10 September 2026</p>
+
+<p><strong>jobfeed</strong> is a personal tool used by one person, its author, to
+track internship applications and to write to recruiters at the companies he
+has applied to. It is not offered as a service to anyone else and has no other
+users.</p>
+
+<h2>What it accesses</h2>
+<p>The application requests two Google account scopes, both against the
+author's own Gmail account:</p>
+<ul>
+  <li><code>gmail.send</code> — to send the author's own application follow-up
+    emails from his own address.</li>
+  <li><code>gmail.readonly</code> — to read replies and delivery failures for
+    those messages, so that a follow-up is not sent to somebody who has
+    already answered and so that an address which bounced is never written to
+    again.</li>
+</ul>
+
+<h2>What it stores, and where</h2>
+<p>All data is held in storage controlled by the author — an Upstash Redis
+database and a GitHub repository, both private to him:</p>
+<ul>
+  <li>Public job postings collected from public sources.</li>
+  <li>Which postings he has applied to, and what stage each application is at.</li>
+  <li>For recruiters at those companies: name, job title, public LinkedIn
+    profile URL and work email address, obtained from a commercial data
+    provider.</li>
+  <li>The emails he has sent, when they were sent, and whether each one was
+    answered or bounced.</li>
+</ul>
+<p>Message contents are read only to classify a reply as an answer, an
+automatic reply, or a delivery failure. Nothing from the mailbox is stored
+beyond what is described above.</p>
+
+<h2>What it does not do</h2>
+<ul>
+  <li>No data is sold, rented, or shared for advertising.</li>
+  <li>No data is transferred to anyone other than the service providers the
+    tool calls to do its work — Apify for recruiter search and address
+    verification, and OpenAI to check the grammar of the author's own drafts
+    before he sends them.</li>
+  <li>No Google user data is used to develop, improve, or train any
+    generalised or non-personalised model.</li>
+  <li>There is no advertising, no analytics, and no tracking of any kind.</li>
+</ul>
+
+<h2>Limited use</h2>
+<p>jobfeed's use of information received from Google APIs adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy"
+   rel="noopener">Google API Services User Data Policy</a>, including the
+Limited Use requirements.</p>
+
+<h2>Retention and removal</h2>
+<p>Data is kept only while it is useful to the author and can be deleted by
+him at any time. Access can be withdrawn at any point from the
+<a href="https://myaccount.google.com/permissions" rel="noopener">Google
+account permissions page</a>, which immediately revokes the token the tool
+uses.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy: <a href="mailto:bknideesh@gmail.com">bknideesh@gmail.com</a>.</p>
+
+<footer>jobfeed is open source. The code that does everything described here is
+at <a href="https://github.com/Lantiar/Test-claude" rel="noopener">github.com/Lantiar/Test-claude</a>.</footer>
+</main>
+</body>
+</html>
